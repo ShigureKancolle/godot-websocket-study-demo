@@ -1,0 +1,132 @@
+[gd_scene format=3 uid="uid://dgrirvumqelko"]
+
+[ext_resource type="Script" uid="uid://curq5n42riq5x" path="res://Script/Base/ScorllDemo.gd" id="1_kjbj4"]
+[ext_resource type="Script" uid="uid://bswnr6e7wlv0w" path="res://Script/chat/chat_main.gd" id="1_p28xj"]
+[ext_resource type="Texture2D" uid="uid://cvdigwg6r8tio" path="res://prefab/chat/Tex/HeadBg.png" id="2_0b173"]
+[ext_resource type="Texture2D" uid="uid://c0jvlirinof58" path="res://prefab/chat/Tex/LeftBubble.png" id="3_p28xj"]
+[ext_resource type="Texture2D" uid="uid://dnoqwcw1wayaf" path="res://prefab/chat/Tex/InputBg.png" id="5_ypgfb"]
+
+[sub_resource type="CompressedTexture2D" id="CompressedTexture2D_20axs"]
+load_path = "res://.godot/imported/bg.png-676fe1e2d145a58185f1e05b1d0ecb25.ctex"
+
+[node name="ChatMain" type="Node" unique_id=1733397351]
+script = ExtResource("1_p28xj")
+
+[node name="Panel" type="PanelContainer" parent="." unique_id=408300520]
+offset_right = 1152.0
+offset_bottom = 640.0
+
+[node name="Bg" type="TextureRect" parent="Panel" unique_id=283323975]
+layout_mode = 2
+texture = SubResource("CompressedTexture2D_20axs")
+expand_mode = 1
+
+[node name="ScrollList" type="Node" parent="Panel" unique_id=587208875]
+script = ExtResource("1_kjbj4")
+
+[node name="ScrollContainer" type="ScrollContainer" parent="Panel/ScrollList" unique_id=11909672]
+offset_right = 960.0
+offset_bottom = 500.0
+
+[node name="ScrollItem" type="Control" parent="Panel/ScrollList" unique_id=2023480375]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 1152.0
+offset_bottom = 100.0
+
+[node name="Sprite2D" type="Sprite2D" parent="Panel/ScrollList/ScrollItem" unique_id=2018684743]
+position = Vector2(57, 50.000004)
+scale = Vector2(0.3, 0.3)
+texture = ExtResource("2_0b173")
+
+[node name="NinePatchRect" type="NinePatchRect" parent="Panel/ScrollList/ScrollItem" unique_id=1076279799]
+layout_mode = 0
+offset_left = 116.0
+offset_top = 36.0
+offset_right = 1116.0
+offset_bottom = 233.0
+scale = Vector2(0.3, 0.3)
+texture = ExtResource("3_p28xj")
+patch_margin_left = 100
+patch_margin_top = 89
+patch_margin_right = 100
+patch_margin_bottom = 65
+
+[node name="Name" type="RichTextLabel" parent="Panel/ScrollList/ScrollItem" unique_id=1053652319]
+layout_mode = 0
+offset_left = 131.0
+offset_top = 7.0
+offset_right = 381.0
+offset_bottom = 57.0
+theme_override_colors/default_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/normal_font_size = 18
+theme_override_font_sizes/bold_font_size = 18
+theme_override_font_sizes/bold_italics_font_size = 18
+theme_override_font_sizes/italics_font_size = 18
+theme_override_font_sizes/mono_font_size = 18
+text = "牛魔酬宾"
+fit_content = true
+scroll_active = false
+
+[node name="Text" type="RichTextLabel" parent="Panel/ScrollList/ScrollItem" unique_id=591976526]
+layout_mode = 0
+offset_left = 140.0
+offset_top = 40.0
+offset_right = 390.0
+offset_bottom = 90.0
+theme_override_colors/default_color = Color(0, 0, 0, 1)
+theme_override_font_sizes/normal_font_size = 20
+theme_override_font_sizes/bold_font_size = 20
+theme_override_font_sizes/bold_italics_font_size = 20
+theme_override_font_sizes/italics_font_size = 20
+theme_override_font_sizes/mono_font_size = 20
+text = "神、人的终点"
+fit_content = true
+scroll_active = false
+
+[node name="Control" type="Control" parent="." unique_id=1735773502]
+layout_mode = 3
+anchors_preset = 0
+offset_left = 28.0
+offset_top = 439.0
+offset_right = 68.0
+offset_bottom = 479.0
+
+[node name="NinePatchRect" type="NinePatchRect" parent="Control" unique_id=1925092914]
+layout_mode = 0
+offset_left = 7.0
+offset_top = 71.0
+offset_right = 2007.0
+offset_bottom = 271.0
+scale = Vector2(0.5, 0.5)
+texture = ExtResource("5_ypgfb")
+patch_margin_left = 70
+patch_margin_top = 70
+patch_margin_right = 70
+patch_margin_bottom = 70
+
+[node name="Input" type="TextEdit" parent="Control" unique_id=2116377120]
+layout_mode = 0
+offset_left = 24.0
+offset_top = 80.0
+offset_right = 974.0
+offset_bottom = 160.0
+text = "666眼都不演了"
+
+[node name="Send" type="Button" parent="Control" unique_id=989682373]
+layout_mode = 0
+offset_left = 1020.0
+offset_top = 67.0
+offset_right = 1314.0
+offset_bottom = 360.0
+scale = Vector2(0.3, 0.3)
+icon = ExtResource("2_0b173")
+
+[node name="Label" type="Label" parent="Control/Send" unique_id=919071530]
+layout_mode = 0
+offset_left = 36.666664
+offset_top = 56.666664
+offset_right = 76.666664
+offset_bottom = 79.66667
+scale = Vector2(7, 7)
+text = "发送"

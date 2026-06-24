@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package game;
+
+// 玩家基本信息
+message PlayerInfo {
+  string player_id = 1;      // 玩家唯一ID
+  string player_name = 2;    // 玩家名称
+  int32 level = 3;           // 玩家等级
+  int32 score = 4;           // 玩家分数
+  float x = 5;               // X坐标
+  float y = 6;               // Y坐标
+}
+
+// 聊天消息
+message ChatMessage {
+  string player_id = 1;      // 发送者ID
+  string player_name = 2;    // 发送者名称
+  string content = 3;        // 消息内容
+  int64 timestamp = 4;       // 时间戳
+}
+
+// 玩家移动消息
+message PlayerMove {
+  string player_id = 1;      // 玩家ID
+  float x = 2;               // 目标X坐标
+  float y = 3;               // 目标Y坐标
+  float speed = 4;           // 移动速度
+}
+
+// 玩家加入游戏
+message PlayerJoin {
+  PlayerInfo player_info = 1; // 玩家信息
+}
+
+// 玩家离开游戏
+message PlayerLeave {
+  string player_id = 1;      // 玩家ID
+}
+
+// 游戏状态更新
+message GameState {
+  repeated PlayerInfo players = 1; // 所有玩家信息
+  int64 timestamp = 2;             // 时间戳
+}
+
+// 心跳消息
+message Heartbeat {
+  int64 timestamp = 1;       // 时间戳
+}
+
+// 通用消息包装器
+message GameMessage {
+  oneof message_type {
+    PlayerJoin player_join = 1;       // 玩家加入
+    PlayerLeave player_leave = 2;     // 玩家离开
+    PlayerMove player_move = 3;       // 玩家移动
+    ChatMessage chat_message = 4;     // 聊天消息
+    GameState game_state = 5;         // 游戏状态
+    Heartbeat heartbeat = 6;          // 心跳
+  }
+}

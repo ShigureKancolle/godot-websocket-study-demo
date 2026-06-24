@@ -1,0 +1,9 @@
+[gd_scene format=3 uid="uid://dykmnqxcxwtff"]
+
+[ext_resource type="Script" uid="uid://s30bovrksaqm" path="res://Script/init.gd" id="1_1wa8x"]
+[ext_resource type="PackedScene" uid="uid://dgrirvumqelko" path="res://prefab/chat/ChatMain.tscn" id="2_ptqhc"]
+
+[node name="Node2D" type="Node2D" unique_id=877372069]
+script = ExtResource("1_1wa8x")
+
+[node name="ChatMain" parent="." unique_id=1733397351 instance=ExtResource("2_ptqhc")]
