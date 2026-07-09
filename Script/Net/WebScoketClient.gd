@@ -40,6 +40,7 @@ func poll() -> WebSocketPeer.State:
 					"y": 0.0
 				}
 			})
+			SignalMgr.fire_signal("websocket_connected", {"message": "WebSocket 已连接"})
 		while _ws.get_available_packet_count():
 			var packet = _ws.get_packet()
 			# print("数据包：", packet)

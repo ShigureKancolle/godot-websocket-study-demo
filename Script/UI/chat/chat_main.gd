@@ -12,6 +12,7 @@ func _ready() -> void:
 	scroll_list.set_scroll_data_handler(_on_item_data)     # 设置数据的回调
 	scroll_list.set_item_spacing(10.0)                      # 可选：间距
 	$Control/Send.pressed.connect(_send_chat_message)
+	$Control/E_Back.pressed.connect(_on_click_back)
 	_register_msg_handler()
 
 	# 回调签名：(item: Node, data: Dictionary)
@@ -37,3 +38,6 @@ func _send_chat_message() -> void:
 		"player_id": MessageBus._player_id, 
 		"time": Time.get_unix_time_from_system()
 	})
+
+func _on_click_back() -> void:
+	queue_free()

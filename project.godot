@@ -15,8 +15,15 @@ run/main_scene="uid://dykmnqxcxwtff"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 config/icon="res://icon.svg"
 
+[autoload]
+
+WebScoketMgr="*uid://m1ngiumo6irb"
+SignalMgr="*uid://cu3pcmwhaq83q"
+UIManager="*uid://bvjvdqvo5i8iv"
+
 [display]
 
+window/size/viewport_height=720
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 

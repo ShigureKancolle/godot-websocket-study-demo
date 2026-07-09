@@ -1,0 +1,21 @@
+[gd_scene format=3 uid="uid://cytibtjlykk44"]
+
+[ext_resource type="Script" uid="uid://brcxfjw0gjems" path="res://Script/dead_man_scene.gd" id="1_kxmo5"]
+[ext_resource type="Texture2D" uid="uid://dhyj7gac1tpxk" path="res://prefab/CommonTexture/panel_beige.png" id="2_vsqur"]
+
+[node name="DeadManScene" type="Node2D" unique_id=1985196160]
+script = ExtResource("1_kxmo5")
+
+[node name="Bg" type="NinePatchRect" parent="." unique_id=1932924694]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_right = 1152.0
+offset_bottom = 720.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("2_vsqur")
+patch_margin_left = 62
+patch_margin_top = 36
+patch_margin_right = 14
+patch_margin_bottom = 37

@@ -1,4 +1,4 @@
-extends RefCounted
+extends Object
 class_name MessageBus
 
 # 基础常量来源（任何 proto .gd 都行，取 game.gd）
@@ -52,7 +52,9 @@ func _init():
 		onproto("game.PlayerJoin", _on_player_join)
 
 static func _on_player_join(msg: Dictionary):
-	_player_id = msg["player_info"]["player_name"]
+	# 注意: 这里取的是 player_id，不是 player_name
+	# 之前错误地用了 player_name 赋给 _player_id，导致 chat_main.gd 发消息时 player_id 是名字而非 ID
+	_player_id = msg["player_info"]["player_id"]
 
 # snake_case -> PascalCase（player_join -> PlayerJoin）
 static func _snake_to_pascal(s: String) -> String:

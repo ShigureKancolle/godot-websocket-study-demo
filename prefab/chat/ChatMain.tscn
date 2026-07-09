@@ -1,13 +1,24 @@
 [gd_scene format=3 uid="uid://dgrirvumqelko"]
 
-[ext_resource type="Script" uid="uid://curq5n42riq5x" path="res://Script/Base/ScorllDemo.gd" id="1_kjbj4"]
-[ext_resource type="Script" uid="uid://bswnr6e7wlv0w" path="res://Script/chat/chat_main.gd" id="1_p28xj"]
+[ext_resource type="Script" uid="uid://curq5n42riq5x" path="res://Script/UI/Base/ScorllDemo.gd" id="1_kjbj4"]
+[ext_resource type="Script" uid="uid://bswnr6e7wlv0w" path="res://Script/UI/chat/chat_main.gd" id="1_p28xj"]
 [ext_resource type="Texture2D" uid="uid://cvdigwg6r8tio" path="res://prefab/chat/Tex/HeadBg.png" id="2_0b173"]
 [ext_resource type="Texture2D" uid="uid://c0jvlirinof58" path="res://prefab/chat/Tex/LeftBubble.png" id="3_p28xj"]
+[ext_resource type="Texture2D" uid="uid://csdd00cnx8evu" path="res://prefab/CommonTexture/buttonRound_beige.png" id="5_b4iem"]
 [ext_resource type="Texture2D" uid="uid://dnoqwcw1wayaf" path="res://prefab/chat/Tex/InputBg.png" id="5_ypgfb"]
 
 [sub_resource type="CompressedTexture2D" id="CompressedTexture2D_20axs"]
 load_path = "res://.godot/imported/bg.png-676fe1e2d145a58185f1e05b1d0ecb25.ctex"
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_vofgg"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_rxips"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_7ktgo"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_rvtyu"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_rdlqm"]
 
 [node name="ChatMain" type="Node" unique_id=1733397351]
 script = ExtResource("1_p28xj")
@@ -91,6 +102,23 @@ offset_left = 28.0
 offset_top = 439.0
 offset_right = 68.0
 offset_bottom = 479.0
+
+[node name="E_Back" type="Button" parent="Control" unique_id=1149730347]
+layout_mode = 0
+offset_left = 1077.0
+offset_top = -429.0
+offset_right = 1112.0
+offset_bottom = -391.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_font_sizes/font_size = 16
+theme_override_icons/icon = ExtResource("5_b4iem")
+theme_override_styles/normal = SubResource("StyleBoxEmpty_vofgg")
+theme_override_styles/pressed = SubResource("StyleBoxEmpty_rxips")
+theme_override_styles/hover = SubResource("StyleBoxEmpty_7ktgo")
+theme_override_styles/disabled = SubResource("StyleBoxEmpty_rvtyu")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_rdlqm")
+text = "返回"
+icon_alignment = 1
 
 [node name="NinePatchRect" type="NinePatchRect" parent="Control" unique_id=1925092914]
 layout_mode = 0
