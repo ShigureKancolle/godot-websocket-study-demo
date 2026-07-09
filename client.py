@@ -8,10 +8,13 @@ WebSocket 游戏客户端
 import asyncio
 import websockets
 import time
-from message_bus import MessageBus
+# 项目模块用 import xxx + xxx.def 访问，不用 from xxx import def
+# 原因：后续要支持 hotfix/hotreload（详见 web_server.py 文件头注释）
+import message_bus
 
 # 获取全局消息总线单例
-bus = MessageBus()
+# 用 message_bus.MessageBus() 而非 MessageBus()，热更见 web_server.py 文件头注释
+bus = message_bus.MessageBus()
 
 
 class GameClient:

@@ -106,6 +106,11 @@ class MessageBus:
         # 默认 websocket 连接（客户端用，服务器端在 send 时显式传入）
         self._websocket = None
 
+        # 入站消息校验钩子（可选）
+        # 服务端启动时设置它做方向校验，客户端保持 None（不校验）
+        # 详见 dispatch 方法里的 2.5 步注释
+        self._inbound_validator: Optional[Callable[[str], bool]] = None
+
         # 自动扫描 GameMessage 的 oneof 字段，注册所有消息类型
         self._auto_register()
 
@@ -172,6 +177,22 @@ class MessageBus:
         服务器端不需要设置，因为有多条连接，在 send 时显式传入
         """
         self._websocket = ws
+
+    def set_inbound_validator(self, validator: Callable[[str], bool]):
+        """
+        设置入站消息校验钩子（服务端用）
+
+        传入一个函数，签名为 (full_name: str) -> bool。
+        dispatch 时会调用它，返回 False 则跳过该消息不调 handler。
+        客户端不调用此方法，_inbound_validator 保持 None，dispatch 行为不变。
+
+        用法（服务端启动时）：
+            from message_contract import MessageContract
+            contract = MessageContract()
+            contract.load()
+            bus.set_inbound_validator(contract.is_valid_inbound)
+        """
+        self._inbound_validator = validator
 
     def register_message(self, message_class, field_name: str):
         """
@@ -267,6 +288,19 @@ class MessageBus:
                 full_name = self._field_to_name.get(field_descriptor.name)
                 if not full_name:
                     continue
+
+                # 2.5 契约校验（可选）
+                # inbound_validator 是一个可选的钩子：服务端启动时设置它做方向校验，
+                # 客户端不设置（None），行为不变。
+                # 为什么不直接在 MessageBus 里 import message_contract：
+                #   MessageBus 是双端共用的概念，契约模块是服务端特有。
+                #   硬编码依赖会让双端 MessageBus 不再对称，且客户端引入无用依赖。
+                #   用钩子保持解耦：MessageBus 只提供「插入点」，不关心校验逻辑。
+                if self._inbound_validator is not None:
+                    if not self._inbound_validator(full_name):
+                        # 校验失败：跳过这条消息，不调 handler
+                        # 不抛异常，只是跳过——非法消息不该让整个 dispatch 崩掉
+                        continue
 
                 # 3. protobuf 对象 -> 字典
                 data_dict = MessageToDict(field_value, preserving_proto_field_name=True)
