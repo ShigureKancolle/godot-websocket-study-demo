@@ -188,6 +188,15 @@ class GameRoom:
         # （web_server.py 的 handler 会保留 player_info 引用做日志，不能让它误改状态）
         stored = dict(player_info)
         stored["player_id"] = player_id  # 强制不变式
+        # facing 默认 0(朝右)——客户端加入时通常没带 facing，状态从创建起就要有这个字段
+        # 不用 .get() 是因为要确保字段存在(后续 snapshot/apply_facing 都依赖它)
+        if "facing" not in stored:
+            stored["facing"] = 0.0
+        # state 默认 "idle"——动画状态字段,和 facing 一样属于持续状态
+        # 客户端加入时没带 state,服务端从创建起就给默认值
+        # 后续 apply_move 会根据 moving 参数把它改成 "run"/"idle"
+        if "state" not in stored:
+            stored["state"] = "idle"
 
         self._players[player_id] = stored
         logger.info(f"玩家加入房间: {stored.get('player_name', '?')} (ID: {player_id})")
@@ -212,7 +221,7 @@ class GameRoom:
             logger.info(f"玩家离开房间: {removed.get('player_name', '?')} (ID: {player_id})")
         return removed
 
-    def apply_move(self, player_id: str, x: float, y: float, speed: float = 1.0) -> bool:
+    def apply_move(self, player_id: str, x: float, y: float, speed: float = 1.0, moving: bool = False) -> bool:
         """
         应用一次玩家移动输入到状态
 
@@ -238,10 +247,20 @@ class GameRoom:
         这是一种「为已知的下一步留接口，但不实现」的克制——
             不要因此就去写 half-implemented 的速度积分逻辑，那才是过度设计。
 
+        =========================================================================
+         moving 参数：驱动动画状态 state
+        =========================================================================
+        moving=True 表示玩家正在移动→state="run"；moving=False 表示停止→state="idle"。
+        这把"动画状态"也收口到服务端权威：客户端不发"我处于 run 状态"，
+        而是发"我在动/我没在动"，由服务端定 state。
+        未来加攻击/受击等动作状态时,用独立的 apply_attack/apply_hurt 方法,
+        各自设自己的 state,和 apply_move 互不干扰(攻击时可能不能移动,那是上层逻辑)。
+
         Args:
             player_id: 谁在移动
             x, y: 目标坐标
             speed: 移动速度（当前未使用，保留字段）
+            moving: 是否正在移动(驱动 state 字段)
 
         Returns:
             True 表示状态已更新；False 表示玩家不存在（移动被忽略）
@@ -262,5 +281,43 @@ class GameRoom:
         #   - 事件 = 瞬时发生的动作（一次移动、一次攻击）
         # proto 里 PlayerInfo 没有 speed、PlayerMove 有 speed，正好对应这个区分。
 
-        logger.debug(f"玩家 {player_id} 移动到 ({x}, {y})")
+        # 动画状态:moving 决定 idle/run
+        # state 是持久状态字段(存 PlayerInfo),客户端动画状态机读它切换动画
+        info["state"] = "run" if moving else "idle"
+
+        logger.debug(f"玩家 {player_id} 移动到 ({x}, {y}) state={info['state']}")
+        return True
+
+    def apply_facing(self, player_id: str, facing: float) -> bool:
+        """
+        应用一次玩家朝向输入到状态
+
+        和 apply_move 平行，但只改 facing 不改坐标。
+        朝向和移动是两个独立状态维度——玩家可以一边移动一边朝任意方向攻击，
+        所以 facing 不应混在 apply_move 里（那会让朝向变成"移动的附属属性"，语义错了）。
+
+        Args:
+            player_id: 谁在转朝向
+            facing: 朝向角度(弧度),0=右,逆时针正(Godot 标准)
+
+        Returns:
+            True 表示状态已更新；False 表示玩家不存在（朝向被忽略）
+
+        =========================================================================
+         频率限制当前未做——留给第3步
+        =========================================================================
+        鼠标移动会高频触发朝向更新(60Hz+)，服务端应做频率限制(如 30Hz)。
+        当前简化版不做限制，第3步"限定服务端同步速率"会统一加 tick 机制处理。
+        这里只做状态变更逻辑，节流策略交给上层(handler/web_server)。
+        """
+        info = self._players.get(player_id)
+        if info is None:
+            return False
+
+        # 弧度归一到 [0, 2*PI)，避免数值无限增长
+        # 不做范围校验(如限制角度范围)，因为任意朝向都是合法的
+        import math
+        info["facing"] = facing % (2 * math.pi)
+
+        logger.debug(f"玩家 {player_id} 朝向 {info['facing']}")
         return True

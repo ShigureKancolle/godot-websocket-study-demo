@@ -1,2 +1,2 @@
-py -3 web_server.py --console
+py -3 main.py --console
 pause

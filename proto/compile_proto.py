@@ -21,10 +21,12 @@ import subprocess
 
 # ==================== 用户配置区 ====================
 # proto 文件所在目录（相对于本脚本的路径，或绝对路径均可）
-INPUT_DIR = "./proto"
+# 本脚本在 server/proto/，.proto 文件就在当前目录
+INPUT_DIR = "."
 
 # 编译后 Python 文件输出目录（相对于本脚本的路径，或绝对路径均可）
-OUTPUT_DIR = "./proto/generated"
+# 输出到 server/proto/generated/
+OUTPUT_DIR = "./generated"
 # ==================================================
 
 

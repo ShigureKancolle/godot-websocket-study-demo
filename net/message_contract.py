@@ -95,10 +95,11 @@ class MessageContract:
             True 加载成功，False 失败（文件不存在或格式错误）
         """
         if path is None:
-            # 默认路径：本文件所在目录下的 proto/messages.json
-            # __file__ 是 server/message_contract.py，所以 proto 在同目录的子文件夹
-            here = os.path.dirname(os.path.abspath(__file__))
-            path = os.path.join(here, "proto", "messages.json")
+            # 默认路径：本文件在 server/net/，messages.json 在 server/proto/messages.json
+            # 往上跳一层到 server/，再进 proto/
+            here = os.path.dirname(os.path.abspath(__file__))        # server/net
+            server_root = os.path.dirname(here)                       # server
+            path = os.path.join(server_root, "proto", "messages.json")
 
         if not os.path.isfile(path):
             # 契约文件不存在：不报错，只告警。

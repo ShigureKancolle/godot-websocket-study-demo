@@ -28,9 +28,10 @@ from typing import Dict, Callable, Optional, List
 from collections import defaultdict
 
 # 把 proto/generated 加入搜索路径，确保能 import game_pb2
-# 这样 message_bus.py 无论放在服务器还是客户端目录，只要旁边有 proto/generated 就能工作
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_GENERATED_DIR = os.path.join(_HERE, "proto", "generated")
+# 本文件在 server/net/，proto/generated 在 server/proto/generated，所以要往上跳一层
+_HERE = os.path.dirname(os.path.abspath(__file__))        # server/net
+_SERVER_ROOT = os.path.dirname(_HERE)                       # server
+_GENERATED_DIR = os.path.join(_SERVER_ROOT, "proto", "generated")
 if os.path.isdir(_GENERATED_DIR) and _GENERATED_DIR not in sys.path:
     sys.path.insert(0, _GENERATED_DIR)
 

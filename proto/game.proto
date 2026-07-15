@@ -10,6 +10,8 @@ message PlayerInfo {
   int32 score = 4;           // 玩家分数
   float x = 5;               // X坐标
   float y = 6;               // Y坐标
+  float facing = 7;          // 朝向角度(弧度),0=右,逆时针正(Godot 标准)
+  string state = 8;          // 动画状态:idle/run/attack/hurt/... (服务端权威,客户端只读镜像)
 }
 
 // 聊天消息
@@ -26,6 +28,15 @@ message PlayerMove {
   float x = 2;               // 目标X坐标
   float y = 3;               // 目标Y坐标
   float speed = 4;           // 移动速度
+  bool moving = 5;           // 是否正在移动(客户端发,服务端据此设 PlayerInfo.state=idle/run)
+}
+
+// 玩家朝向消息
+// 和 PlayerMove 平行,但只改 facing 不改坐标
+// 设计原因:朝向和移动是两个独立状态维度——玩家可以移动时朝任意方向攻击
+message PlayerFacing {
+  string player_id = 1;      // 玩家ID
+  float facing = 2;           // 朝向角度(弧度)
 }
 
 // 玩家加入游戏
@@ -58,5 +69,6 @@ message GameMessage {
     ChatMessage chat_message = 4;     // 聊天消息
     GameState game_state = 5;         // 游戏状态
     Heartbeat heartbeat = 6;          // 心跳
+    PlayerFacing player_facing = 7;   // 玩家朝向
   }
 }

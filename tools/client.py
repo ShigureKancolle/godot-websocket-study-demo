@@ -8,9 +8,19 @@ WebSocket 游戏客户端
 import asyncio
 import websockets
 import time
+import os
+import sys
+
+# 本脚本在 server/tools/，需要把 server/ 加入 sys.path 才能 import net 包
+# 这样无论从哪个目录运行 python tools/client.py 都能正确找到 net 包
+_HERE = os.path.dirname(os.path.abspath(__file__))            # server/tools
+_SERVER_ROOT = os.path.dirname(_HERE)                           # server
+if _SERVER_ROOT not in sys.path:
+    sys.path.insert(0, _SERVER_ROOT)
+
 # 项目模块用 import xxx + xxx.def 访问，不用 from xxx import def
-# 原因：后续要支持 hotfix/hotreload（详见 web_server.py 文件头注释）
-import message_bus
+# 原因：后续要支持 hotfix/hotreload（详见 net/web_server.py 文件头注释）
+import net.message_bus as message_bus
 
 # 获取全局消息总线单例
 # 用 message_bus.MessageBus() 而非 MessageBus()，热更见 web_server.py 文件头注释

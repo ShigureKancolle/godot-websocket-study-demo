@@ -1,2 +1,2 @@
-py -3 compile_proto.py 
+py -3 proto\compile_proto.py
 pause
