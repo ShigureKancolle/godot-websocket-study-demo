@@ -1,0 +1,107 @@
+[gd_scene format=3 uid="uid://dpp1il75df5ph"]
+
+[ext_resource type="Script" uid="uid://cgq0dtgneanbg" path="res://Script/UI/tips/confirm_dialog.gd" id="1_script"]
+[ext_resource type="Texture2D" uid="uid://b27deyshkigia" path="res://prefab/CommonTexture/panelInset_blue.png" id="2_panel"]
+
+[node name="ConfirmDialog" type="Node" unique_id=1222841416]
+script = ExtResource("1_script")
+
+[node name="Mask" type="Control" parent="." unique_id=504456633]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Dim" type="ColorRect" parent="Mask" unique_id=1433530588]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.5)
+
+[node name="Bg" type="NinePatchRect" parent="Mask" unique_id=919930163]
+layout_mode = 1
+offset_left = 326.0
+offset_top = 170.0
+offset_right = 826.0
+offset_bottom = 470.0
+texture = ExtResource("2_panel")
+patch_margin_left = 10
+patch_margin_top = 10
+patch_margin_right = 10
+patch_margin_bottom = 10
+
+[node name="Title" type="Label" parent="Mask/Bg" unique_id=93486704]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 15.0
+offset_right = 480.0
+offset_bottom = 55.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 28
+text = "提示"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Content" type="RichTextLabel" parent="Mask/Bg" unique_id=1676295232]
+layout_mode = 0
+offset_left = 30.0
+offset_top = 70.0
+offset_right = 470.0
+offset_bottom = 200.0
+theme_override_colors/default_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/normal_font_size = 20
+bbcode_enabled = true
+text = "确定要执行此操作吗？"
+fit_content = true
+scroll_active = false
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="E_Confirm" type="TextureButton" parent="Mask/Bg" unique_id=56118877]
+layout_mode = 0
+offset_left = 70.0
+offset_top = 220.0
+offset_right = 230.0
+offset_bottom = 280.0
+ignore_texture_size = true
+stretch_mode = 0
+
+[node name="Label" type="Label" parent="Mask/Bg/E_Confirm" unique_id=1689347636]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_font_sizes/font_size = 22
+text = "确定"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="E_Cancel" type="TextureButton" parent="Mask/Bg" unique_id=216002032]
+layout_mode = 0
+offset_left = 270.0
+offset_top = 220.0
+offset_right = 430.0
+offset_bottom = 280.0
+ignore_texture_size = true
+stretch_mode = 0
+
+[node name="Label" type="Label" parent="Mask/Bg/E_Cancel" unique_id=1994714418]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_font_sizes/font_size = 22
+text = "取消"
+horizontal_alignment = 1
+vertical_alignment = 1

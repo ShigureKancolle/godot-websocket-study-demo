@@ -2,6 +2,7 @@ extends Node
 
 var ddd_idx = 0
 var delta_time = 0.0
+var connect_time = 0.0
 
 func _ready():
 	SignalMgr.register_handler("websocket_connected", Callable(self, "_on_websocket_connected"))
@@ -9,9 +10,12 @@ func _ready():
 	# 进入游戏场景（木桩场景）的按钮
 	# 当前 dead_man_scene 只做玩家同步验证，后续会加木桩玩法
 	$Bg/E_Game.pressed.connect(_on_click_game)
+	$Bg/E_Chat.visible = false
+	$Bg/E_Game.visible = false
 
 func _process(_delta):
 	if ddd_idx < 3: 
+		connect_time += _delta
 		delta_time += _delta
 		if delta_time > 0.3:
 			var ddd = [".", "..", "..."]
@@ -19,10 +23,17 @@ func _process(_delta):
 			ddd_idx = (ddd_idx + 1) % 3
 			delta_time = 0.0
 
+		if connect_time > 30.0:
+			$Bg/E_WebScoketState.text = "连接超时"
+			ddd_idx = 3
+		
 func _on_websocket_connected(data: Dictionary):
 	print("WebSocket 已连接: %s" % data)
 	$Bg/E_WebScoketState.text = "已连接"
 	ddd_idx = 3
+
+	$Bg/E_Chat.visible = true
+	$Bg/E_Game.visible = true
 	
 	
 func _on_click_chat():

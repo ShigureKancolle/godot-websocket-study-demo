@@ -20,6 +20,8 @@ var _roles: Dictionary = {}
 
 
 func _ready() -> void:
+	$E_Back.connect("pressed", _on_back_pressed)
+
 	# 连接 StateMirror 的三个信号
 	# 信号定义见 StateMirror.gd
 	var mirror = ClientStateMirror.instance()
@@ -77,3 +79,7 @@ func _create_role(info: Dictionary) -> void:
 	role.setup(info)
 	add_child(role)
 	_roles[info.get("player_id", "")] = role
+
+func _on_back_pressed() -> void:
+	# 返回大厅
+	get_tree().change_scene_to_file.call_deferred("res://prefab/main/MainScene.tscn")

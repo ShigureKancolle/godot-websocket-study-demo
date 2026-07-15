@@ -1,0 +1,120 @@
+[gd_scene format=3 uid="uid://yjdvw2mw27mc"]
+
+[ext_resource type="Script" uid="uid://b67rvcysqj6x7" path="res://Script/role/PlayerVisual.gd" id="1_script"]
+[ext_resource type="Texture2D" uid="uid://ccuxxpedj8p8x" path="res://prefab/role/anim/idle/front/0.png" id="2_3r7cl"]
+[ext_resource type="Texture2D" uid="uid://e10553008mhs" path="res://prefab/role/anim/run/front/0.png" id="3_2rnry"]
+[ext_resource type="Texture2D" uid="uid://d2uyrprux5sts" path="res://prefab/role/anim/idle/front/1.png" id="3_dk6uw"]
+[ext_resource type="Texture2D" uid="uid://do0yxwv4c7014" path="res://prefab/role/anim/idle/front/2.png" id="4_7j3hk"]
+[ext_resource type="Texture2D" uid="uid://bka6vbmh8wxrs" path="res://prefab/role/anim/run/front/1.png" id="4_udo2b"]
+[ext_resource type="Texture2D" uid="uid://b5xtdtd67buwd" path="res://prefab/role/anim/idle/front/3.png" id="5_1pn1b"]
+[ext_resource type="Texture2D" uid="uid://rfkgbbkm4cn7" path="res://prefab/role/anim/run/front/2.png" id="5_oo2mu"]
+[ext_resource type="Texture2D" uid="uid://crhu7apfn0oe6" path="res://prefab/role/anim/idle/front/4.png" id="6_uch4d"]
+[ext_resource type="Texture2D" uid="uid://dhwx0oljvajs1" path="res://prefab/role/anim/run/front/4.png" id="7_1d46a"]
+[ext_resource type="Texture2D" uid="uid://0lfgap0b24nm" path="res://prefab/role/anim/idle/front/5.png" id="7_t7udc"]
+[ext_resource type="Texture2D" uid="uid://du2pos368kghp" path="res://prefab/role/anim/idle/front/6.png" id="8_5l0c1"]
+[ext_resource type="Texture2D" uid="uid://cotmugstjfgvp" path="res://prefab/role/anim/idle/front/7.png" id="9_pp13s"]
+[ext_resource type="Texture2D" uid="uid://bma6yexu07rxr" path="res://prefab/role/anim/run/front/7.png" id="10_7j3hk"]
+[ext_resource type="Texture2D" uid="uid://bfv26n1knpenr" path="res://prefab/role/anim/idle/front/8.png" id="10_wiexn"]
+[ext_resource type="Texture2D" uid="uid://cp4e6tef4vbu8" path="res://prefab/role/anim/idle/front/9.png" id="11_553d7"]
+[ext_resource type="Texture2D" uid="uid://boksos5qsjiba" path="res://prefab/role/anim/idle/front/10.png" id="12_q66r7"]
+[ext_resource type="Texture2D" uid="uid://pb5qddrb2g1l" path="res://prefab/role/anim/run/front/10.png" id="13_t7udc"]
+[ext_resource type="Texture2D" uid="uid://e2j0fqrrvuqs" path="res://prefab/role/anim/run/front/11.png" id="14_5l0c1"]
+[ext_resource type="Texture2D" uid="uid://cmkuxngc0t2hw" path="res://prefab/role/anim/run/front/12.png" id="15_pp13s"]
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_wiexn"]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("2_3r7cl")
+}, {
+"duration": 1.0,
+"texture": ExtResource("3_dk6uw")
+}, {
+"duration": 1.0,
+"texture": ExtResource("4_7j3hk")
+}, {
+"duration": 1.0,
+"texture": ExtResource("5_1pn1b")
+}, {
+"duration": 1.0,
+"texture": ExtResource("6_uch4d")
+}, {
+"duration": 1.0,
+"texture": ExtResource("7_t7udc")
+}, {
+"duration": 1.0,
+"texture": ExtResource("8_5l0c1")
+}, {
+"duration": 1.0,
+"texture": ExtResource("9_pp13s")
+}, {
+"duration": 1.0,
+"texture": ExtResource("10_wiexn")
+}, {
+"duration": 1.0,
+"texture": ExtResource("11_553d7")
+}, {
+"duration": 1.0,
+"texture": ExtResource("12_q66r7")
+}],
+"loop": true,
+"name": &"idle",
+"speed": 8.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("3_2rnry")
+}, {
+"duration": 1.0,
+"texture": ExtResource("4_udo2b")
+}, {
+"duration": 1.0,
+"texture": ExtResource("5_oo2mu")
+}, {
+"duration": 1.0,
+"texture": ExtResource("7_1d46a")
+}, {
+"duration": 1.0,
+"texture": ExtResource("10_7j3hk")
+}, {
+"duration": 1.0,
+"texture": ExtResource("13_t7udc")
+}, {
+"duration": 1.0,
+"texture": ExtResource("14_5l0c1")
+}, {
+"duration": 1.0,
+"texture": ExtResource("15_pp13s")
+}],
+"loop": true,
+"name": &"run",
+"speed": 15.0
+}]
+
+[node name="PlayerVisual" type="Node2D" unique_id=1889249389]
+script = ExtResource("1_script")
+
+[node name="Body" type="AnimatedSprite2D" parent="." unique_id=1743655513]
+sprite_frames = SubResource("SpriteFrames_wiexn")
+animation = &"idle"
+autoplay = "idle"
+frame_progress = 0.52652323
+
+[node name="FacingArrow" type="Sprite2D" parent="." unique_id=1709146306]
+position = Vector2(35, 0)
+
+[node name="NameLabel" type="Label" parent="." unique_id=1956648074]
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -65.0
+offset_top = -75.0
+offset_right = 65.0
+offset_bottom = -52.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+text = "玩家名"
+horizontal_alignment = 1

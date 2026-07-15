@@ -20,6 +20,12 @@ config/icon="res://icon.svg"
 WebScoketMgr="*uid://m1ngiumo6irb"
 SignalMgr="*uid://cu3pcmwhaq83q"
 UIManager="*uid://bvjvdqvo5i8iv"
+DebugConsoleLoader="*res://Script/UI/debug/DebugConsoleLoader.gd"
+InputIntentProvider="*res://Script/role/input/InputIntentProvider.gd"
+
+[debug_console]
+
+enabled=true
 
 [display]
 

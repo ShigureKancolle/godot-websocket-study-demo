@@ -133,13 +133,15 @@ func player_count() -> int:
 ## 在 MessageBus 初始化完成后调用一次即可
 func register_handlers() -> void:
 	var mb = MessageBus.instance()
-	# 这里注册四个会影响状态的消息。
-	# ChatMessage 和 Heartbeat 不影响状态，不在这里注册——
-	# 它们由各自的 UI（如 chat_main）单独处理。
+	# 这里注册会影响状态的消息。
+	# ChatMessage 和 Heartbeat 不影响状态,不在这里注册——
+	# 它们由各自的 UI(如 chat_main)单独处理。
 	mb.onproto("game.GameState", _on_game_state)
 	mb.onproto("game.PlayerJoin", _on_player_join)
 	mb.onproto("game.PlayerMove", _on_player_move)
+	mb.onproto("game.PlayerFacing", _on_player_facing)
 	mb.onproto("game.PlayerLeave", _on_player_leave)
+	mb.onproto("game.Heartbeat", _on_heartbeat)
 
 
 ## 收到 GameState 快照：整体替换本地镜像
@@ -225,12 +227,46 @@ func _on_player_move(data: Dictionary) -> void:
 		return
 
 	# 更新坐标（只改这两个字段，不动其他）
-	# 为什么不整体替换 player_info：PlayerMove 消息里只有 player_id/x/y/speed，
+	# 为什么不整体替换 player_info：PlayerMove 消息里只有 player_id/x/y/speed/moving，
 	# 没有 player_name/level/score，整体替换会丢信息。
 	player["x"] = data.get("x", 0.0)
 	player["y"] = data.get("y", 0.0)
 
+	# 动画状态:从 moving 字段推断 state
+	# 服务端 apply_move 也是用 moving 推 state(moving=true→"run", false→"idle"),
+	# 客户端这里做同样的映射,保证镜像 state 和服务端 PlayerInfo.state 一致。
+	# 这不算"状态逻辑重复"——只是字段映射,真正的状态权威在服务端
+	# (GameState 快照会带服务端的 state 字段,可对账)。
+	var moving: bool = data.get("moving", false)
+	player["state"] = "run" if moving else "idle"
+
 	# 通知渲染层：这个玩家变了
+	player_updated.emit(player)
+
+
+## 收到 PlayerFacing：增量更新某玩家朝向
+##
+## 和 _on_player_move 平行,但只改 facing 不改坐标。
+## 朝向和移动是独立状态维度——玩家可以一边移动一边朝任意方向攻击。
+##
+## 复用 player_updated 信号通知渲染层(不新增 player_facing_updated 信号):
+##   - Role 已经监听 player_updated 做坐标更新,朝向更新走同一信号链路最简单
+##   - Role.on_player_updated 里判断 facing 字段,变了就调 PlayerVisual.update_facing
+##   - 信号越少,连接关系越简单
+func _on_player_facing(data: Dictionary) -> void:
+	var pid: String = data.get("player_id", "")
+	if pid == "":
+		return
+
+	var player: Variant = _players.get(pid)
+	if player == null:
+		# 镜像里没这个玩家:忽略,等全量快照修正(和 _on_player_move 一致的容错)
+		return
+
+	# 更新朝向(只改 facing,不动 x/y)
+	player["facing"] = data.get("facing", 0.0)
+
+	# 通知渲染层:这个玩家变了(复用 player_updated 信号)
 	player_updated.emit(player)
 
 
@@ -245,3 +281,8 @@ func _on_player_leave(data: Dictionary) -> void:
 
 	# 通知渲染层：移除该角色显示
 	player_removed.emit(pid)
+
+func _on_heartbeat(_data: Dictionary) -> void:
+	# 心跳消息，告知服务端还存活
+	var mb: MessageBus = MessageBus.instance()
+	mb.send("game.Heartbeat", {})

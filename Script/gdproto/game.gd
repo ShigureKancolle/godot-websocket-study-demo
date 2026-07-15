@@ -718,8 +718,18 @@ class PlayerInfo:
 		service.field = __y
 		data[__y.tag] = service
 		
+		__facing = PBField.new("facing", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 7, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
+		service = PBServiceField.new()
+		service.field = __facing
+		data[__facing.tag] = service
+
+		__state = PBField.new("state", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 8, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
+		service = PBServiceField.new()
+		service.field = __state
+		data[__state.tag] = service
+
 	var data = {}
-	
+
 	var __player_id: PBField
 	func has_player_id() -> bool:
 		if __player_id.value != null:
@@ -732,7 +742,7 @@ class PlayerInfo:
 		__player_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
 	func set_player_id(value : String) -> void:
 		__player_id.value = value
-	
+
 	var __player_name: PBField
 	func has_player_name() -> bool:
 		if __player_name.value != null:
@@ -745,7 +755,7 @@ class PlayerInfo:
 		__player_name.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
 	func set_player_name(value : String) -> void:
 		__player_name.value = value
-	
+
 	var __level: PBField
 	func has_level() -> bool:
 		if __level.value != null:
@@ -758,7 +768,7 @@ class PlayerInfo:
 		__level.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
 	func set_level(value : int) -> void:
 		__level.value = value
-	
+
 	var __score: PBField
 	func has_score() -> bool:
 		if __score.value != null:
@@ -771,7 +781,7 @@ class PlayerInfo:
 		__score.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
 	func set_score(value : int) -> void:
 		__score.value = value
-	
+
 	var __x: PBField
 	func has_x() -> bool:
 		if __x.value != null:
@@ -784,7 +794,7 @@ class PlayerInfo:
 		__x.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
 	func set_x(value : float) -> void:
 		__x.value = value
-	
+
 	var __y: PBField
 	func has_y() -> bool:
 		if __y.value != null:
@@ -797,7 +807,33 @@ class PlayerInfo:
 		__y.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
 	func set_y(value : float) -> void:
 		__y.value = value
-	
+
+	var __facing: PBField
+	func has_facing() -> bool:
+		if __facing.value != null:
+			return true
+		return false
+	func get_facing() -> float:
+		return __facing.value
+	func clear_facing() -> void:
+		data[7].state = PB_SERVICE_STATE.UNFILLED
+		__facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
+	func set_facing(value : float) -> void:
+		__facing.value = value
+
+	var __state: PBField
+	func has_state() -> bool:
+		if __state.value != null:
+			return true
+		return false
+	func get_state() -> String:
+		return __state.value
+	func clear_state() -> void:
+		data[8].state = PB_SERVICE_STATE.UNFILLED
+		__state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
+	func set_state(value : String) -> void:
+		__state.value = value
+
 	func _to_string() -> String:
 		return PBPacker.message_to_string(data)
 		
@@ -943,6 +979,114 @@ class PlayerMove:
 		service = PBServiceField.new()
 		service.field = __speed
 		data[__speed.tag] = service
+
+		__moving = PBField.new("moving", PB_DATA_TYPE.BOOL, PB_RULE.OPTIONAL, 5, true, DEFAULT_VALUES_3[PB_DATA_TYPE.BOOL])
+		service = PBServiceField.new()
+		service.field = __moving
+		data[__moving.tag] = service
+
+	var data = {}
+
+	var __player_id: PBField
+	func has_player_id() -> bool:
+		if __player_id.value != null:
+			return true
+		return false
+	func get_player_id() -> String:
+		return __player_id.value
+	func clear_player_id() -> void:
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__player_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
+	func set_player_id(value : String) -> void:
+		__player_id.value = value
+
+	var __x: PBField
+	func has_x() -> bool:
+		if __x.value != null:
+			return true
+		return false
+	func get_x() -> float:
+		return __x.value
+	func clear_x() -> void:
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__x.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
+	func set_x(value : float) -> void:
+		__x.value = value
+
+	var __y: PBField
+	func has_y() -> bool:
+		if __y.value != null:
+			return true
+		return false
+	func get_y() -> float:
+		return __y.value
+	func clear_y() -> void:
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__y.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
+	func set_y(value : float) -> void:
+		__y.value = value
+
+	var __speed: PBField
+	func has_speed() -> bool:
+		if __speed.value != null:
+			return true
+		return false
+	func get_speed() -> float:
+		return __speed.value
+	func clear_speed() -> void:
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__speed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
+	func set_speed(value : float) -> void:
+		__speed.value = value
+
+	var __moving: PBField
+	func has_moving() -> bool:
+		if __moving.value != null:
+			return true
+		return false
+	func get_moving() -> bool:
+		return __moving.value
+	func clear_moving() -> void:
+		data[5].state = PB_SERVICE_STATE.UNFILLED
+		__moving.value = DEFAULT_VALUES_3[PB_DATA_TYPE.BOOL]
+	func set_moving(value : bool) -> void:
+		__moving.value = value
+
+	func _to_string() -> String:
+		return PBPacker.message_to_string(data)
+		
+	func to_bytes() -> PackedByteArray:
+		return PBPacker.pack_message(data)
+		
+	func from_bytes(bytes : PackedByteArray, offset : int = 0, limit : int = -1) -> int:
+		var cur_limit = bytes.size()
+		if limit != -1:
+			cur_limit = limit
+		var result = PBPacker.unpack_message(data, bytes, offset, cur_limit)
+		if result == cur_limit:
+			if PBPacker.check_required(data):
+				if limit == -1:
+					return PB_ERR.NO_ERRORS
+			else:
+				return PB_ERR.REQUIRED_FIELDS
+		elif limit == -1 && result > 0:
+			return PB_ERR.PARSE_INCOMPLETE
+		return result
+	
+class PlayerFacing:
+	extends RefCounted
+	func _init():
+		var service
+		
+		__player_id = PBField.new("player_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
+		service = PBServiceField.new()
+		service.field = __player_id
+		data[__player_id.tag] = service
+		
+		__facing = PBField.new("facing", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 2, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
+		service = PBServiceField.new()
+		service.field = __facing
+		data[__facing.tag] = service
 		
 	var data = {}
 	
@@ -959,44 +1103,18 @@ class PlayerMove:
 	func set_player_id(value : String) -> void:
 		__player_id.value = value
 	
-	var __x: PBField
-	func has_x() -> bool:
-		if __x.value != null:
+	var __facing: PBField
+	func has_facing() -> bool:
+		if __facing.value != null:
 			return true
 		return false
-	func get_x() -> float:
-		return __x.value
-	func clear_x() -> void:
+	func get_facing() -> float:
+		return __facing.value
+	func clear_facing() -> void:
 		data[2].state = PB_SERVICE_STATE.UNFILLED
-		__x.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
-	func set_x(value : float) -> void:
-		__x.value = value
-	
-	var __y: PBField
-	func has_y() -> bool:
-		if __y.value != null:
-			return true
-		return false
-	func get_y() -> float:
-		return __y.value
-	func clear_y() -> void:
-		data[3].state = PB_SERVICE_STATE.UNFILLED
-		__y.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
-	func set_y(value : float) -> void:
-		__y.value = value
-	
-	var __speed: PBField
-	func has_speed() -> bool:
-		if __speed.value != null:
-			return true
-		return false
-	func get_speed() -> float:
-		return __speed.value
-	func clear_speed() -> void:
-		data[4].state = PB_SERVICE_STATE.UNFILLED
-		__speed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
-	func set_speed(value : float) -> void:
-		__speed.value = value
+		__facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
+	func set_facing(value : float) -> void:
+		__facing.value = value
 	
 	func _to_string() -> String:
 		return PBPacker.message_to_string(data)
@@ -1264,6 +1382,12 @@ class GameMessage:
 		service.func_ref = Callable(self, "new_heartbeat")
 		data[__heartbeat.tag] = service
 		
+		__player_facing = PBField.new("player_facing", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 7, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		service = PBServiceField.new()
+		service.field = __player_facing
+		service.func_ref = Callable(self, "new_player_facing")
+		data[__player_facing.tag] = service
+		
 	var data = {}
 	
 	enum MessageTypeCase {
@@ -1274,6 +1398,7 @@ class GameMessage:
 		CHAT_MESSAGE = 4,
 		GAME_STATE = 5,
 		HEARTBEAT = 6,
+		PLAYER_FACING = 7,
 	}
 	var _message_type_case: int = 0
 
@@ -1298,6 +1423,8 @@ class GameMessage:
 		data[5].state = PB_SERVICE_STATE.UNFILLED
 		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
 		__player_join.value = PlayerJoin.new()
 		return __player_join.value
 	
@@ -1322,6 +1449,8 @@ class GameMessage:
 		data[5].state = PB_SERVICE_STATE.UNFILLED
 		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
 		__player_leave.value = PlayerLeave.new()
 		return __player_leave.value
 	
@@ -1346,6 +1475,8 @@ class GameMessage:
 		data[5].state = PB_SERVICE_STATE.UNFILLED
 		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = PlayerMove.new()
 		return __player_move.value
 	
@@ -1370,6 +1501,8 @@ class GameMessage:
 		data[5].state = PB_SERVICE_STATE.UNFILLED
 		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
 		__chat_message.value = ChatMessage.new()
 		return __chat_message.value
 	
@@ -1394,6 +1527,8 @@ class GameMessage:
 		_message_type_case = 5
 		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
 		__game_state.value = GameState.new()
 		return __game_state.value
 	
@@ -1418,8 +1553,36 @@ class GameMessage:
 		data[5].state = PB_SERVICE_STATE.UNFILLED
 		data[6].state = PB_SERVICE_STATE.FILLED
 		_message_type_case = 6
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
 		__heartbeat.value = Heartbeat.new()
 		return __heartbeat.value
+	
+	var __player_facing: PBField
+	func has_player_facing() -> bool:
+		return data[7].state == PB_SERVICE_STATE.FILLED
+	func get_player_facing() -> PlayerFacing:
+		return __player_facing.value
+	func clear_player_facing() -> void:
+		data[7].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_player_facing() -> PlayerFacing:
+		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__chat_message.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__game_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[5].state = PB_SERVICE_STATE.UNFILLED
+		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[6].state = PB_SERVICE_STATE.UNFILLED
+		data[7].state = PB_SERVICE_STATE.FILLED
+		_message_type_case = 7
+		__player_facing.value = PlayerFacing.new()
+		return __player_facing.value
 	
 	func get_message_type_case() -> int:
 		return _message_type_case

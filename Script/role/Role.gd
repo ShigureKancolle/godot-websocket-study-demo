@@ -53,13 +53,26 @@ func setup(info: Dictionary) -> void:
 	# 这在 player_updated 信号重复触发时有用（虽然一般不会重复挂）
 	_remove_component("PlayerVisual")
 	_remove_component("LocalPlayerController")
+	_remove_component("AnimStateMachine")
 
 	# 挂 PlayerVisual（所有玩家都要显示）
-	var visual = preload("res://Script/role/PlayerVisual.gd").new()
+	# 用预制体实例化:节点结构/Label 位置/颜色等静态配置在 PlayerVisual.tscn 里
+	# 先挂 visual,再挂状态机:状态机 _ready 时要访问 visual 播初始动画
+	var visual = preload("res://prefab/role/PlayerVisual.tscn").instantiate()
 	visual.name = "PlayerVisual"
 	add_child(visual)
 	# 调用组件的初始化（传入玩家信息，让它知道显示什么）
 	visual.setup(info)
+
+	# 挂 AnimStateMachine（所有玩家都要挂动画状态机）
+	# 必须在 PlayerVisual 之后挂:_ready 进入 idle 状态时要调 visual.play_anim
+	var anim_machine = preload("res://Script/statemachine/AnimStateMachine.gd").new()
+	anim_machine.name = "AnimStateMachine"
+	add_child(anim_machine)
+	anim_machine.setup(info)
+	# 注:anim_machine._ready 会在进场景树时自动触发(注册状态 + 进入 idle)
+	# Role 此刻可能还没 add_child 到场景树(dead_man_scene 的创建顺序),
+	# _ready 会延迟到 Role 进场景树时触发,那时 PlayerVisual 也已就绪
 
 	# 判断是否本地玩家
 	# 本地玩家额外挂 LocalPlayerController（读键盘输入发 PlayerMove）
@@ -72,9 +85,21 @@ func setup(info: Dictionary) -> void:
 		controller.setup(info)
 
 
-## 收到 StateMirror 的 player_updated 信号时调用，更新坐标
+## 收到 StateMirror 的 player_updated 信号时调用，更新坐标、朝向、动画状态
 func on_player_updated(info: Dictionary) -> void:
 	_update_position(info)
+	# 朝向更新:转发给 PlayerVisual(如果已挂载)
+	# facing 是独立状态维度,和坐标分开更新,但走同一个 player_updated 信号
+	var visual = get_node_or_null("PlayerVisual")
+	if visual != null and info.has("facing"):
+		visual.update_facing(info["facing"])
+	# 动画状态更新:转发给 AnimStateMachine(如果已挂载)
+	# state 字段由 StateMirror 从 moving 推断(或 GameState 快照带),服务端权威
+	var anim_machine = get_node_or_null("AnimStateMachine")
+	if anim_machine != null and info.has("state"):
+		var state_name: String = info["state"]
+		if state_name != "":
+			anim_machine.update_state(state_name)
 
 
 ## 更新坐标到 Role.position
