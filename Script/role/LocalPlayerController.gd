@@ -115,8 +115,7 @@ func _process(_delta: float) -> void:
 	#   鼠标不动(look_target 不变)但人物在移动(role_pos 变了)时,facing 实际已经变了。
 	#   如果只看 look_target 是否变化来节流,就会漏发——表现为「鼠标不动人物动时朝向不更新」。
 	# 正确做法:每帧算出当前 facing,只有 facing 变化超过阈值才发包。
-	if intent.look_target != Vector2.ZERO or _has_last_look:
-		var role_pos: Vector2 = get_parent().position
+	if intent.look_target != Vector2.ZERO or _has_last_look:		
 		var dir: Vector2 = intent.look_target - role_pos
 		# Vector2.angle() 返回弧度,0=右,逆时针正——和 facing 语义完全一致
 		var facing: float = dir.angle()

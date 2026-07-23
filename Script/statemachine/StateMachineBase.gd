@@ -16,8 +16,8 @@ class_name StateMachineBase
 和 StateBase 的分工:
     - StateMachineBase(本类):管状态表、当前状态、切换、每帧驱动
     - StateBase(状态):管具体状态的进入/退出/每帧逻辑
-    - 状态机不关心"什么时候该切什么状态"——切换决策由上层(如 Role 转发 state)
-      调用 change_state 触发,状态机只负责"怎么切"(校验+回调)
+	- 状态机不关心"什么时候该切什么状态"——切换决策由上层(如 Role 转发 state)
+	  调用 change_state 触发,状态机只负责"怎么切"(校验+回调)
 
 和旧版的区别:
     - 旧版 extends Object:无法 add_child,无法自动 _process,已废弃
