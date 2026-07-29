@@ -68,11 +68,12 @@ ID 格式统一带类型前缀:`player:uuid-xxx` / `entity:stake_1`。
 所有 apply_xxx 方法先查 entity_config 的能力配置:能做才改状态,不能做返回 False。
 - `add_entity(entity_id, entity_info: EntityInfo)` — 强制覆盖 entity_id(不变式:状态里的 entity_id 永远=传入的 key)。重复加入抛 ValueError(bug 早暴露)
 - `remove_entity(entity_id)` — pop,不存在返回 None(幂等,断连清理可能重复调用)
-- `apply_move(entity_id, x, y, speed=1.0, moving=False)` — 能力校验:can_move=False 直接拒(木桩不能动)。直接落地目标坐标(简化模型)。根据 moving 设 state='run'/'idle'。
-- `apply_facing(entity_id, facing)` — 能力校验:can_move=False 直接拒(木桩不转向)。只改 facing,弧度归一到 [0, 2*PI)。
-- `apply_attack_start(entity_id, atk_id)` — 能力校验:can_attack=False 直接拒。设 state='attacking'。只做状态变更,判定在 get_attack_hits
+- `apply_move(entity_id, x, y, speed=1.0, moving=False)` — 能力校验:can_move=False 直接拒(木桩不能动)。**硬直校验:state=="hurt" 直接拒(硬直期间锁移动)**。直接落地目标坐标(简化模型)。根据 moving 设 state='run'/'idle'。
+- `apply_facing(entity_id, facing)` — 能力校验:can_move=False 直接拒(木桩不转向)。**硬直校验:state=="hurt" 直接拒(硬直期间锁朝向)**。只改 facing,弧度归一到 [0, 2*PI)。
+- `apply_attack_start(entity_id, atk_id)` — 能力校验:can_attack=False 直接拒。**硬直校验:state=="hurt" 直接拒(硬直期间不能发起攻击)**。设 state='attacking'。只做状态变更,判定在 get_attack_hits
 - `apply_attack_end(entity_id, atk_id)` — 攻击结束恢复 state='idle'
 - `apply_hurt(target_id, atk_id)` — 能力校验:can_be_hurt=False 直接拒(墙/水地不会进入 hurt)。**统一处理玩家和木桩,不区分类型**。设 state='hurt'
+- `apply_hurt_end(entity_id)` — hurt 硬直定时器到期时调,恢复 state='idle'。等下一次 PlayerMove 决定后续状态(若玩家还在按方向键,下一 tick 自然切 run)
 
 ### 攻击命中判定方法(读状态 + 调 collision 纯函数,不改状态)
 - `get_attack_hits(atk_shape, attacker_id) -> List[str]` — 计算一次攻击形状的命中列表
@@ -185,11 +186,18 @@ timer_mgr.py 只管"到时间调回调",不依赖 GameRoom——保持 GameRoom 
 - 单 task 两段 await,取消时 CancelledError 静默退出
 - hit_cb / end_cb 异常被捕获并记录,不让 task 静默挂掉
 
+### HurtTimer(单次受击)
+- 生命周期:`start() → await duration → 调 end_cb`(只有一段 await,无判定帧概念)
+- `cancel()` 任意时刻可取消,end_cb 不触发
+- 用途:hurt 硬直计时,到期调 apply_hurt_end 设 state="idle" + 广播 HurtEnd
+- 连击场景:被命中者已在 hurt 时再被命中,start_hurt 会 cancel 旧 HurtTimer 启新的(实现"重置硬直"+ 客户端重启动画)
+
 ### TimerManager(按 player_id 管理)
 - `start_attack(pid, hit_time, duration, hit_cb, end_cb)` 启动一次攻击定时器
-- `cancel(player_id)` 取消该玩家所有定时器——cleanup_player 时调用,防对已删除玩家操作状态
+- `cancel(player_id)` — **只取消该玩家的 attack timers,不取消 hurt timers**(命名提醒:方法名是 cancel 但范围限定 attack)。cleanup_player 时调用,防对已删除玩家操作状态
+- `start_hurt(pid, duration, end_cb)` 启动一次 hurt 定时器。内部先 cancel 该玩家的 attack timers(攻击被中断)+ cancel 旧 hurt timer(连击重置),再启新 hurt timer
 - `has_active(player_id)` 判断是否在攻击中
-- 用 List 而非单个 AttackTimer:为连击/多段攻击留接口(当前一段攻击只有一个 timer)
+- attack timers 用 List(为连击/多段攻击留接口),hurt timers 用单个(同时只会有一个 hurt)
 
 ### 协作关系
 ```
@@ -255,7 +263,13 @@ GameRoom.get_attack_hits
     ↓ 收集命中者 entity_id 列表
 web_server.hit_cb
     ↓ 遍历 hit_list 逐个调 room.apply_hurt(hurt_id, atk_id)
-    ↓ broadcast("AttackHit", {attacker_id, hit_list, atk_id})
+    ↓ 逐个调 timer_mgr.start_hurt(hurt_id, HURT_DURATION_MS, hurt_end_cb)
+        ↓ start_hurt 内部 cancel 旧 attack timers(攻击被中断)+ cancel 旧 hurt timer(连击重置)
+    ↓ broadcast("AttackHit", {attacker_id, hit_list, atk_id, hurt_duration})
+
+hurt 定时器到期
+    ↓ hurt_end_cb 调 room.apply_hurt_end(hurt_id) 设 state="idle"
+    ↓ broadcast("HurtEnd", {attacker_id, hurt_id, atk_id, hurt_duration})
 ```
 
 ### 当前状态
@@ -280,12 +294,12 @@ web_server.hit_cb
 - **entity_config.py 已建立**:EntityCapability 能力配置表,apply_xxx 方法先查能力再改状态
 - **ID 统一加前缀**:player:uuid-xxx / entity:stake_1
 - GameRoom 功能完整:实体加入/离开/移动/朝向状态管理已实现,所有方法带能力校验
+- **hurt 硬直已实现**:apply_move/apply_facing/apply_attack_start 在 state=="hurt" 时拒绝输入;apply_hurt_end 恢复 idle;HURT_DURATION_MS=666ms
 - 攻击状态三件套已实现:apply_attack_start/apply_attack_end/apply_hurt(原 apply_attack_hurt 改名,统一处理玩家和木桩)
 - 攻击命中判定已接入:get_attack_hits 遍历 _entities,用 can_be_hurt 过滤,每个目标用自己的 radius
 - ATTACK_CONFIG 等攻击配置数据类已从 web_server.py 迁移到 game_room.py
 - handlers 已从 web_server.py 拆分,按功能分文件,PlayerJoin 用 EntityInfo dataclass
 - main.py 启动时硬编码注册 entity:stake_1 木桩(位置和客户端场景一致)
-- timer_mgr.py 已实现 AttackTimer + TimerManager,web_server 的 hit_cb/end_cb 已接入
+- **timer_mgr.py 已实现 AttackTimer + HurtTimer + TimerManager**:attack 三段定时器 + hurt 单段定时器,start_hurt 内部 cancel 旧 attack(攻击被中断)+ 旧 hurt(连击重置)
 - collision.py 已实现:Circle/Sector 形状 + 相交判定函数,冒烟测试通过
 - 冒烟测试通过:A 攻击命中 entity:stake_1;apply_hurt 设 stake state='hurt';木桩 apply_move 被能力配置拒绝
-- 下一步:cleanup_player 接入 timer_mgr.cancel 取消断连玩家未完成的攻击定时器;客户端改造(下次):StateMirror 加 entities 镜像,DeadManScene 动态创建木桩,Role.gd 支持 entity_type 分发

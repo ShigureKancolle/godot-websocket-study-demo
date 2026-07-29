@@ -120,7 +120,8 @@ handler 接收 `data: Dictionary`(godobuf 反序列化的原始 dict),内部调 
 - `_on_player_leave(data)` — 移除实体,emit entity_removed
 - `_on_attack_start(data)` — 取出攻击者 ClientEntityInfo,设 `entity.state = "attacking"` + `entity.atk_id = atk_id`(和服务端 apply_attack_start 对齐),emit entity_updated
 - `_on_attack_end(data)` — 取出攻击者 ClientEntityInfo,设 `entity.state = "idle"`,emit entity_updated
-- `_on_attack_hit(data)` — 攻击命中广播:遍历 `hit_list` 逐个取出被命中者 ClientEntityInfo,设 `entity.state = "hurt"`,emit entity_updated。**只处理 hit_list,不处理 attacker_id**(攻击者 state 由 AttackStart 设为 attacking)
+- `_on_attack_hit(data)` — 攻击命中广播:遍历 `hit_list` 逐个取出被命中者 ClientEntityInfo,设 `entity.state = "hurt"`,emit entity_updated。**只处理 hit_list,不处理 attacker_id**(攻击者 state 由 AttackStart 设为 attacking)。消息带 `hurt_duration` 字段但客户端当前不读(路径X:纯等服务端 HurtEnd 信号切 idle)
+- `_on_hurt_end(data)` — 受击硬直到期广播:读 `hurt_id` 取出 ClientEntityInfo,设 `entity.state = "idle"`,emit entity_updated。客户端不主动计时,完全等服务端信号(纯服务端权威恢复)。连击场景下服务端 hurt timer 被 cancel+restart,不会发 HurtEnd
 
 > 注:`_on_player_move` 里从 moving 推断 state 只是**字段映射**(服务端广播的 PlayerMove 只有 moving,没有 state,state 存在服务端 EntityInfo 里),不是状态逻辑重复。真正的状态权威在服务端——GameState 快照会带服务端的 state 字段,可对账。
 
@@ -193,4 +194,6 @@ WebScoketMgr 需要 _process 轮询,用 Node + autoload。
 ## 当前状态
 - 功能完整:连接、消息收发、状态镜像、契约校验都已实现
 - 玩家同步闭环已跑通
+- **hurt 硬直已实现**:StateMirror 处理 AttackHit(设 hurt)和 HurtEnd(恢复 idle),客户端纯被动接收服务端权威信号,不主动计时
+- AttackHit 消息带 hurt_duration 字段,客户端当前不读(留作未来预演/调试)
 - 注意:WebScoketMgr/WebScoketClient 是原拼写(Scoket),已遍布代码,暂不改

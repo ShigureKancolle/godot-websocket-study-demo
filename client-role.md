@@ -22,7 +22,7 @@
 | [statemachine/AnimState/IdleState.gd](file:///d:/work2/godot_demo/client/Script/statemachine/AnimState/IdleState.gd) | 静止状态(extends StateBase),_enter_state 调 visual.play_anim("idle") |
 | [statemachine/AnimState/RunState.gd](file:///d:/work2/godot_demo/client/Script/statemachine/AnimState/RunState.gd) | 移动状态(extends StateBase),_enter_state 调 visual.play_anim("run") |
 | [statemachine/AnimState/AttackState.gd](file:///d:/work2/godot_demo/client/Script/statemachine/AnimState/AttackState.gd) | 攻击状态(extends StateBase),_enter_state 调 visual.play_anim("attack") |
-| [statemachine/AnimState/HurtState.gd](file:///d:/work2/godot_demo/client/Script/statemachine/AnimState/HurtState.gd) | 受击状态(extends StateBase),_enter_state 调 visual.play_anim("hurt") |
+| [statemachine/AnimState/HurtState.gd](file:///d:/work2/godot_demo/client/Script/statemachine/AnimState/HurtState.gd) | 受击状态(extends StateBase),_enter_state 调 visual.play_anim("hurt"),_reenter_state 调 visual.replay_cur_anim() 处理连击重启 |
 | [dead_man_scene.gd](file:///d:/work2/godot_demo/client/Script/dead_man_scene.gd) | 木桩场景(Node2D),接 StateMirror 信号管理所有实体(玩家+木桩)的 Role 创建/更新/删除 |
 | [prefab/role/Role.tscn](file:///d:/work2/godot_demo/client/prefab/role/Role.tscn) | Role 预制体(当前空 Node,实际用脚本 new()) |
 | [prefab/role/PlayerVisual.tscn](file:///d:/work2/godot_demo/client/prefab/role/PlayerVisual.tscn) | PlayerVisual 预制体(Body + FacingArrow + NameLabel,静态视觉配置) |
@@ -164,8 +164,9 @@ PlayerVisual 的 AnimatedSprite2D 播放对应动画
 状态对象(IdleState/RunState/AttackState/HurtState)通过这个方法访问显示层。AnimStateMachine add_child 到 Role,所以 `get_parent()` = Role,再 `get_node_or_null("PlayerVisual")` 拿到 PlayerVisual。
 
 ### 状态基类说明(StateBase / StateMachineBase)
-- **StateBase**(extends RefCounted):纯逻辑状态对象,不进场景树。持有 `machine`/`state_name` 引用(add_state 时注入),三个虚方法 `_enter_state`/`_exit_state`/`_process` 由状态机回调。RefCounted 更轻量,切换时旧状态自动释放。
+- **StateBase**(extends RefCounted):纯逻辑状态对象,不进场景树。持有 `machine`/`state_name` 引用(add_state 时注入),四个虚方法 `_enter_state`/`_exit_state`/`_process`/`_reenter_state` 由状态机回调。RefCounted 更轻量,切换时旧状态自动释放。
 - **StateMachineBase**(extends Node):状态机基类,可 add_child 到宿主、自动 `_process` 驱动当前状态。管状态表(`_states: Dictionary`)、当前状态、切换(`change_state` 带校验)、查询(`get_state`/`get_current_state_name`)。状态机只负责「怎么切」,不决策「什么时候切」(切换由 Role 转发服务端 state 触发)。
+- **change_state 的重入机制**:`change_state` 检测到"目标状态=当前状态"时调 `_reenter_state`(基类默认空实现,等价于之前的 return)。HurtState override `_reenter_state` 调 `visual.replay_cur_anim()` 重启动画——处理连击场景(服务端 hurt timer 被 cancel+restart 不重发 state="hurt",但客户端会再收到一次 AttackHit,触发 change_state("hurt") 进入重入分支)。其他状态(Idle/Run/Attack)不 override,相同状态调用时等价于之前的行为。
 - 旧版基类 extends Object,无法 add_child、无法自动 _process、用 state.name 当 key 会报错(Object 无 name 属性),已废弃。
 
 ## input/ — 输入端模块
@@ -306,6 +307,7 @@ DeadManScene.tscn 里有个 E_Back 按钮用于返回 MainScene。Role 实例用
 - 统一 Entity 模型 + 强类型 ClientEntityInfo 重构完成:Role 按 EntityType 枚举分发,玩家/木桩统一在 `_entities` 表管理,字段访问全用强类型属性
 - 玩家同步闭环已跑通:两个客户端能互相看到对方移动+朝向(本地蓝箭头/远程棕箭头)
 - 攻击流程已实现:LocalPlayerController 发 AttackStart,StateMirror 处理 AttackHit/AttackEnd,AnimStateMachine 支持 attack/hurt 状态
+- **hurt 硬直已实现**:StateMirror 处理 AttackHit(进 hurt)+ HurtEnd(恢复 idle),纯服务端权威恢复(路径X);AnimStateMachine 的 change_state 加 `_reenter_state` 重入机制,HurtState override 后调 replay_cur_anim() 实现连击重启动画;StateBase 加 `_reenter_state` 虚方法(基类默认空)
 - 动画状态机已实现:AnimStateMachine + Idle/Run/Attack/Hurt 四状态,根据服务端 state 切换动画(Body 是 AnimatedSprite2D,SpriteFrames 在预制体里配 4方向×多状态动画,PlayerVisual 按 facing 弧度拼出 "Down_Idle" 等播放)
 - 木桩占位显示:复用 PlayerVisual,后续替换为 StakeVisual
 - 键盘方向移动(WASD)+ 鼠标朝向已实现

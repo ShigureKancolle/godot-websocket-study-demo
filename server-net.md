@@ -38,15 +38,18 @@
 - `room: GameRoom` — 游戏状态持有者(唯一能改状态的地方,详见 server-game.md)
 - `timer_mgr: TimerManager` — 攻击定时器管理器(详见 server-game.md 的 timer_mgr 章节)
 - `_pending_inputs: Dict[entity_id, Dict[action, data]]` — tick 待处理输入(move/facing/attackstart 高频输入先存这里)
+- `_send_queue: asyncio.Queue` — 发送队列(逻辑层塞消息,传输层独立协程发,见下方"发送队列"章节)
 - `TICK_HZ = 30` / `TICK_INTERVAL = 0.033s` — tick 频率常量
 - `handle_client(websocket)` — 处理单个连接:分配 `player:uuid` 作为 entity_id → 等首条消息(必须是 PlayerJoin)→ 进主循环分发消息
-- `broadcast(protoname, params, exclude_player=None)` — 广播给所有玩家
+- `broadcast(protoname, params, exclude_player=None)` — 真正的广播(遍历玩家 await ws.send)。**只被 _sender_loop 调用**,业务代码不直接调
+- `_queue_broadcast(protoname, params)` — 塞队列(不阻塞)。**业务代码(tick/timer 回调/cleanup)用这个替代 await broadcast**
+- `_sender_loop()` — 独立协程,从 _send_queue 取消息调 broadcast 发出。和 _tick_loop 并行
 - `add_pending_input(entity_id, action, data)` — 存入 pending,等 tick 处理(同一 tick 内同动作覆盖=节流)
-- `_tick_loop()` — asyncio task,每 TICK_INTERVAL 秒调 _process_tick
-- `_process_tick()` — 取出 pending → apply_move/apply_facing/apply_attack_start → 统一广播(AttackStart 立即广播,AttackHit/AttackEnd 由 timer_mgr 异步回调触发)
-- `cleanup_player(player_id)` — 断连清理:删连接表 + room.remove_entity + 广播 PlayerLeave(TODO: 还需调 timer_mgr.cancel 取消该玩家未完成的攻击定时器)
+- `_tick_loop()` — asyncio task,启动 _sender_loop + 每 TICK_INTERVAL 秒调 _process_tick,退出时 cancel sender
+- `_process_tick()` — 取出 pending → apply_move/apply_facing/apply_attack_start → _queue_broadcast 塞队列(不 await,立即返回)
+- `cleanup_player(player_id)` — 断连清理:删连接表 + timer_mgr.cancel + room.remove_entity + _queue_broadcast(PlayerLeave)
 - `start()` — create_task(_tick_loop) + websockets.serve 启动
-- `stop()` — 取消 tick_task + 停服务
+- `stop()` — 取消 tick_task(tick 的 finally 会连带 cancel sender_task)
 
 ### 统一 Entity 模型(本次重构)
 - player_id 改为带 `player:` 前缀的 entity_id(如 `player:uuid-xxx`)
@@ -59,24 +62,67 @@
 `ATTACK_CONFIG` / `AttackShape` / `AttackConfig` / `SectorParams` 等数据类原本写在 web_server.py 的 `# region` 块里,现已迁移到 [game_room.py](file:///d:/work2/godot_demo/server/game/game_room.py)。
 理由:配置属 game 层(被 GameRoom.get_attack_hits 读取),不属于 net 层。web_server.py 通过 `game_room.ATTACK_CONFIG` 引用。
 
-### hit_cb / end_cb 攻击定时器回调
+### hit_cb / end_cb / hurt_end_cb 攻击+受击定时器回调
 判定帧触发时(hit_cb):
 1. 调 `room.get_attack_hits(shape, attacker_id)` 取命中列表(统一 Entity 模型:可能含玩家和木桩)
 2. 遍历命中列表逐个调 `room.apply_hurt(hurt_id, atk_id)` 设被命中者 state="hurt"
    - apply_hurt 内部查能力配置(can_be_hurt),统一处理玩家和木桩,不用分流
-3. 广播 AttackHit,key 和 proto 字段名一致:`attacker_id` / `hit_list` / `atk_id`
+3. 逐个调 `timer_mgr.start_hurt(hurt_id, HURT_DURATION_MS, hurt_end_cb)` 启动 hurt 硬直定时器
+   - start_hurt 内部会 cancel 被命中者身上旧的 attack timers(攻击被打断)+ 旧 hurt timer(连击重置硬直)
+4. `_queue_broadcast("AttackHit", ...)` 塞队列(不阻塞 timer 回调),key 和 proto 字段名一致:`attacker_id` / `hit_list` / `atk_id` / `hurt_duration`
+   - hurt_duration 字段客户端当前不读(走路径X纯等服务端 idle 信号),留作未来预演/调试用
 
 攻击结束触发时(end_cb):
 1. 调 `room.apply_attack_end(attacker_id, atk_id)` 设攻击者 state="idle"
-2. 广播 AttackEnd,key 用 `entity_id`(不是 role_id)
+2. `_queue_broadcast("AttackEnd", ...)` 塞队列,key 用 `entity_id`(不是 role_id)
+
+hurt 硬直到期触发时(hurt_end_cb,由 `get_hurt_end_callback` 闭包工厂生成):
+1. 调 `room.apply_hurt_end(hurt_id)` 设被命中者 state="idle"
+2. `_queue_broadcast("HurtEnd", ...)` 塞队列,key:`attacker_id` / `hurt_id` / `atk_id` / `hurt_duration`
+3. 连击场景下 hurt timer 被 cancel+restart,不会触发 hurt_end_cb(不发 HurtEnd)
+
+> 三个回调都走 `_queue_broadcast` 而非 `await broadcast`:timer 回调虽然是独立协程,但若直接 await broadcast 仍会被 I/O 阻塞,导致回调链堆积。走队列后回调立即返回,timer 节奏也不受网络影响。
+
+### apply_xxx 返回值检查(避免状态矛盾)
+`_process_tick` 里三个输入(move/facing/attackstart)调 apply_xxx 后**只有返回 True 才广播**:
+- apply_move / apply_facing / apply_attack_start 可能因 hurt 硬直 / 能力不足返回 False
+- 若不检查就广播,其他客户端会收到"X 在移动/攻击"广播,但 X 实际没动(state 还是 hurt)——状态矛盾
+- AttackStart 广播也加了检查:apply_attack_start 返回 False 时不广播,也不启 hit_cb/end_cb 定时器
+
+### hit_cb 闭包陷阱修复
+`for shape in config.shape_list:` 循环里定义 `async def hit_cb()`,闭包捕获 `shape` 这个循环变量。多个 shape 时所有 hit_cb 实际都会用循环结束时的最后一个 shape 值(Python 闭包经典坑)。
+修复:用默认参数 `async def hit_cb(_shape=shape):` 把当前 shape 绑定到 hit_cb 局部作用域。
+(当前 ATTACK_CONFIG[1002] 两个 shape 配置相同触发不了,但配置不同会出 bug)
+
+### 发送队列:逻辑层与传输层解耦(本次重构)
+**问题**:原来 `_process_tick` 里 `await self.broadcast(...)`,tick 间隔会被网络 I/O 时间拉长——broadcast 要遍历所有玩家 `await ws.send`,某玩家网络慢就卡 tick,30Hz 不稳定。
+
+**解法**:把"算状态"和"发消息"彻底分层:
+```
+_process_tick(逻辑层,30Hz 严格)
+    ↓ apply_xxx 改状态(纯内存,微秒级)
+    ↓ _queue_broadcast(protoname, data) → self._send_queue.put_nowait(...)
+    ↓ 立即返回,不等发送
+
+_sender_loop(传输层,独立协程)
+    ↓ while True: (protoname, data) = await self._send_queue.get()
+    ↓ await self.broadcast(protoname, data)  # 慢就慢,不影响 tick
+```
+
+- **tick 严格 30Hz**:tick 只做状态计算 + put_nowait(都不阻塞),间隔 = TICK_INTERVAL + 几微秒
+- **某玩家网络慢只影响 sender_loop**:不卡 tick,不卡其他协程
+- **顺序保证**:asyncio.Queue 是 FIFO,tick 塞的消息顺序 = 发送顺序
+- **积压可接受**:sender 发得慢会积压,但客户端最终收到最新状态。积压严重说明带宽不足,需要优化广播内容(如 delta 压缩)
+- **所有 broadcast 都走队列**:tick / hit_cb / end_cb / hurt_end / cleanup_player 全部用 `_queue_broadcast`,没有业务代码直接 `await self.broadcast`
 
 ### tick 机制(限定同步速率)
-高频输入(PlayerMove/PlayerFacing)不立即处理,存入 `_pending_inputs`,每 33ms(30Hz)统一处理+广播:
+高频输入(PlayerMove/PlayerFacing)不立即处理,存入 `_pending_inputs`,每 33ms(30Hz)统一处理+塞队列:
 - **节流**:同一 tick 内同一动作的多次输入只保留最后一次(覆盖)。客户端 60Hz 发 → 服务端 30Hz 处理
-- **合并**:一个 tick 内所有玩家的变更统一广播,频率从 60Hz 降到 30Hz(带宽减半)
+- **合并**:一个 tick 内所有玩家的变更统一塞队列,sender 按 FIFO 发出,频率从 60Hz 降到 30Hz(带宽减半)
 - **哪些走 tick**:PlayerMove / PlayerFacing(高频输入)
 - **哪些不走 tick**:PlayerJoin / PlayerLeave / ChatMessage / Heartbeat(低频事件,立即处理)
 - **线程安全**:asyncio 单线程事件循环,handler 存 pending 时无 await(原子),不会在存入中途被 tick 打断
+- **间隔稳定**:tick 不再 await broadcast(改 put_nowait),间隔不受网络 I/O 影响(见上方"发送队列"章节)
 
 ### broadcast 的 exclude_player 语义
 **重要**:状态更新类广播(PlayerJoin/PlayerMove/PlayerFacing)**不要**用 exclude_player 排除发起者。
@@ -211,12 +257,15 @@ start_console 之前写在 web_server.py 里,但它和 WebSocket 服务逻辑无
 - **统一 Entity 模型已落地**:player_id 加 `player:` 前缀,GameRoom 用 _entities 表统一存玩家和木桩
 - **proto 字段名已统一**:role_id/player_id → entity_id(AttackHit 的 attacker_id 保留)
 - **数据存储用 dataclass**:EntityInfo 替代 dict,广播时用 dataclasses.asdict() 转 dict
+- **发送队列已实现**:tick / timer 回调 / cleanup_player 都用 `_queue_broadcast` 塞队列,`_sender_loop` 独立协程负责真正广播。tick 间隔不再被网络 I/O 拉长,30Hz 严格稳定
 - 玩家同步闭环已跑通:两个客户端能互相看到对方移动+朝向(本地蓝箭头/远程棕箭头)
 - tick 机制已实现:30Hz 限定同步速率,PlayerMove/PlayerFacing/AttackStart 走 pending 统一处理
 - 攻击命中判定已接入:hit_cb 调 `room.get_attack_hits` 取命中列表,遍历调 `room.apply_hurt` 设 hurt 状态(统一处理玩家和木桩)
+- **hurt 硬直已实现**:hit_cb 启 hurt 定时器(start_hurt 内部 cancel 旧 attack+旧 hurt),到期 hurt_end_cb 调 apply_hurt_end 恢复 idle + 塞队列 HurtEnd
+- **apply_xxx 返回值检查已加**:三个输入(move/facing/attackstart)只有 True 才塞队列,避免 hurt 期间广播造成状态矛盾
+- **hit_cb 闭包陷阱已修复**:用默认参数 `_shape=shape` 绑定循环变量
+- **AttackHit 加 hurt_duration 字段**:客户端当前不读,留作未来预演/调试
 - ATTACK_CONFIG 等攻击配置已从 web_server.py 迁回 game_room.py(配置属 game 层)
 - handler 已拆到 game/handlers/,web_server.py 只管网络层
 - 热更已实现:控制台 `reload()` 命令,reload 5 模块+重新注册 handler
 - 控制台已拆分到 tools/console.py
-- 待办:cleanup_player 接入 timer_mgr.cancel 取消断连玩家未完成的攻击定时器
-- 待办:客户端改造(下次):StateMirror 加 entities 镜像,DeadManScene 动态创建木桩,Role.gd 支持 entity_type 分发
