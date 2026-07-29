@@ -134,7 +134,7 @@ class ShapeParams:
 
 @dataclass
 class SectorParams(ShapeParams):
-    radius: float = 80.0                     # 扇形半径,单位像素
+    radius: float = 35.0                     # 扇形半径,单位像素
     angle: float = math.pi / 2 * (4 / 3)     # 扇形角度(±60°)
 
 
@@ -165,6 +165,8 @@ ATTACK_CONFIG: Dict[int, AttackConfig] = {
         AttackShape(AttackShapeType.SECTOR, SectorParams())
     ]),  # 扇形两刀
 }
+
+HURT_DURATION_MS = 666  # 666ms
 
 
 # ============================================================================
@@ -367,6 +369,14 @@ class GameRoom:
             logger.warning(f"实体 {entity_id} (type={info.entity_type}) 不能移动,apply_move 被拒绝")
             return False
 
+        # 硬直校验:state=="hurt" 期间拒绝移动输入
+        # 服务端是唯一状态权威,hurt 期间客户端发的 PlayerMove 不应改状态。
+        # 这里拒绝后,web_server._process_tick 检查 apply_xxx 返回值,不会广播——
+        # 避免出现"客户端收到 X 在移动广播,但 X 实际还在 hurt"的状态矛盾。
+        if info.state == "hurt":
+            logger.debug(f"实体 {entity_id} 处于 hurt 硬直,apply_move 被拒绝")
+            return False
+
         # 直接落地目标坐标(简化模型,见上方说明)
         info.x = x
         info.y = y
@@ -405,6 +415,11 @@ class GameRoom:
             logger.warning(f"实体 {entity_id} (type={info.entity_type}) 不能转向,apply_facing 被拒绝")
             return False
 
+        # 硬直校验:state=="hurt" 期间拒绝朝向输入(硬直期间朝向也锁)
+        if info.state == "hurt":
+            logger.debug(f"实体 {entity_id} 处于 hurt 硬直,apply_facing 被拒绝")
+            return False
+
         # 弧度归一到 [0, 2*PI),避免数值无限增长
         # 不做范围校验(如限制角度范围),因为任意朝向都是合法的
         info.facing = facing % (2 * math.pi)
@@ -431,6 +446,12 @@ class GameRoom:
 
         if not entity_config.get_capability(info.entity_type).can_attack:
             logger.warning(f"实体 {entity_id} (type={info.entity_type}) 不能攻击,apply_attack_start 被拒绝")
+            return False
+
+        # 硬直校验:state=="hurt" 期间不能发起攻击
+        # (硬直被打断的不只是移动,新攻击也要拒绝,否则会出现"边硬直边攻击"的诡异状态)
+        if info.state == "hurt":
+            logger.debug(f"实体 {entity_id} 处于 hurt 硬直,apply_attack_start 被拒绝")
             return False
 
         # 这里不做任何判定逻辑(如攻击范围/碰撞检测),只做状态变更
@@ -563,3 +584,14 @@ class GameRoom:
                 hits.append(target_id)
 
         return hits
+
+    def apply_hurt_end(self, entity_id: str):
+        """
+        应用实体的伤害结束状态,将实体状态重置为正常
+        """
+        info = self._entities.get(entity_id)
+        if info is None:
+            return
+
+        info.state = "idle"
+        logger.debug(f"实体 {entity_id} 伤害结束")

@@ -85,6 +85,16 @@ class GameServer:
         # tick 循环任务(start 时 create,stop 时 cancel)
         self._tick_task = None
 
+        # 发送队列 + sender 协程:状态层(tick)只往队列塞消息,传输层(sender)独立协程发
+        # 为什么这样设计:
+        #   原来 _process_tick 里 await self.broadcast(...),tick 间隔会被 I/O 时间拉长
+        #   (broadcast 要遍历所有玩家 await ws.send,网络慢就卡 tick)
+        #   改成塞队列后,tick 只做状态计算(微秒级),broadcast 在 sender 协程里慢慢发
+        #   某个玩家网络慢只影响 sender,不影响 tick 节奏——30Hz 严格稳定
+        # 顺序保证:asyncio.Queue 是 FIFO,tick 塞的消息顺序 = 发送顺序
+        self._send_queue: asyncio.Queue = asyncio.Queue()
+        self._sender_task = None
+
     async def handle_client(self, websocket: websockets.WebSocketServerProtocol):
         """处理单个客户端连接
 
@@ -169,6 +179,50 @@ class GameServer:
             await self.cleanup_player(pid)
 
     # ------------------------------------------------------------------
+    # 发送队列:逻辑层与传输层解耦
+    # ------------------------------------------------------------------
+    # _process_tick 和 timer 回调都不直接 await broadcast,而是调 _queue_broadcast 塞队列。
+    # _sender_loop 独立协程从队列取消息,调真正的 broadcast 发出去。
+    # 这样 tick 不会被网络 I/O 阻塞,保证 30Hz 严格稳定。
+
+    def _queue_broadcast(self, protoname: str, protodata: dict) -> None:
+        """把广播消息塞进发送队列(不阻塞,立即返回)
+
+        逻辑层(tick / timer 回调)用这个替代 await self.broadcast(...)。
+        真正的发送在 _sender_loop 里进行,不影响 tick 节奏。
+        """
+        self._send_queue.put_nowait((protoname, protodata))
+
+    async def _sender_loop(self) -> None:
+        """发送协程:独立运行,从队列取消息调 broadcast 发出
+
+        为什么需要独立协程:
+            _process_tick 里如果 await self.broadcast(...),tick 间隔会被 I/O 时间拉长。
+            改成塞队列后,tick 只做状态计算(微秒级),broadcast 在本协程里慢慢发。
+            某个玩家网络慢只影响本协程,不影响 tick 节奏。
+
+        积压处理:
+            队列可能积压(tick 产生消息比 sender 发得快)。
+            这没关系——sender 会按 FIFO 顺序慢慢发,客户端最终收到最新状态。
+            如果积压严重,说明带宽不足或玩家太多,需要优化广播内容(如 delta 压缩)。
+
+        错误处理:
+            单条消息发送失败不退出循环,记日志继续发下一条。
+            broadcast 内部已有失败玩家的 cleanup 逻辑。
+        """
+        logger.info("sender 协程启动")
+        while self.is_running:
+            try:
+                protoname, protodata = await self._send_queue.get()
+                await self.broadcast(protoname, protodata)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"sender_loop 发送消息出错: {e}")
+                continue
+        logger.info("sender 协程已停止")
+
+    # ------------------------------------------------------------------
     # tick 机制:限定同步速率
     # ------------------------------------------------------------------
     # 为什么需要 tick:
@@ -208,11 +262,28 @@ class GameServer:
         asyncio 单线程事件循环:tick_loop 和 handle_client 在同一线程,
         通过 await 切换执行。pending_inputs 不需要锁——
         handler 存入 pending 时不会 await(原子执行),不会在存入中途被 tick 打断。
+
+        为什么 tick 间隔严格 30Hz:
+            tick 循环里不再有 await self.broadcast(...)(那会因网络 I/O 拉长间隔)。
+            tick 只做状态计算(apply_move 等,纯内存微秒级)+ 塞队列(put_nowait 不阻塞)。
+            真正的广播在 _sender_loop 独立协程里发,不影响 tick 节奏。
         """
         logger.info(f"tick 循环启动,频率 {self.TICK_HZ}Hz")
-        while self.is_running:
-            await asyncio.sleep(self.TICK_INTERVAL)
-            await self._process_tick()
+        # 启动 sender 协程:tick 只算状态+塞队列,sender 负责真正发
+        # tick 和 sender 通过 _send_queue 解耦,互不阻塞
+        self._sender_task = asyncio.create_task(self._sender_loop())
+        try:
+            while self.is_running:
+                await asyncio.sleep(self.TICK_INTERVAL)
+                await self._process_tick()
+        finally:
+            # tick 退出时必须连带取消 sender,否则 sender 会永远阻塞在 queue.get()
+            if self._sender_task and not self._sender_task.done():
+                self._sender_task.cancel()
+                try:
+                    await self._sender_task
+                except asyncio.CancelledError:
+                    pass
         logger.info("tick 循环已停止")
 
     async def _process_tick(self) -> None:
@@ -247,64 +318,92 @@ class GameServer:
             # 处理移动输入
             if "move" in inputs:
                 m = inputs["move"]
-                self.room.apply_move(entity_id, m["x"], m["y"], m["speed"], m["moving"])
-                broadcasts.append(("PlayerMove", {
-                    "entity_id": entity_id,
-                    "x": m["x"], "y": m["y"], "speed": m["speed"],
-                    "moving": m["moving"]
-                }))
+                # 检查 apply_xxx 返回值:只有状态真的改了才广播
+                # (apply_move 可能因 hurt 硬直/能力不足返回 False,此时广播会让其他客户端
+                #  收到"X 在移动"但 X 实际没动,造成状态矛盾)
+                if self.room.apply_move(entity_id, m["x"], m["y"], m["speed"], m["moving"]):
+                    broadcasts.append(("PlayerMove", {
+                        "entity_id": entity_id,
+                        "x": m["x"], "y": m["y"], "speed": m["speed"],
+                        "moving": m["moving"]
+                    }))
 
             # 处理朝向输入
             if "facing" in inputs:
                 f = inputs["facing"]
-                self.room.apply_facing(entity_id, f["facing"])
-                broadcasts.append(("PlayerFacing", {
-                    "entity_id": entity_id,
-                    "facing": f["facing"]
-                }))
+                if self.room.apply_facing(entity_id, f["facing"]):
+                    broadcasts.append(("PlayerFacing", {
+                        "entity_id": entity_id,
+                        "facing": f["facing"]
+                    }))
 
             # 处理攻击发起输入
             if "attackstart" in inputs:
                 a = inputs["attackstart"]
                 attacker_id = a["entity_id"]
-                self.room.apply_attack_start(attacker_id, a["atk_id"])
-                await self.broadcast("AttackStart", {
-                    "entity_id": attacker_id,
-                    "atk_id": a["atk_id"]
-                })
-                config = game_room.ATTACK_CONFIG.get(a["atk_id"])
-                if config:
-                    for shape in config.shape_list:
-                        logger.info(f"实体 {attacker_id} 发起攻击 atk_id={a['atk_id']}，形状 {shape.shape.value}")
-                        # hit_cb: 判定帧触发,调 GameRoom 算命中列表并广播
-                        # 命中判定逻辑在 game_room.get_attack_hits(状态层),不在网络层
-                        # 统一 Entity 模型:hit_list 里可能同时含玩家和木桩,统一调 apply_hurt
-                        async def hit_cb():
-                            hurt_list = self.room.get_attack_hits(shape, attacker_id)
-                            # 逐个调 apply_hurt 改状态(状态变更方法都是单玩家的,
-                            # 遍历列表由调用方负责,保持原子性;apply_hurt 内部会查能力配置)
-                            for hurt_id in hurt_list:
-                                self.room.apply_hurt(hurt_id, a["atk_id"])
-                            await self.broadcast("AttackHit", {
-                                "attacker_id": attacker_id,
-                                "hit_list": hurt_list,
-                                "atk_id": a["atk_id"]
-                            })
+                if self.room.apply_attack_start(attacker_id, a["atk_id"]):
+                    # 塞队列不阻塞 tick:AttackStart 广播由 _sender_loop 异步发出
+                    self._queue_broadcast("AttackStart", {
+                        "entity_id": attacker_id,
+                        "atk_id": a["atk_id"]
+                    })
+                    config = game_room.ATTACK_CONFIG.get(a["atk_id"])
+                    if config:
+                        # 闭包陷阱修复:for 循环里定义 async def hit_cb 会捕获 shape 这个
+                        # 循环变量,所有 hit_cb 实际都会用循环结束时的最后一个 shape 值。
+                        # 用默认参数把当前 shape 绑定到 hit_cb 的局部作用域,绕开陷阱。
+                        # (当前 ATTACK_CONFIG[1002] 两个 shape 配置相同,触发不了;但配置不同会出 bug)
+                        for shape in list(config.shape_list):
+                            logger.info(f"实体 {attacker_id} 发起攻击 atk_id={a['atk_id']}，形状 {shape.shape.value}")
+                            # hit_cb: 判定帧触发,调 GameRoom 算命中列表并广播
+                            # 命中判定逻辑在 game_room.get_attack_hits(状态层),不在网络层
+                            # 统一 Entity 模型:hit_list 里可能同时含玩家和木桩,统一调 apply_hurt
+                            # 注:hit_cb/end_cb 里也用 _queue_broadcast 而非 await broadcast——
+                            # timer 回调虽然是独立协程,但仍不应被 I/O 阻塞(回调链可能很长)
+                            async def hit_cb(_shape=shape):
+                                hurt_list = self.room.get_attack_hits(_shape, attacker_id)
+                                # 逐个调 apply_hurt 改状态(状态变更方法都是单玩家的,
+                                # 遍历列表由调用方负责,保持原子性;apply_hurt 内部会查能力配置)
+                                for hurt_id in hurt_list:
+                                    self.room.apply_hurt(hurt_id, a["atk_id"])
+                                    self.timer_mgr.start_hurt(hurt_id, game_room.HURT_DURATION_MS, self.get_hurt_end_callback(hurt_id, attacker_id, a["atk_id"], game_room.HURT_DURATION_MS))
+                                # 塞队列不阻塞 timer 回调
+                                self._queue_broadcast("AttackHit", {
+                                    "attacker_id": attacker_id,
+                                    "hit_list": hurt_list,
+                                    "atk_id": a["atk_id"],
+                                    "hurt_duration": game_room.HURT_DURATION_MS
+                                })
 
-                        async def end_cb():
-                            self.room.apply_attack_end(attacker_id, a["atk_id"])
-                            await self.broadcast("AttackEnd", {
-                                "entity_id": attacker_id,
-                            })
+                            async def end_cb():
+                                self.room.apply_attack_end(attacker_id, a["atk_id"])
+                                # 塞队列不阻塞 timer 回调
+                                self._queue_broadcast("AttackEnd", {
+                                    "entity_id": attacker_id,
+                                })
 
-                        self.timer_mgr.start_attack(attacker_id, shape.hit_time, shape.duration, hit_cb, end_cb)
+                            self.timer_mgr.start_attack(attacker_id, shape.hit_time, shape.duration, hit_cb, end_cb)
 
 
-        # 统一广播:一个 tick 内所有变更的消息一次性发出去
+        # 统一塞队列:一个 tick 内所有变更的消息按顺序发出
         # 注意:这里不 exclude 任何人——状态变更广播必须包含发起者
         # (项目硬约束:所有状态变更广播必须包含发起客户端)
+        # 注:改成 _queue_broadcast 后不再 await,tick 立即完成,广播在 _sender_loop 里发
         for proto_name, proto_data in broadcasts:
-            await self.broadcast(proto_name, proto_data)
+            self._queue_broadcast(proto_name, proto_data)
+
+    def get_hurt_end_callback(self, hurt_id: str, attacker_id: str, atk_id: int, hurt_duration: int):
+        async def hurt_end():
+            self.room.apply_hurt_end(hurt_id)
+            # 塞队列不阻塞 timer 回调
+            self._queue_broadcast("HurtEnd", {
+                "attacker_id": attacker_id,
+                "hurt_id": hurt_id,
+                "atk_id": atk_id,
+                "hurt_duration": hurt_duration,
+            })
+        return hurt_end
+        
 
     async def cleanup_player(self, player_id: str):
         """
@@ -339,7 +438,8 @@ class GameServer:
             # 广播玩家离开消息给其他人
             # 注意:这里广播的是"事件"(PlayerLeave),不是"快照"(GameState)。
             # 客户端收到后从本地镜像里删掉该实体。这是当前混合模型的体现。
-            await self.broadcast("PlayerLeave", {"entity_id": player_id})
+            # 走发送队列,和 tick 广播一致(避免 cleanup_player 被一条慢消息阻塞)
+            self._queue_broadcast("PlayerLeave", {"entity_id": player_id})
 
     async def start(self):
         self.is_running = True
@@ -357,6 +457,7 @@ class GameServer:
         self.is_running = False
         # 取消 tick 循环(is_running=False 后 _tick_loop 的 while 循环会退出,
         # 但 cancel 确保即使正在 await asyncio.sleep 也能立即取消)
+        # _tick_loop 的 finally 会连带取消 _sender_task,这里不用单独 cancel sender
         if self._tick_task and not self._tick_task.done():
             self._tick_task.cancel()
         logger.info("服务器停止中...")

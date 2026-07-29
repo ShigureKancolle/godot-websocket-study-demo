@@ -77,34 +77,8 @@ logger = logging.getLogger(__name__)
 AsyncCallback = Callable[[], Coroutine[Any, Any, None]]
 
 
-class AttackTimer:
-    """
-    单次攻击的定时器
-    管判定帧(hit_time)和结束(duration)两个时间点
-
-    生命周期:
-        start() → await hit_time → 调 hit_cb → await (duration-hit_time) → 调 end_cb
-        cancel() 可在任意时刻取消,两个回调都不触发
-
-    注意:cancel 后 task 内部的回调不会触发,但若 hit_cb 已经触发过,
-          end_cb 仍会被 cancel 掉——这是合理的(攻击被强制中断,不该再发 End)。
-
-    时间单位:毫秒(ms),所有对外参数都是 int 毫秒
-    """
-
-    def __init__(self, hit_time_ms: int, duration_ms: int,
-                 hit_callback: AsyncCallback, end_callback: AsyncCallback):
-        """
-        Args:
-            hit_time_ms: 判定帧时间(毫秒,从 start 算)
-            duration_ms: 攻击总时长(毫秒,从 start 算),必须 >= hit_time_ms
-            hit_callback: 判定帧到时调用的 async 回调
-            end_callback: 攻击结束时调用的 async 回调
-        """
-        self._hit_time_ms = hit_time_ms
-        self._duration_ms = duration_ms
-        self._hit_cb = hit_callback
-        self._end_cb = end_callback
+class StateTimer:
+    def __init__(self, *args, **kwargs):
         # asyncio.Task 引用,start 时 create,cancel/done 时置 None
         self._task: Optional[asyncio.Task] = None
         # 是否已取消(防 cancel 重复调用 + 状态查询)
@@ -129,6 +103,39 @@ class AttackTimer:
     def is_done(self) -> bool:
         """是否已结束(自然结束或被取消)"""
         return self._task is None or self._task.done()
+
+    async def _run(self) -> None:
+        raise NotImplementedError("Subclasses must implement _run")
+
+class AttackTimer(StateTimer):
+    """
+    单次攻击的定时器
+    管判定帧(hit_time)和结束(duration)两个时间点
+
+    生命周期:
+        start() → await hit_time → 调 hit_cb → await (duration-hit_time) → 调 end_cb
+        cancel() 可在任意时刻取消,两个回调都不触发
+
+    注意:cancel 后 task 内部的回调不会触发,但若 hit_cb 已经触发过,
+          end_cb 仍会被 cancel 掉——这是合理的(攻击被强制中断,不该再发 End)。
+
+    时间单位:毫秒(ms),所有对外参数都是 int 毫秒
+    """
+
+    def __init__(self, hit_time_ms: int, duration_ms: int,
+                 hit_callback: AsyncCallback, end_callback: AsyncCallback):
+        """
+        Args:
+            hit_time_ms: 判定帧时间(毫秒,从 start 算)
+            duration_ms: 攻击总时长(毫秒,从 start 算),必须 >= hit_time_ms
+            hit_callback: 判定帧到时调用的 async 回调
+            end_callback: 攻击结束时调用的 async 回调
+        """
+        super().__init__()
+        self._hit_time_ms = hit_time_ms
+        self._duration_ms = duration_ms
+        self._hit_cb = hit_callback
+        self._end_cb = end_callback
 
     async def _run(self) -> None:
         """
@@ -170,6 +177,25 @@ class AttackTimer:
             logger.debug("AttackTimer 被取消,回调不再触发")
             return
 
+class HurtTimer(StateTimer):
+
+    def __init__(self, duration_ms: int, end_callback: AsyncCallback):
+        super().__init__()
+        self._duration_ms = duration_ms
+        self._end_cb = end_callback
+
+    async def _run(self) -> None:
+        try:
+            await asyncio.sleep(self._duration_ms / 1000.0)
+            try:
+                await self._end_cb()
+            except Exception as e:
+                logger.exception(f"HurtTimer end_callback 异常: {e}")
+        except asyncio.CancelledError:
+            logger.debug("HurtTimer 被取消,回调不再触发")
+            return
+
+
 
 class TimerManager:
     """
@@ -187,6 +213,8 @@ class TimerManager:
         # player_id -> List[AttackTimer]
         # 用 List 而非单个:支持连击等多段攻击(当前项目一段攻击只有一个 timer,但留接口)
         self._timers: Dict[str, list] = {}
+        # 同时只会有一个hurt_timer
+        self._hurt_timers: Dict[str, HurtTimer] = {}
 
     def start_attack(self, player_id: str,
                      hit_time_ms: int, duration_ms: int,
@@ -216,10 +244,14 @@ class TimerManager:
 
     def cancel(self, player_id: str) -> None:
         """
-        取消该玩家的所有攻击定时器
+        取消该玩家的所有攻击定时器(注意:只取消 attack,不取消 hurt)
         玩家断连时调(cleanup_player 里),防止对已删除玩家操作状态
 
         玩家不存在或无定时器时静默返回(幂等)
+
+        命名提醒:本方法叫 cancel 但只管 attack timers,不管 hurt timers。
+        hurt timers 由 start_hurt 内部自己 cancel+restart(连击场景)。
+        如需统一取消,调 cancel 后再单独处理 _hurt_timers(当前无此需求)。
         """
         timers = self._timers.pop(player_id, None)
         if not timers:
@@ -249,3 +281,19 @@ class TimerManager:
         if player_id not in self._timers:
             return False
         return any(not t.is_done() for t in self._timers[player_id])
+
+
+    def start_hurt(self, player_id: str, duration_ms: int, end_callback: AsyncCallback) -> HurtTimer:
+        timer = HurtTimer(duration_ms, end_callback)
+        timer.start()
+
+        if player_id in self._timers:
+            self.cancel(player_id)  # 剩余的攻击被打断了
+      
+        if self._hurt_timers.get(player_id, None) is not None:  
+            # 打断之前的 HurtTimer
+            self._hurt_timers[player_id].cancel()
+            del self._hurt_timers[player_id]
+
+        self._hurt_timers[player_id] = timer
+        return timer
