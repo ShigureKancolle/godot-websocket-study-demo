@@ -2,16 +2,26 @@ syntax = "proto3";
 
 package game;
 
-// 玩家基本信息
-message PlayerInfo {
-  string player_id = 1;      // 玩家唯一ID
-  string player_name = 2;    // 玩家名称
-  int32 level = 3;           // 玩家等级
-  int32 score = 4;           // 玩家分数
-  float x = 5;               // X坐标
-  float y = 6;               // Y坐标
-  float facing = 7;          // 朝向角度(弧度),0=右,逆时针正(Godot 标准)
-  string state = 8;          // 动画状态:idle/run/attack/hurt/... (服务端权威,客户端只读镜像)
+// ============================================================================
+// 统一实体信息
+// ----------------------------------------------------------------------------
+// 所有可交互物体都是 Entity:玩家、木桩、箱子、陷阱...
+// 区别在 entity_type 决定的"行为能力"(见服务端 entity_config.py):
+//   - player: 可移动/可攻击/可被攻击/可断连
+//   - stake:  不可移动/不可攻击/可被攻击/不可断连
+// player_name / moving 等 player 特有字段其他类型不填(空值/默认值)
+// ============================================================================
+message EntityInfo {
+  string entity_id = 1;      // 实体ID,格式 "player:uuid" | "entity:stake_1"
+  string entity_type = 2;    // 类型:player/stake/...(决定行为能力,见 entity_config.py)
+  float x = 3;               // X坐标
+  float y = 4;               // Y坐标
+  float facing = 5;          // 朝向角度(弧度),0=右,逆时针正(Godot 标准)。木桩永远 0
+  string state = 6;          // 动画状态:idle/run/attack/hurt/...(服务端权威,客户端只读镜像)
+  float radius = 7;          // 碰撞半径(用于攻击命中判定)
+  // player 特有字段(其他类型不填)
+  string player_name = 8;    // 玩家名称
+  bool moving = 9;           // 是否正在移动(客户端发,服务端据此设 state=idle/run)
 }
 
 // 聊天消息
@@ -22,37 +32,55 @@ message ChatMessage {
   int64 timestamp = 4;       // 时间戳
 }
 
-// 玩家移动消息
+// 玩家移动消息(增量更新,只带 x/y/moving)
 message PlayerMove {
-  string player_id = 1;      // 玩家ID
+  string entity_id = 1;      // 实体ID
   float x = 2;               // 目标X坐标
   float y = 3;               // 目标Y坐标
   float speed = 4;           // 移动速度
-  bool moving = 5;           // 是否正在移动(客户端发,服务端据此设 PlayerInfo.state=idle/run)
+  bool moving = 5;           // 是否正在移动(客户端发,服务端据此设 state=idle/run)
 }
 
-// 玩家朝向消息
+// 玩家朝向消息(增量更新,只改 facing 不改坐标)
 // 和 PlayerMove 平行,但只改 facing 不改坐标
 // 设计原因:朝向和移动是两个独立状态维度——玩家可以移动时朝任意方向攻击
 message PlayerFacing {
-  string player_id = 1;      // 玩家ID
-  float facing = 2;           // 朝向角度(弧度)
+  string entity_id = 1;      // 实体ID
+  float facing = 2;          // 朝向角度(弧度)
 }
 
 // 玩家加入游戏
 message PlayerJoin {
-  PlayerInfo player_info = 1; // 玩家信息
+  EntityInfo entity_info = 1; // 加入的实体信息
 }
 
 // 玩家离开游戏
 message PlayerLeave {
-  string player_id = 1;      // 玩家ID
+  string entity_id = 1;      // 离开的实体ID
 }
 
-// 游戏状态更新
+// 攻击开始
+message AttackStart {
+  string entity_id = 1;      // 攻击者ID
+  int32 atk_id = 2;          // 攻击ID(对应 ATTACK_CONFIG 的 key)
+}
+
+// 攻击命中
+message AttackHit {
+  string attacker_id = 1;    // 攻击者ID
+  repeated string hit_list = 2; // 命中目标ID列表
+  int32 atk_id = 3;          // 攻击ID
+}
+
+// 攻击结束
+message AttackEnd {
+  string entity_id = 1;      // 攻击者ID
+}
+
+// 游戏状态更新(完整快照,新玩家加入/定期同步用)
 message GameState {
-  repeated PlayerInfo players = 1; // 所有玩家信息
-  int64 timestamp = 2;             // 时间戳
+  repeated EntityInfo entities = 1; // 所有实体信息(玩家+木桩+...)
+  int64 timestamp = 2;              // 时间戳
 }
 
 // 心跳消息
@@ -70,5 +98,8 @@ message GameMessage {
     GameState game_state = 5;         // 游戏状态
     Heartbeat heartbeat = 6;          // 心跳
     PlayerFacing player_facing = 7;   // 玩家朝向
+    AttackStart attack_start = 8;     // 攻击开始(双端:C2S 发起 / S2C 广播)
+    AttackHit attack_hit = 9;         // 攻击命中(S2C 广播)
+    AttackEnd attack_end = 10;        // 攻击结束(S2C 广播)
   }
 }

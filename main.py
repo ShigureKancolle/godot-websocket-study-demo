@@ -33,6 +33,7 @@ import net.message_bus as message_bus
 import net.message_contract as message_contract
 import net.web_server as web_server
 import game.handlers as handlers
+import game.game_room as game_room
 import tools.console as console
 
 # 配置日志系统
@@ -78,7 +79,20 @@ async def main():
     # handler 代码已拆到 game/handlers/ 下(player_handlers/chat_handlers)
     handlers.register_all(server)
 
-    # 5. （可选）启动交互式控制台
+    # 5. 注册静态实体(木桩/箱子等,服务端硬编码位置)
+    # 这些实体没有连接,不会被 cleanup_player 清理,启动时一次性注册
+    # 位置和客户端场景里的 DeadMan 节点一致(见 client/Scene/DeadManScene.tscn)
+    # 未来多了可读配置文件,当前硬编码够用
+    server.room.add_entity("entity:stake_1", game_room.EntityInfo(
+        entity_id="entity:stake_1",    # 会被 add_entity 强制覆盖,这里只是占位
+        entity_type="stake",
+        x=572.0,
+        y=361.0,
+        radius=24.0,
+        state="idle",
+    ))
+
+    # 6. （可选）启动交互式控制台
     if args.console:
         loop = asyncio.get_running_loop()
         console_thread = threading.Thread(
@@ -89,7 +103,7 @@ async def main():
         console_thread.start()
         logger.info("交互式控制台已启动（独立线程）")
 
-    # 6. 启动服务器
+    # 7. 启动服务器
     try:
         await server.start()
     except KeyboardInterrupt:

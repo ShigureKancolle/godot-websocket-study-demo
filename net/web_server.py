@@ -13,8 +13,9 @@ import asyncio
 import websockets
 import uuid
 import time
-from typing import Dict, Set, Optional
 import logging
+import dataclasses
+from typing import Dict, Optional, Set
 
 # 项目模块用 import xxx + xxx.def 访问，不用 from xxx import def
 # 原因：后续要支持 hotfix/hotreload。
@@ -31,6 +32,7 @@ import logging
 import net.message_bus as message_bus
 import net.message_contract as message_contract
 import game.game_room as game_room
+import game.timer_mgr as timer_mgr
 # game_pb2 是生成代码，由 message_bus 内部加入 sys.path，这里直接 import
 import game_pb2
 
@@ -67,6 +69,7 @@ class GameServer:
         # 这样状态变更规则只有一处定义，避免双端重复（详见 game_room.py 文档）。
         # 用 game_room.GameRoom() 而非 GameRoom()，热更见文件头注释
         self.room = game_room.GameRoom()
+        self.timer_mgr = timer_mgr.TimerManager()
 
         self.is_running = False
 
@@ -88,7 +91,9 @@ class GameServer:
         注意：websockets 13.0+ 版本不再传 path 参数，如需路径可从 websocket.request.path 获取
         """
         async with websocket:
-            player_id = str(uuid.uuid4())
+            # entity_id 统一带类型前缀(见 game_room.py 的统一 Entity 模型说明)
+            # player: 前缀区分玩家和木桩等实体,避免 ID 撞名,调试时一眼看出类型
+            player_id = f"player:{uuid.uuid4()}"
             logger.info(f"新客户端连接，分配玩家ID: {player_id}")
 
             # 构造消息上下文，后续所有消息分发都带上它
@@ -234,17 +239,17 @@ class GameServer:
 
         # 收集本 tick 要广播的消息:List[(protoname, protodata)]
         broadcasts = []
-        for player_id, inputs in pending.items():
-            # 玩家可能已离开(tick 间隔内断连),跳过
-            if not self.room.has_player(player_id):
+        for entity_id, inputs in pending.items():
+            # 实体可能已离开(tick 间隔内断连),跳过
+            if not self.room.has_entity(entity_id):
                 continue
 
             # 处理移动输入
             if "move" in inputs:
                 m = inputs["move"]
-                self.room.apply_move(player_id, m["x"], m["y"], m["speed"], m["moving"])
+                self.room.apply_move(entity_id, m["x"], m["y"], m["speed"], m["moving"])
                 broadcasts.append(("PlayerMove", {
-                    "player_id": player_id,
+                    "entity_id": entity_id,
                     "x": m["x"], "y": m["y"], "speed": m["speed"],
                     "moving": m["moving"]
                 }))
@@ -252,11 +257,48 @@ class GameServer:
             # 处理朝向输入
             if "facing" in inputs:
                 f = inputs["facing"]
-                self.room.apply_facing(player_id, f["facing"])
+                self.room.apply_facing(entity_id, f["facing"])
                 broadcasts.append(("PlayerFacing", {
-                    "player_id": player_id,
+                    "entity_id": entity_id,
                     "facing": f["facing"]
                 }))
+
+            # 处理攻击发起输入
+            if "attackstart" in inputs:
+                a = inputs["attackstart"]
+                attacker_id = a["entity_id"]
+                self.room.apply_attack_start(attacker_id, a["atk_id"])
+                await self.broadcast("AttackStart", {
+                    "entity_id": attacker_id,
+                    "atk_id": a["atk_id"]
+                })
+                config = game_room.ATTACK_CONFIG.get(a["atk_id"])
+                if config:
+                    for shape in config.shape_list:
+                        logger.info(f"实体 {attacker_id} 发起攻击 atk_id={a['atk_id']}，形状 {shape.shape.value}")
+                        # hit_cb: 判定帧触发,调 GameRoom 算命中列表并广播
+                        # 命中判定逻辑在 game_room.get_attack_hits(状态层),不在网络层
+                        # 统一 Entity 模型:hit_list 里可能同时含玩家和木桩,统一调 apply_hurt
+                        async def hit_cb():
+                            hurt_list = self.room.get_attack_hits(shape, attacker_id)
+                            # 逐个调 apply_hurt 改状态(状态变更方法都是单玩家的,
+                            # 遍历列表由调用方负责,保持原子性;apply_hurt 内部会查能力配置)
+                            for hurt_id in hurt_list:
+                                self.room.apply_hurt(hurt_id, a["atk_id"])
+                            await self.broadcast("AttackHit", {
+                                "attacker_id": attacker_id,
+                                "hit_list": hurt_list,
+                                "atk_id": a["atk_id"]
+                            })
+
+                        async def end_cb():
+                            self.room.apply_attack_end(attacker_id, a["atk_id"])
+                            await self.broadcast("AttackEnd", {
+                                "entity_id": attacker_id,
+                            })
+
+                        self.timer_mgr.start_attack(attacker_id, shape.hit_time, shape.duration, hit_cb, end_cb)
+
 
         # 统一广播:一个 tick 内所有变更的消息一次性发出去
         # 注意:这里不 exclude 任何人——状态变更广播必须包含发起者
@@ -268,27 +310,36 @@ class GameServer:
         """
         玩家断开连接时清理资源
 
-        清理分两步，对应两份状态：
-            1. 传输层状态（self.players 连接表）：删 websocket 引用
-            2. 游戏状态（self.room）：调 remove_player
-        两份状态必须同步清理，否则会出现「连接已断但状态还在」的幽灵玩家。
+        清理三步,对应三份状态:
+            1. 传输层状态(self.players 连接表):删 websocket 引用
+            2. 攻击定时器(self.timer_mgr):取消该玩家所有未完成的攻击定时器
+            3. 游戏状态(self.room):调 remove_entity
+        三份状态必须同步清理,否则会出现:
+            - 连接已断但状态还在 → 幽灵玩家
+            - 定时器没取消 → 回调对已删除实体 apply_attack_end/broadcast 报错
         """
-        # 1. 传输层：删除连接引用
+        # 1. 传输层:删除连接引用
         if player_id in self.players:
             del self.players[player_id]
 
-        # 2. 游戏状态：从房间移除
-        # remove_player 返回被移除的玩家信息（用于取名字做日志），
-        # 玩家不存在时返回 None（幂等，详见 game_room.py 的 remove_player 文档）。
-        removed = self.room.remove_player(player_id)
+        # 2. 攻击定时器:取消该玩家所有未完成的攻击
+        # 必须在 remove_entity 之前——否则定时器回调可能对已删除实体操作状态
+        # cancel 是幂等的,玩家没有定时器时静默返回
+        self.timer_mgr.cancel(player_id)
+
+        # 3. 游戏状态:从房间移除
+        # remove_entity 返回被移除的 EntityInfo(用于取名字做日志),
+        # 实体不存在时返回 None(幂等,详见 game_room.py 的 remove_entity 文档)。
+        removed = self.room.remove_entity(player_id)
         if removed is not None:
-            player_name = removed.get("player_name", "未知")
+            # dataclass 用点访问而非 dict 的 .get()
+            player_name = removed.player_name or "未知"
             logger.info(f"玩家 {player_name} (ID: {player_id}) 离开游戏")
 
             # 广播玩家离开消息给其他人
-            # 注意：这里广播的是「事件」(PlayerLeave)，不是「快照」(GameState)。
-            # 客户端收到后从本地镜像里删掉该玩家。这是当前混合模型的体现。
-            await self.broadcast("PlayerLeave", {"player_id": player_id})
+            # 注意:这里广播的是"事件"(PlayerLeave),不是"快照"(GameState)。
+            # 客户端收到后从本地镜像里删掉该实体。这是当前混合模型的体现。
+            await self.broadcast("PlayerLeave", {"entity_id": player_id})
 
     async def start(self):
         self.is_running = True

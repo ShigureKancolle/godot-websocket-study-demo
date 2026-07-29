@@ -17,7 +17,7 @@
 
 """
 // 玩家攻击消息
-message PlayerAttack {
+message AttackStart {
   string attacker_id = 1;      // 攻击者ID
   string target_id = 2;        // 目标ID
   int32 damage = 3;            // 伤害值
@@ -32,7 +32,7 @@ message PlayerLevelUp {
 }
 
 // 在 GameMessage 的 oneof 中添加：
-//   PlayerAttack player_attack = 7;
+//   AttackStart attack_start = 7;
 //   PlayerLevelUp player_level_up = 8;
 """
 

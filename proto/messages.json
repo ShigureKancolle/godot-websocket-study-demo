@@ -52,6 +52,24 @@
             "state_affecting": true,
             "comment": "客户端发朝向输入(鼠标位置算出的角度)，服务端 apply_facing 后转发给所有人。和 PlayerMove 平行，但只改 facing 不改坐标。朝向是独立状态维度，支持移动时朝任意方向攻击"
         },
+        "AttackStart": {
+            "direction": "C2S",
+            "category": "input",
+            "state_affecting": true,
+            "comment": "客户端发攻击请求(带 atk_id)。服务端 apply_attack_start 设 state=attacking + 启动判定帧/结束定时器,再广播 AttackStart 给所有人(含攻击者,客户端据此切 AttackState 播动画)。判定帧模型下 S2C 不带 hit_list,命中由 AttackHit 单独通知。字段:entity_id(攻击者), atk_id"
+        },
+        "AttackHit": {
+            "direction": "S2C",
+            "category": "event",
+            "state_affecting": true,
+            "comment": "服务端判定帧到时调 apply_hurt 设被命中者 state=hurt(统一 Entity 模型:hit_list 可同时含玩家和木桩,apply_hurt 内部查能力配置),然后广播命中列表给所有人。客户端遍历 hit_list 逐个设 hurt 状态(不处理 attacker_id,攻击者 state 由 AttackStart 设为 attacking)。字段:attacker_id, hit_list, atk_id"
+        },
+        "AttackEnd": {
+            "direction": "S2C",
+            "category": "snapshot",
+            "state_affecting": true,
+            "comment": "服务端攻击结束定时器到,调 apply_attack_end 设 state=idle 后广播给所有人,客户端据此类切回 IdleState。字段:entity_id(攻击者)"
+        },
         "ChatMessage": {
             "direction": "both",
             "category": "event",

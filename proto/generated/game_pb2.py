@@ -24,29 +24,35 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\ngame.proto\x12\x04game\"\x87\x01\n\nPlayerInfo\x12\x11\n\tplayer_id\x18\x01 \x01(\t\x12\x13\n\x0bplayer_name\x18\x02 \x01(\t\x12\r\n\x05level\x18\x03 \x01(\x05\x12\r\n\x05score\x18\x04 \x01(\x05\x12\t\n\x01x\x18\x05 \x01(\x02\x12\t\n\x01y\x18\x06 \x01(\x02\x12\x0e\n\x06\x66\x61\x63ing\x18\x07 \x01(\x02\x12\r\n\x05state\x18\x08 \x01(\t\"Y\n\x0b\x43hatMessage\x12\x11\n\tplayer_id\x18\x01 \x01(\t\x12\x13\n\x0bplayer_name\x18\x02 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x03 \x01(\t\x12\x11\n\ttimestamp\x18\x04 \x01(\x03\"T\n\nPlayerMove\x12\x11\n\tplayer_id\x18\x01 \x01(\t\x12\t\n\x01x\x18\x02 \x01(\x02\x12\t\n\x01y\x18\x03 \x01(\x02\x12\r\n\x05speed\x18\x04 \x01(\x02\x12\x0e\n\x06moving\x18\x05 \x01(\x08\"1\n\x0cPlayerFacing\x12\x11\n\tplayer_id\x18\x01 \x01(\t\x12\x0e\n\x06\x66\x61\x63ing\x18\x02 \x01(\x02\"3\n\nPlayerJoin\x12%\n\x0bplayer_info\x18\x01 \x01(\x0b\x32\x10.game.PlayerInfo\" \n\x0bPlayerLeave\x12\x11\n\tplayer_id\x18\x01 \x01(\t\"A\n\tGameState\x12!\n\x07players\x18\x01 \x03(\x0b\x32\x10.game.PlayerInfo\x12\x11\n\ttimestamp\x18\x02 \x01(\x03\"\x1e\n\tHeartbeat\x12\x11\n\ttimestamp\x18\x01 \x01(\x03\"\xbf\x02\n\x0bGameMessage\x12\'\n\x0bplayer_join\x18\x01 \x01(\x0b\x32\x10.game.PlayerJoinH\x00\x12)\n\x0cplayer_leave\x18\x02 \x01(\x0b\x32\x11.game.PlayerLeaveH\x00\x12\'\n\x0bplayer_move\x18\x03 \x01(\x0b\x32\x10.game.PlayerMoveH\x00\x12)\n\x0c\x63hat_message\x18\x04 \x01(\x0b\x32\x11.game.ChatMessageH\x00\x12%\n\ngame_state\x18\x05 \x01(\x0b\x32\x0f.game.GameStateH\x00\x12$\n\theartbeat\x18\x06 \x01(\x0b\x32\x0f.game.HeartbeatH\x00\x12+\n\rplayer_facing\x18\x07 \x01(\x0b\x32\x12.game.PlayerFacingH\x00\x42\x0e\n\x0cmessage_typeb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\ngame.proto\x12\x04game\"\x9e\x01\n\nEntityInfo\x12\x11\n\tentity_id\x18\x01 \x01(\t\x12\x13\n\x0b\x65ntity_type\x18\x02 \x01(\t\x12\t\n\x01x\x18\x03 \x01(\x02\x12\t\n\x01y\x18\x04 \x01(\x02\x12\x0e\n\x06\x66\x61\x63ing\x18\x05 \x01(\x02\x12\r\n\x05state\x18\x06 \x01(\t\x12\x0e\n\x06radius\x18\x07 \x01(\x02\x12\x13\n\x0bplayer_name\x18\x08 \x01(\t\x12\x0e\n\x06moving\x18\t \x01(\x08\"Y\n\x0b\x43hatMessage\x12\x11\n\tplayer_id\x18\x01 \x01(\t\x12\x13\n\x0bplayer_name\x18\x02 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x03 \x01(\t\x12\x11\n\ttimestamp\x18\x04 \x01(\x03\"T\n\nPlayerMove\x12\x11\n\tentity_id\x18\x01 \x01(\t\x12\t\n\x01x\x18\x02 \x01(\x02\x12\t\n\x01y\x18\x03 \x01(\x02\x12\r\n\x05speed\x18\x04 \x01(\x02\x12\x0e\n\x06moving\x18\x05 \x01(\x08\"1\n\x0cPlayerFacing\x12\x11\n\tentity_id\x18\x01 \x01(\t\x12\x0e\n\x06\x66\x61\x63ing\x18\x02 \x01(\x02\"3\n\nPlayerJoin\x12%\n\x0b\x65ntity_info\x18\x01 \x01(\x0b\x32\x10.game.EntityInfo\" \n\x0bPlayerLeave\x12\x11\n\tentity_id\x18\x01 \x01(\t\"0\n\x0b\x41ttackStart\x12\x11\n\tentity_id\x18\x01 \x01(\t\x12\x0e\n\x06\x61tk_id\x18\x02 \x01(\x05\"B\n\tAttackHit\x12\x13\n\x0b\x61ttacker_id\x18\x01 \x01(\t\x12\x10\n\x08hit_list\x18\x02 \x03(\t\x12\x0e\n\x06\x61tk_id\x18\x03 \x01(\x05\"\x1e\n\tAttackEnd\x12\x11\n\tentity_id\x18\x01 \x01(\t\"B\n\tGameState\x12\"\n\x08\x65ntities\x18\x01 \x03(\x0b\x32\x10.game.EntityInfo\x12\x11\n\ttimestamp\x18\x02 \x01(\x03\"\x1e\n\tHeartbeat\x12\x11\n\ttimestamp\x18\x01 \x01(\x03\"\xb8\x03\n\x0bGameMessage\x12\'\n\x0bplayer_join\x18\x01 \x01(\x0b\x32\x10.game.PlayerJoinH\x00\x12)\n\x0cplayer_leave\x18\x02 \x01(\x0b\x32\x11.game.PlayerLeaveH\x00\x12\'\n\x0bplayer_move\x18\x03 \x01(\x0b\x32\x10.game.PlayerMoveH\x00\x12)\n\x0c\x63hat_message\x18\x04 \x01(\x0b\x32\x11.game.ChatMessageH\x00\x12%\n\ngame_state\x18\x05 \x01(\x0b\x32\x0f.game.GameStateH\x00\x12$\n\theartbeat\x18\x06 \x01(\x0b\x32\x0f.game.HeartbeatH\x00\x12+\n\rplayer_facing\x18\x07 \x01(\x0b\x32\x12.game.PlayerFacingH\x00\x12)\n\x0c\x61ttack_start\x18\x08 \x01(\x0b\x32\x11.game.AttackStartH\x00\x12%\n\nattack_hit\x18\t \x01(\x0b\x32\x0f.game.AttackHitH\x00\x12%\n\nattack_end\x18\n \x01(\x0b\x32\x0f.game.AttackEndH\x00\x42\x0e\n\x0cmessage_typeb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'game_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_PLAYERINFO']._serialized_start=21
-  _globals['_PLAYERINFO']._serialized_end=156
-  _globals['_CHATMESSAGE']._serialized_start=158
-  _globals['_CHATMESSAGE']._serialized_end=247
-  _globals['_PLAYERMOVE']._serialized_start=249
-  _globals['_PLAYERMOVE']._serialized_end=333
-  _globals['_PLAYERFACING']._serialized_start=335
-  _globals['_PLAYERFACING']._serialized_end=384
-  _globals['_PLAYERJOIN']._serialized_start=386
-  _globals['_PLAYERJOIN']._serialized_end=437
-  _globals['_PLAYERLEAVE']._serialized_start=439
-  _globals['_PLAYERLEAVE']._serialized_end=471
-  _globals['_GAMESTATE']._serialized_start=473
-  _globals['_GAMESTATE']._serialized_end=538
-  _globals['_HEARTBEAT']._serialized_start=540
-  _globals['_HEARTBEAT']._serialized_end=570
-  _globals['_GAMEMESSAGE']._serialized_start=573
-  _globals['_GAMEMESSAGE']._serialized_end=892
+  _globals['_ENTITYINFO']._serialized_start=21
+  _globals['_ENTITYINFO']._serialized_end=179
+  _globals['_CHATMESSAGE']._serialized_start=181
+  _globals['_CHATMESSAGE']._serialized_end=270
+  _globals['_PLAYERMOVE']._serialized_start=272
+  _globals['_PLAYERMOVE']._serialized_end=356
+  _globals['_PLAYERFACING']._serialized_start=358
+  _globals['_PLAYERFACING']._serialized_end=407
+  _globals['_PLAYERJOIN']._serialized_start=409
+  _globals['_PLAYERJOIN']._serialized_end=460
+  _globals['_PLAYERLEAVE']._serialized_start=462
+  _globals['_PLAYERLEAVE']._serialized_end=494
+  _globals['_ATTACKSTART']._serialized_start=496
+  _globals['_ATTACKSTART']._serialized_end=544
+  _globals['_ATTACKHIT']._serialized_start=546
+  _globals['_ATTACKHIT']._serialized_end=612
+  _globals['_ATTACKEND']._serialized_start=614
+  _globals['_ATTACKEND']._serialized_end=644
+  _globals['_GAMESTATE']._serialized_start=646
+  _globals['_GAMESTATE']._serialized_end=712
+  _globals['_HEARTBEAT']._serialized_start=714
+  _globals['_HEARTBEAT']._serialized_end=744
+  _globals['_GAMEMESSAGE']._serialized_start=747
+  _globals['_GAMEMESSAGE']._serialized_end=1187
 # @@protoc_insertion_point(module_scope)
