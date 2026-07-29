@@ -34,18 +34,41 @@
 ## web_server.py
 
 ### GameServer 类
-- `players: Dict[player_id, websocket]` — 传输层连接表(谁连着)
+- `players: Dict[entity_id, websocket]` — 传输层连接表(谁连着,entity_id 带 `player:` 前缀)
 - `room: GameRoom` — 游戏状态持有者(唯一能改状态的地方,详见 server-game.md)
-- `_pending_inputs: Dict[player_id, Dict[action, data]]` — tick 待处理输入(move/facing 高频输入先存这里)
+- `timer_mgr: TimerManager` — 攻击定时器管理器(详见 server-game.md 的 timer_mgr 章节)
+- `_pending_inputs: Dict[entity_id, Dict[action, data]]` — tick 待处理输入(move/facing/attackstart 高频输入先存这里)
 - `TICK_HZ = 30` / `TICK_INTERVAL = 0.033s` — tick 频率常量
-- `handle_client(websocket)` — 处理单个连接:分配 uuid4 作为 player_id → 等首条消息(必须是 PlayerJoin)→ 进主循环分发消息
+- `handle_client(websocket)` — 处理单个连接:分配 `player:uuid` 作为 entity_id → 等首条消息(必须是 PlayerJoin)→ 进主循环分发消息
 - `broadcast(protoname, params, exclude_player=None)` — 广播给所有玩家
-- `add_pending_input(player_id, action, data)` — 存入 pending,等 tick 处理(同一 tick 内同动作覆盖=节流)
+- `add_pending_input(entity_id, action, data)` — 存入 pending,等 tick 处理(同一 tick 内同动作覆盖=节流)
 - `_tick_loop()` — asyncio task,每 TICK_INTERVAL 秒调 _process_tick
-- `_process_tick()` — 取出 pending → apply_move/apply_facing → 统一广播
-- `cleanup_player(player_id)` — 断连清理:删连接表 + room.remove_player + 广播 PlayerLeave
+- `_process_tick()` — 取出 pending → apply_move/apply_facing/apply_attack_start → 统一广播(AttackStart 立即广播,AttackHit/AttackEnd 由 timer_mgr 异步回调触发)
+- `cleanup_player(player_id)` — 断连清理:删连接表 + room.remove_entity + 广播 PlayerLeave(TODO: 还需调 timer_mgr.cancel 取消该玩家未完成的攻击定时器)
 - `start()` — create_task(_tick_loop) + websockets.serve 启动
 - `stop()` — 取消 tick_task + 停服务
+
+### 统一 Entity 模型(本次重构)
+- player_id 改为带 `player:` 前缀的 entity_id(如 `player:uuid-xxx`)
+- GameRoom 内部用 `_entities: Dict[entity_id, EntityInfo]` 一张表存所有可交互物体(玩家+木桩)
+- web_server 通过 `room.has_entity` / `room.remove_entity` / `room.get_entity` 访问
+- PlayerJoin handler 构造 EntityInfo dataclass 存入,广播时用 `dataclasses.asdict()` 转 dict
+- 广播 GameState 时用 `[dataclasses.asdict(e) for e in room.snapshot()]` 转 dict 列表
+
+### 攻击配置已迁回 game 层
+`ATTACK_CONFIG` / `AttackShape` / `AttackConfig` / `SectorParams` 等数据类原本写在 web_server.py 的 `# region` 块里,现已迁移到 [game_room.py](file:///d:/work2/godot_demo/server/game/game_room.py)。
+理由:配置属 game 层(被 GameRoom.get_attack_hits 读取),不属于 net 层。web_server.py 通过 `game_room.ATTACK_CONFIG` 引用。
+
+### hit_cb / end_cb 攻击定时器回调
+判定帧触发时(hit_cb):
+1. 调 `room.get_attack_hits(shape, attacker_id)` 取命中列表(统一 Entity 模型:可能含玩家和木桩)
+2. 遍历命中列表逐个调 `room.apply_hurt(hurt_id, atk_id)` 设被命中者 state="hurt"
+   - apply_hurt 内部查能力配置(can_be_hurt),统一处理玩家和木桩,不用分流
+3. 广播 AttackHit,key 和 proto 字段名一致:`attacker_id` / `hit_list` / `atk_id`
+
+攻击结束触发时(end_cb):
+1. 调 `room.apply_attack_end(attacker_id, atk_id)` 设攻击者 state="idle"
+2. 广播 AttackEnd,key 用 `entity_id`(不是 role_id)
 
 ### tick 机制(限定同步速率)
 高频输入(PlayerMove/PlayerFacing)不立即处理,存入 `_pending_inputs`,每 33ms(30Hz)统一处理+广播:
@@ -185,8 +208,15 @@ start_console 之前写在 web_server.py 里,但它和 WebSocket 服务逻辑无
 
 ## 当前状态
 - 功能完整:连接、加入、移动、朝向、聊天、心跳、断连清理都已实现
+- **统一 Entity 模型已落地**:player_id 加 `player:` 前缀,GameRoom 用 _entities 表统一存玩家和木桩
+- **proto 字段名已统一**:role_id/player_id → entity_id(AttackHit 的 attacker_id 保留)
+- **数据存储用 dataclass**:EntityInfo 替代 dict,广播时用 dataclasses.asdict() 转 dict
 - 玩家同步闭环已跑通:两个客户端能互相看到对方移动+朝向(本地蓝箭头/远程棕箭头)
-- tick 机制已实现:30Hz 限定同步速率,PlayerMove/PlayerFacing 走 pending 统一处理
+- tick 机制已实现:30Hz 限定同步速率,PlayerMove/PlayerFacing/AttackStart 走 pending 统一处理
+- 攻击命中判定已接入:hit_cb 调 `room.get_attack_hits` 取命中列表,遍历调 `room.apply_hurt` 设 hurt 状态(统一处理玩家和木桩)
+- ATTACK_CONFIG 等攻击配置已从 web_server.py 迁回 game_room.py(配置属 game 层)
 - handler 已拆到 game/handlers/,web_server.py 只管网络层
 - 热更已实现:控制台 `reload()` 命令,reload 5 模块+重新注册 handler
 - 控制台已拆分到 tools/console.py
+- 待办:cleanup_player 接入 timer_mgr.cancel 取消断连玩家未完成的攻击定时器
+- 待办:客户端改造(下次):StateMirror 加 entities 镜像,DeadManScene 动态创建木桩,Role.gd 支持 entity_type 分发
