@@ -70,6 +70,16 @@ message AttackHit {
   string attacker_id = 1;    // 攻击者ID
   repeated string hit_list = 2; // 命中目标ID列表
   int32 atk_id = 3;          // 攻击ID
+  int32 hurt_duration = 4;   // 受击硬直时长(毫秒),客户端当前不读,留作未来预演/调试用
+  repeated float hit_pos = 5; // 命中坐标 x,y
+}
+
+// 受击结束
+message HurtEnd {
+  string attacker_id = 1;
+  string hurt_id = 2;
+  int32 atk_id = 3;
+  int32 hurt_duration = 4;
 }
 
 // 攻击结束
@@ -101,5 +111,6 @@ message GameMessage {
     AttackStart attack_start = 8;     // 攻击开始(双端:C2S 发起 / S2C 广播)
     AttackHit attack_hit = 9;         // 攻击命中(S2C 广播)
     AttackEnd attack_end = 10;        // 攻击结束(S2C 广播)
+    HurtEnd hurt_end = 11;            // 受击结束(S2C 广播)
   }
 }

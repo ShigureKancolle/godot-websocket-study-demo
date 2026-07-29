@@ -62,7 +62,13 @@
             "direction": "S2C",
             "category": "event",
             "state_affecting": true,
-            "comment": "服务端判定帧到时调 apply_hurt 设被命中者 state=hurt(统一 Entity 模型:hit_list 可同时含玩家和木桩,apply_hurt 内部查能力配置),然后广播命中列表给所有人。客户端遍历 hit_list 逐个设 hurt 状态(不处理 attacker_id,攻击者 state 由 AttackStart 设为 attacking)。字段:attacker_id, hit_list, atk_id"
+            "comment": "服务端判定帧到时调 apply_hurt 设被命中者 state=hurt(统一 Entity 模型:hit_list 可同时含玩家和木桩,apply_hurt 内部查能力配置),同时为每个被命中者启动 666ms hurt 定时器(连击会重置),然后广播命中列表给所有人。客户端遍历 hit_list 逐个设 hurt 状态(不处理 attacker_id,攻击者 state 由 AttackStart 设为 attacking),收到 hurt 的 HurtState 会播 hurt 动画。字段:attacker_id, hit_list, atk_id, hurt_duration"
+        },
+        "HurtEnd": {
+            "direction": "S2C",
+            "category": "snapshot",
+            "state_affecting": true,
+            "comment": "服务端 hurt 定时器到期时调 apply_hurt_end 设被命中者 state=idle 后广播给所有人,客户端据此切回 IdleState(纯服务端权威恢复,客户端不主动计时)。连击场景下 hurt 定时器被 cancel+restart,不会发 HurtEnd。字段:attacker_id, hurt_id, atk_id, hurt_duration"
         },
         "AttackEnd": {
             "direction": "S2C",

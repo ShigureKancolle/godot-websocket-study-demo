@@ -94,7 +94,7 @@ func _process(_delta: float) -> void:
 	# state=="attacking" 时禁止移动/朝向/再次攻击(和服务端 apply_attack_start 设的 state 对齐)
 	# 之前用 "attack" 是误称,服务端实际设的是 "attacking"
 	if my_state == "attacking":
-		print("当前正在attacking,不发移动和朝向消息")
+		# print("当前正在attacking,不发移动和朝向消息")
 		return
 
 	if intent.attack_pressed:

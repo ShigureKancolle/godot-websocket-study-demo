@@ -6,34 +6,6 @@
 [ext_resource type="Texture2D" uid="uid://bjvmevbs1bcn6" path="res://prefab/role/anim/player/Player_Run.png" id="3_erqgd"]
 [ext_resource type="Texture2D" uid="uid://bs75r2uwqkv7n" path="res://prefab/role/anim/player/Player_Hurt.png" id="3_orqnj"]
 
-[sub_resource type="AtlasTexture" id="AtlasTexture_xoher"]
-atlas = ExtResource("2_s76sp")
-region = Rect2(0, 0, 96, 96)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_ufs7n"]
-atlas = ExtResource("2_s76sp")
-region = Rect2(96, 0, 96, 96)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_3k6xk"]
-atlas = ExtResource("2_s76sp")
-region = Rect2(192, 0, 96, 96)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_6kb1t"]
-atlas = ExtResource("2_s76sp")
-region = Rect2(288, 0, 96, 96)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_6xj3k"]
-atlas = ExtResource("2_s76sp")
-region = Rect2(384, 0, 96, 96)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_a3qjk"]
-atlas = ExtResource("2_s76sp")
-region = Rect2(480, 0, 96, 96)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_vh5lr"]
-atlas = ExtResource("2_s76sp")
-region = Rect2(576, 0, 96, 96)
-
 [sub_resource type="AtlasTexture" id="AtlasTexture_jv23c"]
 atlas = ExtResource("3_orqnj")
 region = Rect2(0, 0, 96, 96)
@@ -65,34 +37,6 @@ region = Rect2(576, 0, 96, 96)
 [sub_resource type="AtlasTexture" id="AtlasTexture_jjwbd"]
 atlas = ExtResource("3_orqnj")
 region = Rect2(672, 0, 96, 96)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_erqgd"]
-atlas = ExtResource("2_rmt74")
-region = Rect2(0, 0, 96, 96)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_s76sp"]
-atlas = ExtResource("2_rmt74")
-region = Rect2(96, 0, 96, 96)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_orqnj"]
-atlas = ExtResource("2_rmt74")
-region = Rect2(192, 0, 96, 96)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_rrfiq"]
-atlas = ExtResource("2_rmt74")
-region = Rect2(288, 0, 96, 96)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_wdhfc"]
-atlas = ExtResource("2_rmt74")
-region = Rect2(384, 0, 96, 96)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_bxjbd"]
-atlas = ExtResource("2_rmt74")
-region = Rect2(480, 0, 96, 96)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_xpjq6"]
-atlas = ExtResource("2_rmt74")
-region = Rect2(576, 0, 96, 96)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_q66r7"]
 atlas = ExtResource("3_erqgd")
@@ -514,32 +458,6 @@ region = Rect2(448, 96, 64, 96)
 animations = [{
 "frames": [{
 "duration": 1.0,
-"texture": SubResource("AtlasTexture_xoher")
-}, {
-"duration": 1.0,
-"texture": SubResource("AtlasTexture_ufs7n")
-}, {
-"duration": 1.0,
-"texture": SubResource("AtlasTexture_3k6xk")
-}, {
-"duration": 1.0,
-"texture": SubResource("AtlasTexture_6kb1t")
-}, {
-"duration": 1.0,
-"texture": SubResource("AtlasTexture_6xj3k")
-}, {
-"duration": 1.0,
-"texture": SubResource("AtlasTexture_a3qjk")
-}, {
-"duration": 1.0,
-"texture": SubResource("AtlasTexture_vh5lr")
-}],
-"loop": false,
-"name": &"Down_Attack",
-"speed": 12.0
-}, {
-"frames": [{
-"duration": 1.0,
 "texture": SubResource("AtlasTexture_jv23c")
 }, {
 "duration": 1.0,
@@ -565,32 +483,6 @@ animations = [{
 }],
 "loop": false,
 "name": &"Down_Hurt",
-"speed": 12.0
-}, {
-"frames": [{
-"duration": 1.0,
-"texture": SubResource("AtlasTexture_erqgd")
-}, {
-"duration": 1.0,
-"texture": SubResource("AtlasTexture_s76sp")
-}, {
-"duration": 1.0,
-"texture": SubResource("AtlasTexture_orqnj")
-}, {
-"duration": 1.0,
-"texture": SubResource("AtlasTexture_rrfiq")
-}, {
-"duration": 1.0,
-"texture": SubResource("AtlasTexture_wdhfc")
-}, {
-"duration": 1.0,
-"texture": SubResource("AtlasTexture_bxjbd")
-}, {
-"duration": 1.0,
-"texture": SubResource("AtlasTexture_xpjq6")
-}],
-"loop": true,
-"name": &"Down_Idle",
 "speed": 12.0
 }, {
 "frames": [{
@@ -1050,7 +942,6 @@ script = ExtResource("1_script")
 [node name="Body" type="AnimatedSprite2D" parent="." unique_id=1743655513]
 sprite_frames = SubResource("SpriteFrames_wiexn")
 animation = &"Down_Hurt"
-autoplay = "Down_Idle"
 
 [node name="FacingArrow" type="Sprite2D" parent="." unique_id=1709146306]
 position = Vector2(35, 0)

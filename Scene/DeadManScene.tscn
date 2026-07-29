@@ -27,6 +27,10 @@ patch_margin_top = 36
 patch_margin_right = 14
 patch_margin_bottom = 37
 
+[node name="EntityLayer" type="Node2D" parent="." unique_id=1317972687]
+
+[node name="EffectLayer" type="Node2D" parent="." unique_id=2085122232]
+
 [node name="E_Back" type="Button" parent="." unique_id=419275881]
 offset_left = 1091.0
 offset_top = 20.0

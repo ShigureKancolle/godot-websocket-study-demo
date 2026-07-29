@@ -161,6 +161,7 @@ func register_handlers() -> void:
 	mb.onproto("game.AttackStart", _on_attack_start)
 	mb.onproto("game.AttackEnd", _on_attack_end)
 	mb.onproto("game.AttackHit", _on_attack_hit)
+	mb.onproto("game.HurtEnd", _on_hurt_end) 
 
 
 ## 收到 GameState 快照:整体替换本地镜像
@@ -356,3 +357,17 @@ func _on_attack_hit(data: Dictionary) -> void:
 		# 服务端 apply_hurt 设 state="hurt",客户端镜像同步
 		entity.state = "hurt"
 		entity_updated.emit(entity)
+
+func _on_hurt_end(data: Dictionary) -> void:
+	var eid: String = data.get("hurt_id", "")
+	var _attacker_id: String = data.get("attacker_id", "")
+	var _atk_id: int = data.get("atk_id", 0)
+	var _hurt_duration: int = data.get("hurt_duration", 0)
+
+	var entity: ClientEntityInfo = _entities.get(eid)
+	if entity == null:
+		return
+
+	# 服务端 apply_hurt_end 设 state="idle",客户端镜像同步
+	entity.state = "idle"	
+	entity_updated.emit(entity)

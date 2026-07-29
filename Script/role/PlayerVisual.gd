@@ -157,6 +157,11 @@ func play_anim(anim_name: String) -> void:
 	# 缓存当前状态名,facing 变化时要用它拼新方向动画
 	_current_state = anim_name
 	_play_current()
+	
+func replay_cur_anim() -> void:
+	if _body == null:
+		return
+	_body.set_frame(0)
 
 
 ## 实际播放: 用 _facing_dir + _current_state 拼出动画名(如 "Down_Idle")

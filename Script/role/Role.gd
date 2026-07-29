@@ -135,7 +135,11 @@ func _setup_stake(info: ClientEntityInfo) -> void:
 	visual.name = "PlayerVisual"
 	add_child(visual)
 	visual.setup(info)
-	# 木桩不挂 AnimStateMachine(没有动画状态切换需求,简化)
+	# AnimStateMachine(没有动画状态切换需求,简化)
+	var anim_machine = preload("res://Script/statemachine/AnimState/AnimStateMachine.gd").new()
+	anim_machine.name = "AnimStateMachine"
+	add_child(anim_machine)
+	anim_machine.setup(info)
 	# 木桩不挂 LocalPlayerController(不被本地控制)
 	# 如果未来木桩需要 hurt 动画,通过 entity_updated 信号里的 state 字段驱动即可
 	# (StateMirror._on_attack_hit 会设 state="hurt" 并 emit entity_updated)

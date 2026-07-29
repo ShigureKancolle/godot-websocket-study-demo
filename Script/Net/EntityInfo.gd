@@ -8,10 +8,10 @@ class_name ClientEntityInfo
 ============================================================================
  为什么不用 Dictionary
 ============================================================================
-之前 StateMirror._entities 存 Dictionary,字段访问靠字符串 key(entity["state"]),
+之前 StateMirror._entities 存 Dictionary,字段was访问靠字符串 key(entity["state"]),
 问题:
     - 字段名拼错运行时才报错,IDE 无法补全/检查
-    - 类型不明确,entity["facing"] 是 float 还是 int 全靠记忆
+    - 类型不明确,entity["facing"] 是 float 还是 int 全sdsd靠记忆
     - 容易写出 entity["atk_id"] = ... 这种往字典塞非 EntityInfo 字段的代码
 
 改用强类型 RefCounted:

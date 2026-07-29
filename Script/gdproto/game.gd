@@ -1334,6 +1334,17 @@ class AttackHit:
 		service.field = __atk_id
 		data[__atk_id.tag] = service
 		
+		__hurt_duration = PBField.new("hurt_duration", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 4, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
+		service = PBServiceField.new()
+		service.field = __hurt_duration
+		data[__hurt_duration.tag] = service
+		
+		var __hit_pos_default: Array[float] = []
+		__hit_pos = PBField.new("hit_pos", PB_DATA_TYPE.FLOAT, PB_RULE.REPEATED, 5, true, __hit_pos_default)
+		service = PBServiceField.new()
+		service.field = __hit_pos
+		data[__hit_pos.tag] = service
+		
 	var data = {}
 	
 	var __attacker_id: PBField
@@ -1370,6 +1381,128 @@ class AttackHit:
 		__atk_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
 	func set_atk_id(value : int) -> void:
 		__atk_id.value = value
+	
+	var __hurt_duration: PBField
+	func has_hurt_duration() -> bool:
+		if __hurt_duration.value != null:
+			return true
+		return false
+	func get_hurt_duration() -> int:
+		return __hurt_duration.value
+	func clear_hurt_duration() -> void:
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_duration.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
+	func set_hurt_duration(value : int) -> void:
+		__hurt_duration.value = value
+	
+	var __hit_pos: PBField
+	func get_hit_pos() -> Array[float]:
+		return __hit_pos.value
+	func clear_hit_pos() -> void:
+		data[5].state = PB_SERVICE_STATE.UNFILLED
+		__hit_pos.value.clear()
+	func add_hit_pos(value : float) -> void:
+		__hit_pos.value.append(value)
+	
+	func _to_string() -> String:
+		return PBPacker.message_to_string(data)
+		
+	func to_bytes() -> PackedByteArray:
+		return PBPacker.pack_message(data)
+		
+	func from_bytes(bytes : PackedByteArray, offset : int = 0, limit : int = -1) -> int:
+		var cur_limit = bytes.size()
+		if limit != -1:
+			cur_limit = limit
+		var result = PBPacker.unpack_message(data, bytes, offset, cur_limit)
+		if result == cur_limit:
+			if PBPacker.check_required(data):
+				if limit == -1:
+					return PB_ERR.NO_ERRORS
+			else:
+				return PB_ERR.REQUIRED_FIELDS
+		elif limit == -1 && result > 0:
+			return PB_ERR.PARSE_INCOMPLETE
+		return result
+	
+class HurtEnd:
+	extends RefCounted
+	func _init():
+		var service
+		
+		__attacker_id = PBField.new("attacker_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
+		service = PBServiceField.new()
+		service.field = __attacker_id
+		data[__attacker_id.tag] = service
+		
+		__hurt_id = PBField.new("hurt_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 2, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
+		service = PBServiceField.new()
+		service.field = __hurt_id
+		data[__hurt_id.tag] = service
+		
+		__atk_id = PBField.new("atk_id", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 3, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
+		service = PBServiceField.new()
+		service.field = __atk_id
+		data[__atk_id.tag] = service
+		
+		__hurt_duration = PBField.new("hurt_duration", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 4, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
+		service = PBServiceField.new()
+		service.field = __hurt_duration
+		data[__hurt_duration.tag] = service
+		
+	var data = {}
+	
+	var __attacker_id: PBField
+	func has_attacker_id() -> bool:
+		if __attacker_id.value != null:
+			return true
+		return false
+	func get_attacker_id() -> String:
+		return __attacker_id.value
+	func clear_attacker_id() -> void:
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__attacker_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
+	func set_attacker_id(value : String) -> void:
+		__attacker_id.value = value
+	
+	var __hurt_id: PBField
+	func has_hurt_id() -> bool:
+		if __hurt_id.value != null:
+			return true
+		return false
+	func get_hurt_id() -> String:
+		return __hurt_id.value
+	func clear_hurt_id() -> void:
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
+	func set_hurt_id(value : String) -> void:
+		__hurt_id.value = value
+	
+	var __atk_id: PBField
+	func has_atk_id() -> bool:
+		if __atk_id.value != null:
+			return true
+		return false
+	func get_atk_id() -> int:
+		return __atk_id.value
+	func clear_atk_id() -> void:
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__atk_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
+	func set_atk_id(value : int) -> void:
+		__atk_id.value = value
+	
+	var __hurt_duration: PBField
+	func has_hurt_duration() -> bool:
+		if __hurt_duration.value != null:
+			return true
+		return false
+	func get_hurt_duration() -> int:
+		return __hurt_duration.value
+	func clear_hurt_duration() -> void:
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_duration.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
+	func set_hurt_duration(value : int) -> void:
+		__hurt_duration.value = value
 	
 	func _to_string() -> String:
 		return PBPacker.message_to_string(data)
@@ -1613,6 +1746,12 @@ class GameMessage:
 		service.func_ref = Callable(self, "new_attack_end")
 		data[__attack_end.tag] = service
 		
+		__hurt_end = PBField.new("hurt_end", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 11, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		service = PBServiceField.new()
+		service.field = __hurt_end
+		service.func_ref = Callable(self, "new_hurt_end")
+		data[__hurt_end.tag] = service
+		
 	var data = {}
 	
 	enum MessageTypeCase {
@@ -1627,6 +1766,7 @@ class GameMessage:
 		ATTACK_START = 8,
 		ATTACK_HIT = 9,
 		ATTACK_END = 10,
+		HURT_END = 11,
 	}
 	var _message_type_case: int = 0
 
@@ -1659,6 +1799,8 @@ class GameMessage:
 		data[9].state = PB_SERVICE_STATE.UNFILLED
 		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
 		__player_join.value = PlayerJoin.new()
 		return __player_join.value
 	
@@ -1691,6 +1833,8 @@ class GameMessage:
 		data[9].state = PB_SERVICE_STATE.UNFILLED
 		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
 		__player_leave.value = PlayerLeave.new()
 		return __player_leave.value
 	
@@ -1723,6 +1867,8 @@ class GameMessage:
 		data[9].state = PB_SERVICE_STATE.UNFILLED
 		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = PlayerMove.new()
 		return __player_move.value
 	
@@ -1755,6 +1901,8 @@ class GameMessage:
 		data[9].state = PB_SERVICE_STATE.UNFILLED
 		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
 		__chat_message.value = ChatMessage.new()
 		return __chat_message.value
 	
@@ -1787,6 +1935,8 @@ class GameMessage:
 		data[9].state = PB_SERVICE_STATE.UNFILLED
 		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
 		__game_state.value = GameState.new()
 		return __game_state.value
 	
@@ -1819,6 +1969,8 @@ class GameMessage:
 		data[9].state = PB_SERVICE_STATE.UNFILLED
 		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
 		__heartbeat.value = Heartbeat.new()
 		return __heartbeat.value
 	
@@ -1851,6 +2003,8 @@ class GameMessage:
 		data[9].state = PB_SERVICE_STATE.UNFILLED
 		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
 		__player_facing.value = PlayerFacing.new()
 		return __player_facing.value
 	
@@ -1883,6 +2037,8 @@ class GameMessage:
 		data[9].state = PB_SERVICE_STATE.UNFILLED
 		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
 		__attack_start.value = AttackStart.new()
 		return __attack_start.value
 	
@@ -1915,6 +2071,8 @@ class GameMessage:
 		_message_type_case = 9
 		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
 		__attack_hit.value = AttackHit.new()
 		return __attack_hit.value
 	
@@ -1947,8 +2105,44 @@ class GameMessage:
 		data[9].state = PB_SERVICE_STATE.UNFILLED
 		data[10].state = PB_SERVICE_STATE.FILLED
 		_message_type_case = 10
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
 		__attack_end.value = AttackEnd.new()
 		return __attack_end.value
+	
+	var __hurt_end: PBField
+	func has_hurt_end() -> bool:
+		return data[11].state == PB_SERVICE_STATE.FILLED
+	func get_hurt_end() -> HurtEnd:
+		return __hurt_end.value
+	func clear_hurt_end() -> void:
+		data[11].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_hurt_end() -> HurtEnd:
+		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__chat_message.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__game_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[5].state = PB_SERVICE_STATE.UNFILLED
+		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
+		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[8].state = PB_SERVICE_STATE.UNFILLED
+		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[9].state = PB_SERVICE_STATE.UNFILLED
+		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[10].state = PB_SERVICE_STATE.UNFILLED
+		data[11].state = PB_SERVICE_STATE.FILLED
+		_message_type_case = 11
+		__hurt_end.value = HurtEnd.new()
+		return __hurt_end.value
 	
 	func get_message_type_case() -> int:
 		return _message_type_case

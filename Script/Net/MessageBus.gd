@@ -285,6 +285,7 @@ func dispatch(data: PackedByteArray, ctx: MessageContext = null) -> bool:
 			if service.state != game_pb.PB_SERVICE_STATE.FILLED:
 				continue
 			var field_name: String = service.field.name
+			print("package: ", package, "  field_name: ", field_name)
 			if MessageBus._field_to_name.has(package + "." + field_name):
 				matched.append(service)
 

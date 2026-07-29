@@ -45,3 +45,7 @@ func _exit_state() -> void:
 ## 每帧调用(由 StateMachineBase._process 转发)
 func _process(_delta: float) -> void:
 	pass
+
+## 重新进入状态时调用(由 StateMachineBase.change_state 触发)
+func _reenter_state() -> void:
+	pass

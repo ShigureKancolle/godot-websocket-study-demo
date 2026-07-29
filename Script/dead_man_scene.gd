@@ -19,10 +19,14 @@ const RoleScript = preload("res://Script/role/Role.gd")
 # 所有可交互物体(玩家+木桩)都在这一张表里,和服务端 _entities 对齐
 # 用它快速查找某个 entity_id 对应的 Role,收到 entity_updated 信号时更新它
 var _entities: Dictionary = {}
+var _entity_layer: Node2D = null  # 所有 Role 的父节点,方便统一管理
+var _effect_layer: Node2D = null  # 所有 Effect 的父节点,方便统一管理
 
 
 func _ready() -> void:
 	$E_Back.connect("pressed", _on_back_pressed)
+	_entity_layer = $EntityLayer
+	_effect_layer = $EffectLayer
 
 	# 连接 StateMirror 的三个信号
 	# 信号定义见 StateMirror.gd
@@ -84,7 +88,7 @@ func _on_entity_removed(entity_id: String) -> void:
 func _create_role(info: ClientEntityInfo) -> void:
 	var role = RoleScript.new()
 	role.setup(info)
-	add_child(role)
+	_entity_layer.add_child(role)
 	_entities[info.entity_id] = role
 
 

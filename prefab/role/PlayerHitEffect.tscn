@@ -1,0 +1,45 @@
+[gd_scene format=3 uid="uid://dv6r7kw2dbscw"]
+
+[ext_resource type="Texture2D" uid="uid://cclbqfjsy6l30" path="res://prefab/CommonTexture/VFX/SwordSlash.png" id="1_ghy6k"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_bjrpt"]
+atlas = ExtResource("1_ghy6k")
+region = Rect2(0, 0, 96, 96)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_p7hkd"]
+atlas = ExtResource("1_ghy6k")
+region = Rect2(96, 0, 96, 96)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_oxdc2"]
+atlas = ExtResource("1_ghy6k")
+region = Rect2(192, 0, 96, 96)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_nl0um"]
+atlas = ExtResource("1_ghy6k")
+region = Rect2(288, 0, 96, 96)
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_766a6"]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_bjrpt")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_p7hkd")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_oxdc2")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_nl0um")
+}],
+"loop": false,
+"name": &"default",
+"speed": 12.0
+}]
+
+[node name="PlayerHitEffect" type="Node2D" unique_id=1712290169]
+
+[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="." unique_id=765101893]
+sprite_frames = SubResource("SpriteFrames_766a6")
+autoplay = "default"

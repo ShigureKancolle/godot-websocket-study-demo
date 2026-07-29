@@ -1299,25 +1299,30 @@ class AttackHit:
 	extends RefCounted
 	func _init():
 		var service
-		
+
 		__attacker_id = PBField.new("attacker_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
 		service = PBServiceField.new()
 		service.field = __attacker_id
 		data[__attacker_id.tag] = service
-		
+
 		var __hit_list_default: Array[String] = []
 		__hit_list = PBField.new("hit_list", PB_DATA_TYPE.STRING, PB_RULE.REPEATED, 2, true, __hit_list_default)
 		service = PBServiceField.new()
 		service.field = __hit_list
 		data[__hit_list.tag] = service
-		
+
 		__atk_id = PBField.new("atk_id", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 3, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
 		service = PBServiceField.new()
 		service.field = __atk_id
 		data[__atk_id.tag] = service
-		
+
+		__hurt_duration = PBField.new("hurt_duration", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 4, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
+		service = PBServiceField.new()
+		service.field = __hurt_duration
+		data[__hurt_duration.tag] = service
+
 	var data = {}
-	
+
 	var __attacker_id: PBField
 	func has_attacker_id() -> bool:
 		if __attacker_id.value != null:
@@ -1330,7 +1335,7 @@ class AttackHit:
 		__attacker_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
 	func set_attacker_id(value : String) -> void:
 		__attacker_id.value = value
-	
+
 	var __hit_list: PBField
 	func get_hit_list() -> Array[String]:
 		return __hit_list.value
@@ -1339,7 +1344,7 @@ class AttackHit:
 		__hit_list.value.clear()
 	func add_hit_list(value : String) -> void:
 		__hit_list.value.append(value)
-	
+
 	var __atk_id: PBField
 	func has_atk_id() -> bool:
 		if __atk_id.value != null:
@@ -1352,7 +1357,20 @@ class AttackHit:
 		__atk_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
 	func set_atk_id(value : int) -> void:
 		__atk_id.value = value
-	
+
+	var __hurt_duration: PBField
+	func has_hurt_duration() -> bool:
+		if __hurt_duration.value != null:
+			return true
+		return false
+	func get_hurt_duration() -> int:
+		return __hurt_duration.value
+	func clear_hurt_duration() -> void:
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_duration.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
+	func set_hurt_duration(value : int) -> void:
+		__hurt_duration.value = value
+
 	func _to_string() -> String:
 		return PBPacker.message_to_string(data)
 		

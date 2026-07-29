@@ -60,6 +60,7 @@ func change_state(state_name: String) -> void:
 		return
 	var new_state: StateBase = _states[state_name]
 	if current_state == new_state:
+		current_state._reenter_state()  # 相同状态重新进入,触发 _reenter_state 回调
 		return  # 相同状态不重复进入
 	if current_state != null:
 		current_state._exit_state()
