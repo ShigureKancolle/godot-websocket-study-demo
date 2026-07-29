@@ -1,24 +1,229 @@
 extends Node
 
+var mycell_scroll_list: TiledCellList = null
 var cell_patch: Dictionary = {}
-@onready var _tile_map_layer: TileMapLayer = $TileMapLayer
-
-var target_size: int
-var origin_x: int
-var origin_y: int
-var seed_gx: int
-var seed_gy: int
-var terrain: int
+var last_draw_tile_pos = null
+var SAND_ATLAS = [
+	Vector2i(5, 10), Vector2i(6, 10)
+]
+@onready var _tile_map_layer: TileMapLayer = $Grass
 
 # 鼠标悬停时显示当前 cell 坐标的 Label（懒创建）
 # 加在 TileMapLayer 下，位置跟随世界，相机移动也会跟着走
 var _hover_label: Label
 
+# ===========================================================================
+# 经典样式展示
+# ===========================================================================
+# 在 TileMapLayer 上画出几种经典的草地-沙地过渡形态，验证贴图配置
+# 每个样式 = 1 个中心草地 block + 周围按 form8 放沙地 block
+var _v3_grass_forms: Dictionary = {}
+var _v3_alt_cache: Dictionary = {}
+const _BLOCK_SIZE: int = 2
+
+# Debug 工具：tile 坐标 → TiledCell 映射，鼠标悬停时查表显示
+var _tile_info_map: Dictionary = {}
+
 func _ready() -> void:
-	$DebugUI/DebugDrawButton.pressed.connect(_create_seed)
-	$DebugUI/DebugDrawButton2.pressed.connect(_pre)
-	$DebugUI/DebugDrawButton3.pressed.connect(_next)
+	mycell_scroll_list = $DebugUI/CellSelectScroll2
+	$DebugUI/DebugDrawButton.pressed.connect(_on_debug_draw)
 	_ensure_hover_label()
+	# 启动时直接展示经典样式（草地+沙地过渡贴图）
+	_show_v3_samples()
+
+
+## 展示经典草地-沙地过渡样式
+## 每个样式占 6×6 tile（3×3 block），水平间隔 4 tile
+func _show_v3_samples() -> void:
+	_tile_map_layer.clear()
+	cell_patch = {}
+	_tile_info_map.clear()
+
+	# 初始化配置（复用 InfiniteTileMap 的 static 函数）
+	var tiled: Dictionary = InfiniteTileMap._init_grass_forms_tiled()
+	_v3_grass_forms = InfiniteTileMap._init_grass_forms(tiled)
+
+	# 经典 form8 列表（旋转归一化后的值）
+	# 0=全草地, 1=单边, 2=单角, 5=两边L, 10=两角对, 21=三边, 42=三角, 85=四边, 170=四角
+	var samples: Array = [0, 1, 2, 5, 10, 21, 42, 85, 170]
+
+	# 每个样式水平排列，间距 10 tile（5 block）
+	var sample_stride_tile: int = 10
+
+	for i in range(samples.size()):
+		var form8: int = samples[i]
+		var base_tile_x: int = i * sample_stride_tile
+		var base_tile_y: int = 0
+		_draw_sample_form(form8, base_tile_x, base_tile_y)
+
+	# 旋转测试：9 种 form 水平排列，4 行对应旋转 0/1/2/3 次
+	_show_rotation_test()
+
+
+## 旋转测试：每行一个旋转角度（0/1/2/3），9 种 form 水平排列
+## 布局和 samples 一样，方便对比
+func _show_rotation_test() -> void:
+	var forms: Array = [0, 1, 2, 5, 10, 21, 42, 85, 170]
+	var sand_atlas: Vector2i = InfiniteTileMap._TERRAIN_ATLAS[ChunkGenerator.TerrainType.SAND]
+
+	# 起始 y（在 samples 下方留空 1 行）
+	var start_y: int = 10
+	# 每行间距和 samples 一样 10 tile
+	var row_stride: int = 10
+
+	var offsets: Array = [
+		Vector2i(0, -1), Vector2i(1, -1), Vector2i(1, 0), Vector2i(1, 1),
+		Vector2i(0, 1), Vector2i(-1, 1), Vector2i(-1, 0), Vector2i(-1, -1),
+	]
+
+	for row in range(4):  # 4 行对应 0/1/2/3 次旋转
+		var rotations: int = row
+		for col in range(forms.size()):
+			var base_form: int = forms[col]
+			var mtc_base: MyTiledCell = _v3_grass_forms.get(base_form, null)
+			if mtc_base == null:
+				continue
+
+			var mtc: MyTiledCell = mtc_base
+			if rotations > 0:
+				mtc = InfiniteTileMap._rotate_my_tiled_cell(mtc_base, rotations)
+
+			# 中心草地 block 的左上角 tile 坐标（和 samples 一样的水平间距）
+			var bx: int = col * 5  # 10 tile / 2 = 5 block 间距
+			var by: int = start_y + row * row_stride
+
+			# 1. 画周围沙地 block：根据旋转后的 form8
+			var form8: int = base_form
+			for _i in range(rotations):
+				form8 = InfiniteTileMap._rotate_form8_cw(form8)
+
+			for i in range(8):
+				if form8 & (1 << i):
+					var sbx: int = bx + offsets[i].x
+					var sby: int = by + offsets[i].y
+					for dy in _BLOCK_SIZE:
+						for dx in _BLOCK_SIZE:
+							var cell_pos: Vector2i = Vector2i(sbx * _BLOCK_SIZE + dx, sby * _BLOCK_SIZE + dy)
+							_tile_map_layer.set_cell(cell_pos, 0, sand_atlas)
+							_tile_info_map[cell_pos] = TiledCell.new(sand_atlas, 0, 0)
+
+			# 2. 画中心草地 block 的 4 个 tile
+			for local_idx in range(4):
+				var local_bx: int = local_idx % 2
+				var local_by: int = local_idx / 2
+				var wx: int = bx * _BLOCK_SIZE + local_bx
+				var wy: int = by * _BLOCK_SIZE + local_by
+
+				var candidates: Array = mtc.get_candidates(local_idx)
+				var tc: TiledCell = InfiniteTileMap._pick_tiled_cell(candidates, wx, wy)
+
+				var alt: int = _get_or_create_alt_tile(tc.assets_pos, tc.dir)
+				var cell_pos2: Vector2i = Vector2i(wx, wy)
+				_tile_map_layer.set_cell(cell_pos2, 0, tc.assets_pos, alt)
+				_tile_info_map[cell_pos2] = tc
+
+
+## 画一个经典样式
+## form8: 中心草地 block 的 8 邻居掩码
+## base_tile_x, base_tile_y: 中心草地 block 左上角 tile 的世界坐标
+func _draw_sample_form(form8: int, base_tile_x: int, base_tile_y: int) -> void:
+	var bx: int = base_tile_x / _BLOCK_SIZE
+	var by: int = base_tile_y / _BLOCK_SIZE
+
+	# 1. 放置周围的沙地 block（根据 form8 的 bit）
+	# 8 邻居偏移（顺时针：上、右上、右、右下、下、左下、左、左上）
+	var offsets: Array = [
+		Vector2i(0, -1), Vector2i(1, -1), Vector2i(1, 0), Vector2i(1, 1),
+		Vector2i(0, 1), Vector2i(-1, 1), Vector2i(-1, 0), Vector2i(-1, -1),
+	]
+	var sand_atlas: Vector2i = InfiniteTileMap._TERRAIN_ATLAS[ChunkGenerator.TerrainType.SAND]
+	for i in range(8):
+		if form8 & (1 << i):
+			var sbx: int = bx + offsets[i].x
+			var sby: int = by + offsets[i].y
+			for dy in _BLOCK_SIZE:
+				for dx in _BLOCK_SIZE:
+					var cell_pos: Vector2i = Vector2i(sbx * _BLOCK_SIZE + dx, sby * _BLOCK_SIZE + dy)
+					_tile_map_layer.set_cell(cell_pos, 0, sand_atlas)
+					# 沙地没有走 TiledCell 流程，记录一个简易信息便于 debug
+					_tile_info_map[cell_pos] = TiledCell.new(sand_atlas, 0, 0)
+
+	# 2. 放置中心草地 block（用渲染逻辑算贴图）
+	# 算归一化
+	var norm: Dictionary = InfiniteTileMap._normalize_form8(form8)
+	var base_form: int = norm.form
+	var rotations: int = norm.rotations
+
+	# 查表（先查 8 邻居，没找到退化到 4 正方向）
+	var mtc: MyTiledCell = _v3_grass_forms.get(base_form, null)
+	if mtc == null:
+		var form4: int = form8 & 0b01010101
+		var norm4: Dictionary = InfiniteTileMap._normalize_form8(form4)
+		mtc = _v3_grass_forms.get(norm4.form, null)
+		rotations = norm4.rotations
+	if mtc == null:
+		mtc = _v3_grass_forms.get(0, null)
+		rotations = 0
+	if mtc == null:
+		return
+
+	# 旋转 MyTiledCell
+	# 归一化时 form8 顺时针转 N 次得到 min_form，mtc 需顺时针转 (4-N) 次回到原方向
+	if rotations > 0:
+		mtc = InfiniteTileMap._rotate_my_tiled_cell(mtc, (4 - rotations) % 4)
+
+	# 画 4 个 tile
+	for local_idx in range(4):
+		# 和 InfiniteTileMap 保持一致：local_idx = local_bx + local_by * 2
+		# 0=TL, 1=TR, 2=BL, 3=BR
+		var local_bx: int = local_idx % 2
+		var local_by: int = local_idx / 2
+		var wx: int = bx * _BLOCK_SIZE + local_bx
+		var wy: int = by * _BLOCK_SIZE + local_by
+
+		var candidates: Array = mtc.get_candidates(local_idx)
+		var tc: TiledCell = InfiniteTileMap._pick_tiled_cell(candidates, wx, wy)
+
+		var alt: int = _get_or_create_alt_tile(tc.assets_pos, tc.dir)
+		var cell_pos2: Vector2i = Vector2i(wx, wy)
+		_tile_map_layer.set_cell(cell_pos2, 0, tc.assets_pos, alt)
+		_tile_info_map[cell_pos2] = tc
+
+
+## 获取或创建 alternative_tile（旋转变体）
+## 和 InfiniteTileMap._get_or_create_alt_tile 逻辑一致，但用 TestTiledSeed 自己的缓存
+func _get_or_create_alt_tile(atlas_coord: Vector2i, dir: int) -> int:
+	if dir == 0:
+		return 0
+	var key: Array = [atlas_coord.x, atlas_coord.y, dir]
+	if _v3_alt_cache.has(key):
+		return _v3_alt_cache[key]
+
+	var tile_set: TileSet = _tile_map_layer.tile_set
+	if tile_set == null:
+		return 0
+	var source: TileSetAtlasSource = tile_set.get_source(0)
+	if not source.has_tile(atlas_coord):
+		push_warning("[TestTiledSeed] atlas %s 处没有 base tile，无法创建旋转变体" % atlas_coord)
+		return 0
+	var alt_id: int = source.create_alternative_tile(atlas_coord)
+	if alt_id < 0:
+		return 0
+	var tile_data: TileData = source.get_tile_data(atlas_coord, alt_id)
+	if tile_data == null:
+		return 0
+	match dir:
+		1:  # 90° CW = flip_h + transpose
+			tile_data.flip_h = true
+			tile_data.transpose = true
+		2:  # 180° = flip_h + flip_v
+			tile_data.flip_h = true
+			tile_data.flip_v = true
+		3:  # 270° CW = flip_v + transpose
+			tile_data.flip_v = true
+			tile_data.transpose = true
+	_v3_alt_cache[key] = alt_id
+	return alt_id
 
 # 创建用于显示坐标的 Label 子节点（只创建一次）
 # 加阴影/对比色，保证在亮/暗地形上都能看清
@@ -35,203 +240,168 @@ func _ensure_hover_label() -> void:
 	# 默认水平居中，方便用偏移定位到 cell 中心
 	_hover_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_hover_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_hover_label.size = Vector2(60, 14)
+	_hover_label.size = Vector2(140, 56)
+	_hover_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	_hover_label.visible = false
 	# 加到 TileMapLayer 下，Label 的 position 直接用 map_to_local 的结果
 	_tile_map_layer.add_child(_hover_label)
 
-# 每帧检测鼠标所在的 cell；如果在 cell_patch 中就显示坐标，否则隐藏
-# 这是“按需查询”模式：默认画面完全干净，只有鼠标悬停的 cell 才显示一个坐标
+# 每帧检测鼠标所在的 cell；如果在 _tile_info_map 中就显示 TiledCell 信息
 func _process(_delta: float) -> void:
 	if _hover_label == null:
 		return
-	# 没有 patch 时直接隐藏，省得 Label 留在屏幕上
-	if cell_patch.is_empty():
+	# 没有 tile 信息时直接隐藏
+	if _tile_info_map.is_empty():
 		_hover_label.visible = false
 		return
 	# get_local_mouse_position 返回鼠标相对 TileMapLayer 本地的位置
-	# （已考虑相机变换和 TileMapLayer 自身的 transform）
 	var mouse_local: Vector2 = _tile_map_layer.get_local_mouse_position()
 	# local_to_map：把本地像素坐标转成 cell 坐标（整数 Vector2i）
 	var cell: Vector2i = _tile_map_layer.local_to_map(mouse_local)
-	if cell_patch.has(cell):
-		# map_to_local 返回 cell 中心在 TileMapLayer 本地坐标系下的位置
+	if _tile_info_map.has(cell):
+		var tc: TiledCell = _tile_info_map[cell]
 		var cell_center: Vector2 = _tile_map_layer.map_to_local(cell)
-		# Label size 是 60×14，居中放置就减去半个 size
+		# Label 显示在 cell 右下方，避免遮挡 tile 贴图
 		_hover_label.position = cell_center - _hover_label.size * 0.5
-		_hover_label.text = "(%d, %d)" % [cell.x, cell.y]
+		_hover_label.text = "(%d, %d)\natlas(%d,%d)\ndir=%d weight=%d" % [
+			cell.x, cell.y, tc.assets_pos.x, tc.assets_pos.y, tc.dir, tc.weight,
+		]
 		_hover_label.visible = true
 	else:
 		_hover_label.visible = false
+
+# 鼠标左键点击 TileMapLayer 时触发
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			# 复用 _process 里的坐标换算：本地像素 → cell 坐标
+			var mouse_local: Vector2 = _tile_map_layer.get_local_mouse_position()
+			var tile_pos: Vector2i = _tile_map_layer.local_to_map(mouse_local)
+
+			_on_tile_clicked(tile_pos)
+			# 标记事件已处理，防止继续冒泡到其他节点
+			get_viewport().set_input_as_handled()
+
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
+			# 复理右键点击事件
+			mycell_scroll_list.clear_cur_select()
+
+func _on_tile_clicked(tile_pos: Vector2i) -> void:
+	print ("点击 tile 坐标: ", tile_pos)
+	var tc: TiledCellList.tile_data = mycell_scroll_list.get_cur_select_tile_data()
+	if tc == null:
+		print("当前没有选中 tile 数据")
+		return
+	print("当前选中 tile 数据: ", tc.tiles[0].assets_pos)
+
+	# 设置 tile_map_layer 的 cell
+	# 把起始坐标归一到偶数
+	var wx: int = tile_pos.x / 2 * 2
+	var wy: int = tile_pos.y / 2 * 2
+	for i in range(4):
+		var cell_pos2: Vector2i = Vector2i(wx + i % 2, wy + i / 2)
+		_tile_map_layer.set_cell(cell_pos2, 0, tc.tiles[i].assets_pos)
+		_tile_info_map[cell_pos2] = tc.tiles[i]
 	
-func _create_seed():
-	cur_growth_step = 0
-	var result = _simulate_growth(0, 0, 1)
-	cell_patch = result[0]
-	target_size = result[1]
-	origin_x = result[2]
-	origin_y = result[3]
-	seed_gx = result[4]
-	seed_gy = result[5]
-	terrain = result[6]
-	_draw_patch()
+	last_draw_tile_pos = Vector2i(wx, wy)
 
-func _pre():
-	pass
+func _on_debug_draw() -> void:
+	# 自适应最近画上的8格tile资源
+	if last_draw_tile_pos == null:
+		return
 
-func _next():
-	if cur_growth_step >= MAX_GROWTH_STEPS:
-		cell_patch = _trim_patch(cell_patch, 1)
-	else:
-		cell_patch = _grow_patch(cell_patch, target_size, origin_x, origin_y, seed_gx, seed_gy, 1)
-		# 递增生长步数，对应 ChunkGenerator._simulate_growth 的 for step in range(MAX_GROWTH_STEPS)
-		# 每次 _grow_patch 用 cur_growth_step 算 hash，必须每步 +1 才能和 ChunkGenerator 一致
-		if cur_growth_step < MAX_GROWTH_STEPS:
-			cur_growth_step += 1
-	_draw_patch()
-
-func _draw_patch():
-	# 先清空整个 layer，否则 trim 删掉的 cell 仍会留在画面上看不到效果
-	# patch 最多十几格，整层 clear + 重画开销可忽略
-	_tile_map_layer.clear()
-	for pos in cell_patch.keys():
-		_tile_map_layer.set_cell(pos, 0, Vector2i(1, 10))
-
-
-# V2 配置常量
-var _seed = 123456
-const SEED_GRID_SIZE: int = 8       # 种子粗网格大小（每 8×8 tile 一个候选点）
-const SEED_CORE_SIZE: int = 2       # 种子核心大小（2×2 起步）
-const SEED_ACTIVATION_RATE: float = 0.35  # 种子激活概率
-const MAX_GROWTH_STEPS: int = 12    # 每个种子最多生长步数
-var cur_growth_step: int = 0
-const MAX_GROWTH_RADIUS: int = 2    # 生长范围（种子原点周围 ±2 tile，斑块最大 5×5）
-const GROW_PROB: float = 0.7        # 每步生长概率（hash < 此值才尝试生长）
-const SEED_MUTUAL_DIST: int = 7     # 异类种子最小距离 = 2*MAX_GROWTH_RADIUS + 3
-const MIN_PATCH_SIZE: int = 4       # 斑块最小格子数（= 2×2 核心）
-const MAX_PATCH_SIZE: int = 12      # 斑块最大格子数（5×5 区域内）
-
-func _simulate_growth(seed_gx: int, seed_gy: int, terrain: int):
-	var patch: Dictionary = {}
-	var origin_x: int = seed_gx * SEED_GRID_SIZE
-	var origin_y: int = seed_gy * SEED_GRID_SIZE
-
-	# 1. 放 2×2 核心
-	for dy in SEED_CORE_SIZE:
-		for dx in SEED_CORE_SIZE:
-			patch[Vector2i(origin_x + dx, origin_y + dy)] = terrain
-
-	# 2. hash 决定目标格子数
-	var size_hash: float = _hash_2d(_seed + 300, seed_gx, seed_gy)
-	var target_size: int = MIN_PATCH_SIZE + int(size_hash * float(MAX_PATCH_SIZE - MIN_PATCH_SIZE + 1))
-	if target_size > MAX_PATCH_SIZE:
-		target_size = MAX_PATCH_SIZE
-
-	return [patch, target_size, origin_x, origin_y, seed_gx, seed_gy, terrain]
-
-func _grow_patch(patch: Dictionary, target_size: int, origin_x: int, origin_y: int, seed_gx: int, seed_gy: int, terrain: int) -> Dictionary:
-	# 3. 生长到 target_size（不检查规则 B，直接放入）
-	print("生长  cur_growth_step  ", cur_growth_step)
-	if patch.size() >= target_size:
-		cur_growth_step = MAX_GROWTH_STEPS
-		return patch
-	# 3.1 hash 决定是否继续生长
-	var grow_hash: float = _hash_2d(_seed + 100, seed_gx * 1000 + cur_growth_step, seed_gy)
-	if grow_hash >= GROW_PROB:
-		return patch
-	# 3.2 收集候选位置（patch 边界 tile 的空邻居，在生长范围内）
-	var candidates: Array = []
-	for pos in patch.keys():
-		for ddy in range(-1, 2):
-			for ddx in range(-1, 2):
-				if ddx == 0 and ddy == 0:
-					continue
-				var npos: Vector2i = pos + Vector2i(ddx, ddy)
-				if patch.has(npos):
-					continue
-				if max(abs(npos.x - origin_x), abs(npos.y - origin_y)) > MAX_GROWTH_RADIUS:
-					continue
-				if not candidates.has(npos):
-					candidates.append(npos)
-	if candidates.is_empty():
-		cur_growth_step = MAX_GROWTH_STEPS
-		return patch
-	# 3.3 hash 决定选哪个候选，直接放入（不检查规则 B）
-	var pick_hash: float = _hash_2d(_seed + 200, seed_gx * 1000 + cur_growth_step, seed_gy)
-	var idx: int = int(pick_hash * float(candidates.size()))
-	if idx >= candidates.size():
-		idx = candidates.size() - 1
-	patch[candidates[idx]] = terrain
-	return patch
-
-func _trim_patch(patch: Dictionary, terrain: int) -> Dictionary:
-	# 4. 修剪：反复删除不满足规则 B 的 tile，直到所有剩余 tile 都满足	
-	var to_remove: Array = []
-	for pos in patch.keys():
-		if not _check_rule_b(pos, terrain, patch):
-			to_remove.append(pos)
-			
-	for pos in to_remove:
-		print("修剪  pos",  pos)
-		patch.erase(pos)			
-
-	return patch	
-
-
-
-static func _hash_2d(seed: int, x: int, y: int) -> float:
-	# 每个乘法后立即掩码，防止 64 位溢出在 GDScript/Python 表现不同
-	# GDScript int 是 64 位有符号，Python int 是任意精度
-	# & 0xFFFFFFFF 在双端都把结果规范到 [0, 2^32-1]
-	var h1: int = (seed * 73856093) & 0xFFFFFFFF
-	var h2: int = (x * 19349663) & 0xFFFFFFFF
-	var h3: int = (y * 83492791) & 0xFFFFFFFF
-	var h: int = (h1 ^ h2 ^ h3) & 0xFFFFFFFF
-	# MurmurHash3 finalizer：三轮 XOR-shift + 乘法，avalanche 打乱所有位
-	h ^= h >> 16
-	h = (h * 0x85EBCA6B) & 0xFFFFFFFF
-	h ^= h >> 13
-	h = (h * 0xC2B2AE35) & 0xFFFFFFFF
-	h ^= h >> 16
-	# 归一化到 [0, 1]。用 float(u32_max) 而非 4294967295.0 显得自解释
-	return float(h) / float(0xFFFFFFFF)	
-
-
-func _check_rule_b(pos: Vector2i, terrain: int, patch: Dictionary) -> bool:
-	# 统计 8 邻域中同类的位置
-	var same_neighbors: Array = []
-	const offsets: Array = [
-		Vector2i(0, -1), Vector2i(1, -1), Vector2i(1, 0), Vector2i(1, 1),
-		Vector2i(0, 1), Vector2i(-1, 1), Vector2i(-1, 0), Vector2i(-1, -1),
+	# 获取最近画上的 2×2 block 的 9个格子的tile左上角 坐标
+	var tile_pos: Vector2i = last_draw_tile_pos
+	var from8: Array = [		
+		Vector2i(0, -2),
+		Vector2i(2, -2),
+		Vector2i(2, 0),
+		Vector2i(2, 2),
+		Vector2i(0, 2),
+		Vector2i(-2, 2),
+		Vector2i(-2, 0),
+		Vector2i(-2, -2),
+		Vector2i.ZERO,
 	]
-	for off in offsets:
-		var npos: Vector2i = pos + off
-		if patch.has(npos):
-			same_neighbors.append(off)
 
-	# 规则 B：同类邻居 ≥3
-	if same_neighbors.size() < 3:
-		return false
+	var block_vector: Array = [
+		Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1), Vector2i(1, 1)
+	]
 
-	# 检查是否全在一条直线
-	# 横线：所有邻居的 y 偏移都为 0（只有左/右）
-	# 竖线：所有邻居的 x 偏移都为 0（只有上/下）
-	# 斜线1：所有邻居 dx == dy（左上+右下方向）
-	# 斜线2：所有邻居 dx == -dy（右上+左下方向）
-	var all_horizontal: bool = true
-	var all_vertical: bool = true
-	var all_diag_down: bool = true
-	var all_diag_up: bool = true
-	for off in same_neighbors:
-		if off.y != 0:
-			all_horizontal = false
-		if off.x != 0:
-			all_vertical = false
-		if off.x != off.y:
-			all_diag_down = false
-		if off.x != -off.y:
-			all_diag_up = false
-	# 全在一条直线 → 不满足规则 B
-	if all_horizontal or all_vertical or all_diag_down or all_diag_up:
-		return false
-	return true
+	var pos_list: Array = []
+	for i in from8:
+		pos_list.append(tile_pos + i)
+
+	# 根据这9个格子的tiledtype 刷新这9个格子的资源
+	for pos in pos_list:
+		var tc: TiledCell = _tile_info_map.get(pos, null)
+		if tc == null:
+			continue  
+		var is_sand: bool = (tc.assets_pos in SAND_ATLAS)
+		var block_type: int = ChunkGenerator.TerrainType.SAND if is_sand else ChunkGenerator.TerrainType.GRASS
+		if is_sand:
+			continue  # 沙地不需要刷新
+		# 计算周围8个格子的掩码
+		var from8_mask: int = 0
+		for i in from8:
+			if i == Vector2i.ZERO:
+				continue
+			var neighbor_pos: Vector2i = pos + i
+			var neighbor_tc: TiledCell = _tile_info_map.get(neighbor_pos, null)
+			if neighbor_tc == null:
+				continue
+			var neighbor_is_sand: bool = (neighbor_tc.assets_pos in SAND_ATLAS)
+			if neighbor_is_sand:
+				from8_mask |= (1 << from8.find(i))  # 计算掩码，正上方为bit0，顺时针
+
+		# 对from8_mask归一化，获得最小值
+		var result = null
+		var norm: Dictionary = InfiniteTileMap._normalize_form8(from8_mask)
+		var base_form: int = norm.form
+		var rotations: int = norm.rotations
+		var mtc: MyTiledCell = _v3_grass_forms.get(base_form, null)
+		if mtc == null:
+			# 退化：丢弃 4 个对角方向（bit 1/3/5/7），只保留 4 正方向（bit 0/2/4/6）
+			# 例如 form 7（上+右上+右）退化成 form 5（上+右），用 2 边贴图近似 3 邻居情况
+			var form4: int = from8_mask & 0b01010101
+			var norm4: Dictionary = InfiniteTileMap._normalize_form8(form4)
+			mtc = _v3_grass_forms.get(norm4.form, null)
+			rotations = norm4.rotations
+		if mtc == null:
+			# fallback 到全草地
+			mtc = _v3_grass_forms.get(0, null)
+			rotations = 0
+		if mtc == null:
+			result = [
+				{atlas = InfiniteTileMap._TERRAIN_ATLAS.get(ChunkGenerator.TerrainType.GRASS, Vector2i.ZERO), alt = 0},
+				{atlas = InfiniteTileMap._TERRAIN_ATLAS.get(ChunkGenerator.TerrainType.GRASS, Vector2i.ZERO), alt = 0},
+				{atlas = InfiniteTileMap._TERRAIN_ATLAS.get(ChunkGenerator.TerrainType.GRASS, Vector2i.ZERO), alt = 0},
+				{atlas = InfiniteTileMap._TERRAIN_ATLAS.get(ChunkGenerator.TerrainType.GRASS, Vector2i.ZERO), alt = 0}
+			]
+		
+		if result == null:
+			result = []
+			if rotations > 0:
+				mtc = InfiniteTileMap._rotate_my_tiled_cell(mtc, (4 - rotations) % 4)
+			# var bx = pos.x / _BLOCK_SIZE
+			# var by = pos.y / _BLOCK_SIZE
+			# var local_bx: int = pos.x - bx * _BLOCK_SIZE
+			# var local_by: int = pos.y - by * _BLOCK_SIZE
+			# var local_idx: int = local_bx + local_by * 2
+
+			# 从候选数组按权重抽取 TiledCell
+			
+			for i in range(4):
+				var local_idx: int = i
+				var candidates: Array = mtc.get_candidates(local_idx)
+				var _tc: TiledCell = InfiniteTileMap._pick_tiled_cell(candidates, pos.x, pos.y)
+
+				# 获取或创建 alternative_tile（dir>0 时动态创建旋转变体）
+				var alt: int = _get_or_create_alt_tile(_tc.assets_pos, _tc.dir)
+				result.append({atlas = _tc.assets_pos, alt = alt})
+
+		for i in range(4):
+			var cell_pos: Vector2i = pos + block_vector[i]
+			_tile_map_layer.set_cell(cell_pos, 0, result[i].atlas, result[i].alt)
+
+		

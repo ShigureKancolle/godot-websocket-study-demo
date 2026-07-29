@@ -2,9 +2,10 @@
 木桩场景
 多个玩家进来打木桩
 
-当前阶段: 只做玩家同步，木桩暂未实现
-    - 接 ClientStateMirror 的信号，管理 Role 的创建/更新/删除
+当前阶段: 玩家和木桩都由服务端权威驱动创建
+    - 接 ClientStateMirror 的信号，管理所有实体(玩家/木桩)的 Role 创建/更新/删除
     - 本地玩家点击移动，远程玩家位置由服务端同步
+    - 木桩由服务端在 main.py 注册,通过 GameState 快照下发到客户端动态创建
 '''
 
 extends Node2D
@@ -14,9 +15,10 @@ extends Node2D
 # 这里用脚本 new() 的方式，避免依赖 .tscn 文件的配置
 const RoleScript = preload("res://Script/role/Role.gd")
 
-# 玩家节点表: player_id -> Role 实例
-# 用来快速查找某个玩家对应的 Role，收到 player_updated 信号时更新它
-var _roles: Dictionary = {}
+# 实体节点表: entity_id -> Role 实例
+# 所有可交互物体(玩家+木桩)都在这一张表里,和服务端 _entities 对齐
+# 用它快速查找某个 entity_id 对应的 Role,收到 entity_updated 信号时更新它
+var _entities: Dictionary = {}
 
 
 func _ready() -> void:
@@ -26,59 +28,65 @@ func _ready() -> void:
 	# 信号定义见 StateMirror.gd
 	var mirror = ClientStateMirror.instance()
 	mirror.state_replaced.connect(_on_state_replaced)
-	mirror.player_updated.connect(_on_player_updated)
-	mirror.player_removed.connect(_on_player_removed)
+	mirror.entity_updated.connect(_on_entity_updated)
+	mirror.entity_removed.connect(_on_entity_removed)
 
 	# 如果 StateMirror 里已经有状态（比如进入场景前就收到了 GameState），
 	# 主动用现有状态刷一次——否则要等下一次 state_replaced 才显示
 	# 这种「进入场景时主动拉取一次」的写法很常见，避免信号漏接
-	if mirror.player_count() > 0:
-		_on_state_replaced(mirror.all_players())
+	if mirror.entity_count() > 0:
+		_on_state_replaced(mirror.all_entities())
 
 
 # StateMirror.state_replaced 信号: 全量替换
-# 服务端发 GameState 快照时触发，收到一份完整的玩家列表
-func _on_state_replaced(players: Array) -> void:
+# 服务端发 GameState 快照时触发，收到一份完整的实体列表(玩家+木桩)
+func _on_state_replaced(entities: Array) -> void:
 	# 先清空所有现有 Role（因为要整体替换）
-	for role in _roles.values():
+	for role in _entities.values():
 		role.queue_free()
-	_roles.clear()
+	_entities.clear()
 
 	# 用快照重建所有 Role
-	for info in players:
+	# entities 是 Array[ClientEntityInfo](强类型,不再传 dict)
+	# 每个 ClientEntityInfo 里有 entity_type 字段,Role.setup 会按类型挂不同组件
+	for info in entities:
 		_create_role(info)
 
 
-# StateMirror.player_updated 信号: 单个玩家变化
-# 可能是「新玩家加入」或「已有玩家移动」——两种情况统一处理:
+# StateMirror.entity_updated 信号: 单个实体变化
+# 可能是「新实体加入」或「已有实体移动/朝向/状态变化」——两种情况统一处理:
 #   - 不存在则创建
-#   - 已存在则更新坐标
-func _on_player_updated(info: Dictionary) -> void:
-	var pid: String = info.get("player_id", "")
-	if pid == "":
+#   - 已存在则更新坐标/朝向/动画状态
+func _on_entity_updated(info: ClientEntityInfo) -> void:
+	var eid: String = info.entity_id
+	if eid == "":
 		return
 
-	if _roles.has(pid):
-		# 已存在: 更新坐标
-		_roles[pid].on_player_updated(info)
+	if _entities.has(eid):
+		# 已存在: 更新坐标/朝向/动画状态
+		_entities[eid].on_entity_updated(info)
 	else:
-		# 不存在: 创建新 Role
+		# 不存在: 创建新 Role(可能是新玩家加入,或 GameState 乱序补单)
 		_create_role(info)
 
 
-# StateMirror.player_removed 信号: 玩家离开
-func _on_player_removed(player_id: String) -> void:
-	if _roles.has(player_id):
-		_roles[player_id].queue_free()
-		_roles.erase(player_id)
+# StateMirror.entity_removed 信号: 实体离开
+# 玩家断连会触发;木桩目前不会被移除(没有"木桩被破坏"逻辑)
+func _on_entity_removed(entity_id: String) -> void:
+	if _entities.has(entity_id):
+		_entities[entity_id].queue_free()
+		_entities.erase(entity_id)
 
 
 # 创建一个 Role 实例并加入场景
-func _create_role(info: Dictionary) -> void:
+# info 是 ClientEntityInfo(强类型),含 entity_id / entity_type / x / y / facing / state 等
+# Role.setup 会根据 entity_type 分发到 _setup_player / _setup_stake
+func _create_role(info: ClientEntityInfo) -> void:
 	var role = RoleScript.new()
 	role.setup(info)
 	add_child(role)
-	_roles[info.get("player_id", "")] = role
+	_entities[info.entity_id] = role
+
 
 func _on_back_pressed() -> void:
 	# 返回大厅

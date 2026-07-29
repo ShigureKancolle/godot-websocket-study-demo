@@ -32,7 +32,7 @@ _loaded_chunks 只记录"哪些 chunk 坐标已加载"，是个位置集合。
 
 未来集成到 DeadManScene 时：
     var infinite_map = $InfiniteTileMap
-    var local_role = _roles[ClientStateMirror.local_player_id()]
+    var local_role = _entities[ClientStateMirror.local_entity_id()]
     infinite_map.set_follow_target(local_role)
 
 ============================================================================
@@ -65,149 +65,54 @@ const _TERRAIN_ATLAS: Dictionary = {
 	ChunkGenerator.TerrainType.BRICK: Vector2i(9, 10),  # 砖地（占位）
 }
 
-# 过渡贴图映射表（8 邻居 256 形态）：[地形类型][form8(0-255)] → atlas coord
-# 这是 autotiling 的完整配置。8 邻居 2^8=256 种组合，配满工作量大。
-# 采用渐进式配置：用户按需添加，缺失时自动 fallback 到 16 边形态。
-#
-# ⚠️ 当前为空 Dictionary（占位）。用户配置方式：
-#   1. 先配 _TERRAIN_EDGE_ATLAS 的 16 种边形态（基础过渡，必配）
-#   2. 再按需在此表添加角形态（内角/外角细节，选配）
-#   3. 8 位掩码计算参考 TerrainTransition.compute_form_8
-#
-# fallback 链：_TERRAIN_TRANSITION_ATLAS_8 → _TERRAIN_EDGE_ATLAS → _TERRAIN_ATLAS
-const _TERRAIN_TRANSITION_ATLAS_8: Dictionary = {
-	# 8 邻居位掩码：上=1 右上=2 右=4 右下=8 下=16 左下=32 左=64 左上=128
-	ChunkGenerator.TerrainType.GRASS: {},
-	# 沙地过渡贴图
-	ChunkGenerator.TerrainType.SAND: {
-		# === 5×5 布局：4 角草地 + 4 边沙地过渡 + 中间 3×3 ===
-		#
-		# 4 边沙地（form8 掩码，沙地视角同类=沙地）：
-		# 上边 3 格（y=0 行，上边是草地）
-		28: Vector2i(4, 9),    # (1,0) 左上沙角：右+右下+下连
-		124: Vector2i(6, 9),   # (2,0) 上边中：右+右下+下+左下+左连
-		112: Vector2i(7, 9),   # (3,0) 右上沙角：下+左下+左连
-		# 下边 3 格（y=4 行，下边是草地）
-		7: Vector2i(4, 11),    # (1,4) 左下沙角：上+右上+右连
-		199: Vector2i(6, 11),  # (2,4) 下边中：上+右上+右+左+左上连
-		193: Vector2i(7, 11),  # (3,4) 右下沙角：上+左+左上连
-		# 左边 3 格（x=0 列，左边是草地）
-		30: Vector2i(4, 9),   # (0,1) 左上边中：上(草)+右上+右+右下+下连
-		31: Vector2i(4, 10),   # (0,2) 左边中：上+右上+右+右下+下连
-		15: Vector2i(4, 11),   # (0,3) 左下边中：上+右上+右+右下连
-		# 右边 3 格（x=4 列，右边是草地）
-		240: Vector2i(7, 9),  # (4,1) 右上边中：下+左下+左+左上连
-		241: Vector2i(7, 10),  # (4,2) 右边中：上+下+左下+左+左上连
-		225: Vector2i(7, 11),  # (4,3) 右下边中：上+左下+左+左上连
-		# 中间 3×3 纯沙地：form8=255 全连，fallback 到 form4 FULL(6,10)
-
-		# === 沙地内凹角（7 邻居沙 + 1 角草地）===
-		# 沙地视角同类=沙地。只有 1 个角是草地，其他 7 个方向都是沙地。
-		# form8 = 255 - 单角 bit
-		# 8 邻居位掩码：上=1 右上=2 右=4 右下=8 下=16 左下=32 左=64 左上=128
-		#
-		# 10,6 草在右下：缺右下(bit 3) → form8 = 255 - 8 = 247
-		247: Vector2i(10, 6),
-		# 11,6 草在左下：缺左下(bit 5) → form8 = 255 - 32 = 223
-		223: Vector2i(11, 6),
-		# 10,7 草在右上：缺右上(bit 1) → form8 = 255 - 2 = 253
-		253: Vector2i(10, 7),
-		# 11,7 草在左上：缺左上(bit 7) → form8 = 255 - 128 = 127
-		127: Vector2i(11, 7),
-	},
-	ChunkGenerator.TerrainType.DIRT: {},
-	ChunkGenerator.TerrainType.BRICK: {},
-}
-
-# 边形态贴图映射表（4 边 16 形态 fallback）：[地形类型][form4(0-15)] → atlas coord
-# 这是基础过渡配置，16 种形态覆盖：孤岛/单边/两边/三边/完整。
-# 当 _TERRAIN_TRANSITION_ATLAS_8 缺失某形态时，fallback 到此表。
-#
-# ⚠️ 当前是【占位值】——所有形态都指向纯地块贴图（无过渡效果）。
-# 用户需替换为真实过渡贴图。
-#
-# form4 顺序（4 位掩码，bit 0=上 1=右 2=下 3=左）：
-#   0=ISOLATED  1=TOP  2=RIGHT  3=TR    4=BOTTOM  5=TB   6=BR    7=TBR
-#   8=LEFT      9=TL   10=LR    11=TLR  12=BL     13=TBL  14=BLR  15=FULL
-const _TERRAIN_EDGE_ATLAS: Dictionary = {
-	ChunkGenerator.TerrainType.GRASS: {
-		0: Vector2i(1, 17), 1: Vector2i(1, 17), 2: Vector2i(1, 17), 3: Vector2i(1, 17),
-		4: Vector2i(1, 17), 5: Vector2i(1, 17), 6: Vector2i(1, 17), 7: Vector2i(1, 17),
-		8: Vector2i(1, 17), 9: Vector2i(1, 17), 10: Vector2i(1, 17), 11: Vector2i(1, 17),
-		12: Vector2i(1, 17), 13: Vector2i(1, 17), 14: Vector2i(1, 17), 15: Vector2i(1, 17),
-	},
-	ChunkGenerator.TerrainType.SAND: {
-		# 3×3 沙地过渡贴图映射到 form4（16 种边形态）
-		# 3×3 布局（周围草地，中间沙地）：
-		#   (4,9)=BR(6)  (6,9)=BLR(14)  (7,9)=BL(12)
-		#   (4,10)=TBR(7) (6,10)=FULL(15) (7,10)=TBL(13)
-		#   (4,11)=TR(3)  (6,11)=TLR(11)  (7,11)=TL(9)
-		# 缺失形态（细条/孤岛）fallback 到 FULL(6,10)
-		0: Vector2i(6, 10),   # ISOLATED → fallback FULL
-		1: Vector2i(6, 10),   # TOP → fallback（细条：只有上连）
-		2: Vector2i(6, 10),   # RIGHT → fallback（细条：只有右连）
-		3: Vector2i(4, 11),   # TR = 左下 corner（上连+右连）
-		4: Vector2i(6, 10),   # BOTTOM → fallback（细条：只有下连）
-		5: Vector2i(6, 10),   # TB → fallback（细条：上下连）
-		6: Vector2i(4, 9),    # BR = 左上 corner（下连+右连）
-		7: Vector2i(4, 10),   # TBR = 左 edge（上+下+右连，缺左）
-		8: Vector2i(6, 10),   # LEFT → fallback（细条：只有左连）
-		9: Vector2i(7, 11),   # TL = 右下 corner（上连+左连）
-		10: Vector2i(6, 10),  # LR → fallback（细条：左右连）
-		11: Vector2i(6, 11),  # TLR = 下 edge（上+左+右连，缺下）
-		12: Vector2i(7, 9),   # BL = 右上 corner（下连+左连）
-		13: Vector2i(7, 10),  # TBL = 右 edge（上+下+左连，缺右）
-		14: Vector2i(6, 9),   # BLR = 上 edge（下+左+右连，缺上）
-		15: Vector2i(6, 10),  # FULL = center（四周都连）
-	},
-	ChunkGenerator.TerrainType.DIRT: {
-		0: Vector2i(1, 10), 1: Vector2i(1, 10), 2: Vector2i(1, 10), 3: Vector2i(1, 10),
-		4: Vector2i(1, 10), 5: Vector2i(1, 10), 6: Vector2i(1, 10), 7: Vector2i(1, 10),
-		8: Vector2i(1, 10), 9: Vector2i(1, 10), 10: Vector2i(1, 10), 11: Vector2i(1, 10),
-		12: Vector2i(1, 10), 13: Vector2i(1, 10), 14: Vector2i(1, 10), 15: Vector2i(1, 10),
-	},
-	ChunkGenerator.TerrainType.BRICK: {
-		0: Vector2i(9, 10), 1: Vector2i(9, 10), 2: Vector2i(9, 10), 3: Vector2i(9, 10),
-		4: Vector2i(9, 10), 5: Vector2i(9, 10), 6: Vector2i(9, 10), 7: Vector2i(9, 10),
-		8: Vector2i(9, 10), 9: Vector2i(9, 10), 10: Vector2i(9, 10), 11: Vector2i(9, 10),
-		12: Vector2i(9, 10), 13: Vector2i(9, 10), 14: Vector2i(9, 10), 15: Vector2i(9, 10),
-	},
-}
-
-# 地形变体贴图表：[地形类型] → Array[{atlas: Vector2i, weight: int}]
-# 只对 form8=255（8邻居全同类，真正的内部纯地块）应用变体，打破视觉重复。
-# 边缘/角/内凹角等过渡贴图不变体（否则每种形态×每种变体配置量爆炸）。
-#
-# 选择算法：_pick_variant 用 hash(tile_x, tile_y) * 总权重 落区间选变体，
-# 确保同一 tile 永远是同一变体（移动时不跳变）。
-#
-# 权重是相对值，不需要加起来等于 100。比如 [70, 5, 5, 5, 5, 4, 3, 2, 1]
-# 和 [14, 1, 1, 1, 1, 1, 1, 1, 1] 效果相同（比例一致）。
-# 空数组 = 该地形不变体，用 _TERRAIN_ATLAS[T] 固定贴图。
-#
-# ⚠️ 当前所有变体 weight=1（均匀分布），用户自行调整实际权重。
-const _TERRAIN_VARIANTS: Dictionary = {
-	ChunkGenerator.TerrainType.GRASS: [
-		# 草地 9 个平替贴图。第一个是主变体（1,17），建议权重最高。
-		# 权重待用户配置，当前都是 1（均匀），改成实际权重后按比例分布。
-		{"atlas": Vector2i(1, 17), "weight": 300},
-		{"atlas": Vector2i(4, 20), "weight": 100},
-		{"atlas": Vector2i(5, 20), "weight": 100},
-		{"atlas": Vector2i(6, 8), "weight": 1},
-		{"atlas": Vector2i(7, 8), "weight": 1},
-		{"atlas": Vector2i(8, 8), "weight": 1},
-		{"atlas": Vector2i(9, 8), "weight": 1},
-		{"atlas": Vector2i(10, 8), "weight": 1},
-		{"atlas": Vector2i(11, 8), "weight": 1},
-	],
-	ChunkGenerator.TerrainType.SAND: [],     # 待配
-	ChunkGenerator.TerrainType.DIRT: [],     # 待配
-	ChunkGenerator.TerrainType.BRICK: [],    # 待配
-}
-
 # 变体选择专用 hash seed。和地图 seed 分开（变体是纯渲染层的事）。
 # 用固定值确保变体分布稳定，换地图 seed 不影响变体分布。
 const _VARIANT_HASH_SEED: int = 98765
+
+# ===========================================================================
+# 2×2 block 渲染配置（草地过渡贴图系统）
+# ===========================================================================
+# 以 2×2 tile 的 block 为最小单位。草地 block 根据周围 8 邻居 block 类型
+# 选择不同的 MyTiledCell（4 个 tile 的贴图组合），实现过渡效果。
+#
+# 草地形态查表 key = 8 位掩码（邻居是否非草地），旋转归一化后查 _GRASS_FORMS。
+# 配置时只需定义基础形态（如"右边有沙地"），其他朝向（上/下/左）通过旋转派生。
+#
+# 8 位掩码 bit 顺序（顺时针，从上开始）：
+#   bit 0=上 1=右上 2=右 3=右下 4=下 5=左下 6=左 7=左上
+#   bit=1 表示该方向邻居是非草地（SAND）
+#
+# block 内位置编号（以左上角为原点）：
+#   (0,0)=index 0  (0,1)=index 1
+#   (1,0)=index 2  (1,1)=index 3
+#
+# ⚠️ 当前 _GRASS_FORMS 是占位配置（全用纯草地贴图）。
+# 用户需要根据 Tileset.png 实际贴图配置每种形态的 4 个 tile。
+# 缺失的形态会 fallback 到 form 0（全草地）。
+
+# block 边长（tile 数），和 ChunkGenerator.BLOCK_SIZE 一致
+const _BLOCK_SIZE: int = 2
+
+# 草地形态表。key = 旋转归一化后的 8 位掩码，value = MyTiledCell
+# 用户配置方式：
+#   1. 先配 form 0（全草地，无 SAND 邻居）
+#   2. 再配 form 1（上边 SAND）、form 3（上+右 SAND）等基础形态
+#   3. 其他朝向通过旋转自动派生，无需配置
+#   4. 缺失的 form 自动 fallback 到 form 0
+#
+# ⚠️ 不能用 const（MyTiledCell.new 是运行时构造），在 _ready 中由 _init_grass_forms 初始化
+# 用户修改配置只需改 _init_grass_forms 函数内的 return 内容
+var _GRASS_FORMS: Dictionary = {}
+
+# 草地候选
+# 其实有大量的重复配置 用8位掩码来表示
+enum GRASS_MASKS {
+	ALL_GRASS = 0b00000000,  # 全草地
+	TOP_SAND = 0b00000001,   # 上边 SAND
+	TOP_RIGHT_SAND = 0b00000101, # 上+右 SAND
+	TOP_RIGHT_CORNER_SAND = 0b00000010, # 右上角 CORNER
+}
+var _grass_forms_tiled: Dictionary = {}
 
 # 加载半径（chunk 数）。load_radius=3 → 加载 7×7=49 个 chunk
 # 太小会看到边缘加载，太大会卡顿。3 是 2D 游戏常见值
@@ -224,11 +129,8 @@ const DEBUG_LOG: bool = true
 # TileMapLayer 引用（@onready 确保场景树就绪后获取）
 @onready var _tile_map_layer: TileMapLayer = $TileMapLayer
 
-# 区块生成器（纯函数，持有 seed 和 noise 参数）
+# 区块生成器（纯函数，持有 seed）
 var _generator: ChunkGenerator = null
-
-# 算法版本开关：true=V2 确定性放置（种子+模板），false=V1 noise+CA
-var _use_v2: bool = false
 
 # 已加载 chunk 集合：Vector2i(chunk_x, chunk_y) -> true
 # 用于快速判断哪些 chunk 已加载
@@ -250,6 +152,12 @@ var _tile_size: int = 16
 # 调试绘制开关：开启后 _draw 会画出每个已加载 chunk 的矩形边框 + chunk 坐标文字
 # 由 DebugUI/DebugDrawButton 按钮切换
 var _debug_draw: bool = false
+
+# alternative_tile 缓存。key=(atlas_x, atlas_y, dir), value=alt_id
+# 运行时动态创建旋转变体（dir 0/1/2/3 = 0°/90°/180°/270°），
+# 避免用户在 TileSet 编辑器中手动创建旋转变体。
+# dir=0 用默认 alt_id=0，dir>0 调 create_alternative_tile 创建。
+var _alt_tile_cache: Dictionary = {}
 
 # ===========================================================================
 # 分帧加载配置（异步优化）
@@ -273,15 +181,14 @@ const MAX_UNLOADS_PER_FRAME: int = 4
 
 func _ready() -> void:
 	# 当前阶段：纯客户端硬编码 seed。未来接服务器后改为：
-	#   func setup(seed: int, noise_scale: float = 0.1):
-	#       _generator = ChunkGenerator.new(seed, noise_scale, ca_threshold, ca_iterations, terrain_spacing)
+	#   func setup(seed: int):
+	#       _generator = ChunkGenerator.new(seed)
 	#       _update_chunks_around(_world_to_chunk(_get_center_pos()))
-	# 参数：seed=12345, noise_scale=0.1, ca_threshold=2, ca_iterations=2, terrain_spacing=2
-	# ca_iterations=2 消除二阶孤岛；terrain_spacing=2 让 DIRT/BRICK 间隔至少 2 草地
-	_generator = ChunkGenerator.new(12345, 0.1, 2, 2, 2)
-	# V2 切换开关：设 true 用确定性放置算法（种子+模板），设 false 用 V1（noise+CA）
-	# V2 天然满足规则 A（异类间隔≥3）和规则 B（8邻域≥3同类且不全在一条直线），无需后处理
-	_use_v2 = true
+	_generator = ChunkGenerator.new(12345)
+	# 初始化草地形态表（含 MyTiledCell.new，不能放在 const）
+	# 顺序：先 _grass_forms_tiled（被 _init_grass_forms 引用），再 _GRASS_FORMS
+	_grass_forms_tiled = _init_grass_forms_tiled()
+	_GRASS_FORMS = _init_grass_forms(_grass_forms_tiled)
 
 	# 从 TileSet 读取 tile 像素大小（确保和 Tileset.png 的实际切分一致）
 	if _tile_map_layer.tile_set != null:
@@ -516,16 +423,12 @@ func _process_pending_chunks() -> void:
 ##
 ## 为什么加载后不需要刷新邻居边缘：
 ##   地形是 seed 确定的纯函数。邻居 B 边缘 tile 在 A 加载前查 A 方向邻居
-##   走 get_tile_type 单点查询，A 加载后走 cache —— 两者结果必然相同
-##   （generate_chunk 内部就是调 get_tile_type）。所以加载 A 不改变
+##   走 get_tile_type_v3 单点查询，A 加载后走 cache —— 两者结果必然相同
+##   （generate_chunk_v3 内部就是调 get_tile_type_v3）。所以加载 A 不改变
 ##   任何 tile 的过渡形态，刷新邻居是纯浪费。
 func _load_chunk(chunk: Vector2i) -> void:
 	# 1. 生成数据并写入 cache
-	var data: PackedInt32Array
-	if _use_v2:
-		data = _generator.generate_chunk_v2(chunk.x, chunk.y)
-	else:
-		data = _generator.generate_chunk(chunk.x, chunk.y)
+	var data: PackedInt32Array = _generator.generate_chunk_v3(chunk.x, chunk.y)
 	_chunk_data_cache[chunk] = data
 
 	# 2. 对每个 tile 算过渡形态并设 cell
@@ -535,8 +438,8 @@ func _load_chunk(chunk: Vector2i) -> void:
 		for lx in ChunkGenerator.CHUNK_SIZE:
 			var tile_x: int = chunk.x * ChunkGenerator.CHUNK_SIZE + lx
 			var tile_y: int = chunk.y * ChunkGenerator.CHUNK_SIZE + ly
-			var atlas: Vector2i = _compute_tile_atlas(tile_x, tile_y, data, ly, lx)
-			_tile_map_layer.set_cell(Vector2i(tile_x, tile_y), source_id, atlas)
+			var result: Dictionary = _compute_tile_atlas_v3(tile_x, tile_y, data, ly, lx)
+			_tile_map_layer.set_cell(Vector2i(tile_x, tile_y), source_id, result.atlas, result.alt)
 
 	_loaded_chunks[chunk] = true
 	if DEBUG_LOG:
@@ -547,7 +450,7 @@ func _load_chunk(chunk: Vector2i) -> void:
 ##
 ## 为什么卸载后不需要刷新邻居边缘：
 ##   同 _load_chunk 的理由。邻居 B 边缘 tile 查 A 方向邻居，
-##   卸载前走 cache，卸载后走 get_tile_type —— 结果必然相同。
+##   卸载前走 cache，卸载后走 get_tile_type_v3 —— 结果必然相同。
 ##   地形永远不变，卸载后回来重新加载还是同样的 tile。
 func _unload_chunk(chunk: Vector2i) -> void:
 	# 1. 清除 tile cell
@@ -572,17 +475,17 @@ func _unload_chunk(chunk: Vector2i) -> void:
 ## 获取世界 tile 坐标处的地形类型
 ## 跨 chunk 查询：
 ##   - chunk 已加载 → 从 _chunk_data_cache 取（快，数组索引）
-##   - chunk 未加载 → 直接调 _generator.get_tile_type 单点查询（带 CA）
+##   - chunk 未加载 → 直接调 _generator.get_tile_type_v3 单点查询
 ##
-## 为什么不调 generate_chunk 临时生成整个 chunk：
+## 为什么不调 generate_chunk_v3 临时生成整个 chunk：
 ##   之前版本这样做，导致性能爆炸：
 ##     - 每个 tile 查 8 邻居 → 8 次 _get_tile_type_at
-##     - 未命中 cache 时 generate_chunk 生成 256 个 tile 数据
+##     - 未命中 cache 时 generate_chunk_v3 生成 256 个 tile 数据
 ##     - 但只用其中 1 个 → 浪费 255 次计算
 ##     - 49 chunk 加载 → 上亿次 hash+noise 调用，编辑器卡死
-##   改成单点查询 get_tile_type(wx, wy)：
-##     - 只算需要的那个 tile（含 CA，CA 只查 8 邻居原始 noise，不递归）
-##     - 开销 = 9 次 hash+noise per tile，可接受
+##   改成单点查询 get_tile_type_v3(wx, wy)：
+##     - 只算需要的那个 tile
+##     - 开销 = 1 次 hash+noise per tile，可接受
 func _get_tile_type_at(world_tile_x: int, world_tile_y: int) -> int:
 	var chunk_x: int = int(floor(float(world_tile_x) / ChunkGenerator.CHUNK_SIZE))
 	var chunk_y: int = int(floor(float(world_tile_y) / ChunkGenerator.CHUNK_SIZE))
@@ -594,137 +497,417 @@ func _get_tile_type_at(world_tile_x: int, world_tile_y: int) -> int:
 		var lx: int = world_tile_x - chunk_x * ChunkGenerator.CHUNK_SIZE
 		var ly: int = world_tile_y - chunk_y * ChunkGenerator.CHUNK_SIZE
 		return data[ly * ChunkGenerator.CHUNK_SIZE + lx]
-	# cache 未命中：单点查询（带 CA，不生成整个 chunk）
-	return _generator.get_tile_type(world_tile_x, world_tile_y) if not _use_v2 \
-		else _generator.get_tile_type_v2(world_tile_x, world_tile_y)
+	# cache 未命中：单点查询（不生成整个 chunk）
+	return _generator.get_tile_type_v3(world_tile_x, world_tile_y)
 
 
-## 计算单个 tile 的 atlas coord（8 邻居 + fallback 链）
-## 输入：世界 tile 坐标 + 当前 chunk 的 data（避免重复查 cache）
-## 输出：atlas coord
+# ===========================================================================
+# 2×2 block 渲染（草地过渡贴图系统）
+# ===========================================================================
+# 渲染流程：
+#   1. 非草地 tile（SAND 等）→ 用 _TERRAIN_ATLAS 默认贴图
+#   2. 草地 tile → 查 block 的 8 邻居类型 → 算 form8 → 旋转归一化
+#      → 查 _GRASS_FORMS 得 MyTiledCell → 旋转 → 按 block 内位置抽 TiledCell
+#      → 获取 alternative_tile（含旋转） → 返回 {atlas, alt}
+#
+# 旋转系统（减少配置量）：
+#   - 8 位掩码旋转归一化：form 旋转 0/1/2/3 次取最小值作为查表 key
+#   - MyTiledCell 整体旋转：4 个 cell 位置重排 + 每个 TiledCell 的 dir +1
+#   - alternative_tile 动态创建：dir>0 时调 create_alternative_tile 设置 flip/transpose
+
+## 初始化纯草地候选 TiledCell 数组
+## 这是 form 0（全草地）的几十个变体，也是任何"非过渡位置"的默认候选。
+## 任何需要纯草地贴图的位置都引用此数组，避免重复配置。
+## 旋转时 _rotate_tiled_cells_cw 创建新数组，不修改原数组，共享引用安全。
 ##
-## 算法：
-##   1. 取当前 tile 类型 T
-##   2. 查 8 邻居类型（跨 chunk 查询）
-##   3. 算 8 位掩码 form8 (0-255)
-##   4. 查 _TERRAIN_TRANSITION_ATLAS_8[T][form8] —— 优先用完整 8 邻居贴图
-##   5. 缺失 → 取边位算 form4 (0-15)，查 _TERRAIN_EDGE_ATLAS[T][form4] —— fallback 到边形态
-##   6. 还缺失 → 用 _TERRAIN_ATLAS[T] 纯地块贴图
+## 用户配置方式：在此函数的 return 内增删 TiledCell。
+static func _init_grass_forms_tiled() -> Dictionary:
+	var res = {
+		GRASS_MASKS.ALL_GRASS: [
+		TiledCell.new(Vector2i(3, 20), 0, 300),
+		TiledCell.new(Vector2i(3, 20), 1, 300),
+		TiledCell.new(Vector2i(3, 20), 2, 300),
+		TiledCell.new(Vector2i(3, 20), 3, 300),
+		TiledCell.new(Vector2i(4, 20), 0, 50),
+		TiledCell.new(Vector2i(4, 20), 1, 50),
+		TiledCell.new(Vector2i(4, 20), 2, 50),
+		TiledCell.new(Vector2i(4, 20), 3, 50),
+		TiledCell.new(Vector2i(5, 20), 0, 50),
+		TiledCell.new(Vector2i(5, 20), 1, 50),
+		TiledCell.new(Vector2i(5, 20), 2, 50),
+		TiledCell.new(Vector2i(5, 20), 3, 50),
+		TiledCell.new(Vector2i(6, 8), 0, 1),
+		TiledCell.new(Vector2i(6, 8), 1, 1),
+		TiledCell.new(Vector2i(6, 8), 2, 1),
+		TiledCell.new(Vector2i(6, 8), 3, 1),
+		TiledCell.new(Vector2i(7, 8), 0, 1),
+		TiledCell.new(Vector2i(7, 8), 1, 1),
+		TiledCell.new(Vector2i(7, 8), 2, 1),
+		TiledCell.new(Vector2i(7, 8), 3, 1),
+		TiledCell.new(Vector2i(8, 8), 0, 1),
+		TiledCell.new(Vector2i(8, 8), 1, 1),
+		TiledCell.new(Vector2i(8, 8), 2, 1),
+		TiledCell.new(Vector2i(8, 8), 3, 1),
+		TiledCell.new(Vector2i(9, 8), 0, 1),
+		TiledCell.new(Vector2i(9, 8), 1, 1),
+		TiledCell.new(Vector2i(9, 8), 2, 1),
+		TiledCell.new(Vector2i(9, 8), 3, 1),
+		TiledCell.new(Vector2i(10, 8), 0, 1),
+		TiledCell.new(Vector2i(10, 8), 1, 1),
+		TiledCell.new(Vector2i(10, 8), 2, 1),
+		TiledCell.new(Vector2i(10, 8), 3, 1),
+		TiledCell.new(Vector2i(11, 8), 0, 1),
+		TiledCell.new(Vector2i(11, 8), 1, 1),
+		TiledCell.new(Vector2i(11, 8), 2, 1),
+		TiledCell.new(Vector2i(11, 8), 3, 1),
+		],
+		GRASS_MASKS.TOP_SAND: [
+			TiledCell.new(Vector2i(5, 11), 0, 1), 
+			TiledCell.new(Vector2i(6, 11), 0, 1), 
+			# TiledCell.new(Vector2i(5, 9), 2, 1), 
+			# TiledCell.new(Vector2i(6, 9), 2, 1),
+			# TiledCell.new(Vector2i(4, 10), 1, 1),
+			# TiledCell.new(Vector2i(7, 10), 3, 1),
+		],
+		GRASS_MASKS.TOP_RIGHT_SAND: [
+			TiledCell.new(Vector2i(11, 6), 0, 1),
+			# TiledCell.new(Vector2i(11, 7), 1, 1),
+			# TiledCell.new(Vector2i(10, 7), 2, 1),
+			# TiledCell.new(Vector2i(10, 6), 3, 1),
+		],
+		GRASS_MASKS.TOP_RIGHT_CORNER_SAND: [
+			TiledCell.new(Vector2i(4, 11), 0, 1), 
+			# TiledCell.new(Vector2i(7, 11), 1, 1), 
+			# TiledCell.new(Vector2i(7, 9), 2, 1), 
+			# TiledCell.new(Vector2i(4, 9), 3, 1),
+		]
+	}
+
+	return res
+
+static func _rotate_tiled_cell(p_tiled_cell: Array, step: int = 0) -> Array:
+	# ⚠️ 不能用 duplicate(true)：RefCounted 对象只复制引用，修改 dir 会污染原对象
+	# 必须创建新的 TiledCell 实例
+	var result: Array = []
+	for cell in p_tiled_cell:
+		result.append(TiledCell.new(cell.assets_pos, (cell.dir + step) % 4, cell.weight))
+	return result
+
+
+
+## 初始化草地形态表
+## 因为 MyTiledCell.new / TiledCell.new 是运行时构造，不能用在 const 赋值中，
+## 所以用普通 var + _ready 调用此函数初始化。
 ##
-## fallback 链的好处：用户可渐进配置
-##   - 先配 16 种边形态（基础过渡）
-##   - 再按需加 8 邻居角形态（内角/外角细节）
-func _compute_tile_atlas(world_tile_x: int, world_tile_y: int, data: PackedInt32Array, local_y: int, local_x: int) -> Vector2i:
+## 用户配置方式：修改此函数内的 return 内容。
+## - key = 旋转归一化后的 8 位掩码（邻居非草地 → bit=1）
+## - value = MyTiledCell
+## - 只需定义基础形态（如"上边 SAND"），其他朝向通过旋转自动派生
+## - 缺失的 form 自动 fallback 到 form 0
+## - 任何需要"纯草地"的位置直接引用 _grass_variants（form 0 的几十个变体）
+static func _init_grass_forms(grass_forms_tiled: Dictionary) -> Dictionary:
+	return {
+		# form 0: 全草地（8 邻居都是草地）
+		# 省略形式：4 个位置都用 _grass_variants（几十个变体）
+		0: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [grass_forms_tiled[GRASS_MASKS.ALL_GRASS]]),
+		# form 1: 上边 SAND（归一化形态，右边/下边/左边的 SAND 通过旋转派生）
+		# 上边 2 个 tile 需要草地→沙地过渡贴图，下边 2 个 tile 用纯草地
+		# ⚠️ 占位值，用户替换为实际过渡贴图坐标
+		1: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [
+			grass_forms_tiled[GRASS_MASKS.TOP_SAND],                          # (0,0) 上左：待配
+			grass_forms_tiled[GRASS_MASKS.TOP_SAND],
+			grass_forms_tiled[GRASS_MASKS.ALL_GRASS],                          # (1,0) 下左：复用纯草地变体
+			grass_forms_tiled[GRASS_MASKS.ALL_GRASS],                          # (1,1) 下右：复用纯草地变体
+		]),
+		# form 2: 右上角 CORNER
+		2: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [
+			grass_forms_tiled[GRASS_MASKS.ALL_GRASS],  # (0,0) 上左：待配
+			grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND],  # (0,1) 上右：待配
+			grass_forms_tiled[GRASS_MASKS.ALL_GRASS],                          # (1,0) 下左：复用纯草地变体
+			grass_forms_tiled[GRASS_MASKS.ALL_GRASS],                          # (1,1) 下右：复用纯草地变体
+		]),
+
+		# 上+右
+		5: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [
+			grass_forms_tiled[GRASS_MASKS.TOP_SAND],  # (0,0) 上左：待配
+			grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_SAND],  # (0,1) 上右：待配
+			grass_forms_tiled[GRASS_MASKS.ALL_GRASS],                          # (1,0) 下左：复用纯草地变体
+			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_SAND], 1),  # (1,1) 下右：待配
+		]),
+
+		# 上边 右下角
+		9: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [
+			grass_forms_tiled[GRASS_MASKS.TOP_SAND],  # (0,0) 上左：待配
+			grass_forms_tiled[GRASS_MASKS.TOP_SAND],  # (0,1) 上右：待配			                         
+			grass_forms_tiled[GRASS_MASKS.ALL_GRASS], 
+			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 1), 
+		]),
+
+		#  右上 右下 两角沙
+		10: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [
+			grass_forms_tiled[GRASS_MASKS.ALL_GRASS],
+			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 0),  # (0,0) 上左：待配
+			grass_forms_tiled[GRASS_MASKS.ALL_GRASS],
+			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 1),
+		]),
+		# form  : 上 右 下 3边都是沙
+		21: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [
+			grass_forms_tiled[GRASS_MASKS.TOP_SAND],
+			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_SAND], 0),
+			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_SAND], 2),
+			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_SAND], 1),
+		]),
+
+		# form  : 左下 右上 右下 3角都是沙
+		42: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [
+			grass_forms_tiled[GRASS_MASKS.ALL_GRASS],
+			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 0),  # (0,0) 上左：待配
+			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 2),  # (0,1) 上右：待配
+			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 1),  # (1,1) 下右：待配
+		]),
+
+		# form  : 4角都是沙
+		170: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [
+			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 3),  # (0,0) 上左：待配
+			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 0),  # (0,1) 上右：待配
+			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 2),  # (1,0) 下左：待配
+			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 1),  # (1,1) 下右：待配
+		]),
+
+		# form  : 4边全是沙
+		85: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [
+			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_SAND], 3),
+			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_SAND], 0),
+			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_SAND], 2),
+			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_SAND], 1),
+		]),
+	}
+
+
+## 计算单个 tile 的 atlas coord + alternative_tile
+## 返回 Dictionary {atlas: Vector2i, alt: int}
+##
+## 非草地 tile：用 _TERRAIN_ATLAS 默认贴图，alt=0
+## 草地 tile：根据 block 8 邻居类型选 MyTiledCell，按权重抽 TiledCell
+func _compute_tile_atlas_v3(world_tile_x: int, world_tile_y: int, data: PackedInt32Array, local_y: int, local_x: int) -> Dictionary:
 	var CS: int = ChunkGenerator.CHUNK_SIZE
 	var terrain: int = data[local_y * CS + local_x]
 
-	# 查 8 邻居类型（顺时针：上、右上、右、右下、下、左下、左、左上）
-	var t_top: int
-	var t_top_right: int
-	var t_right: int
-	var t_bottom_right: int
-	var t_bottom: int
-	var t_bottom_left: int
-	var t_left: int
-	var t_top_left: int
+	# 非草地：用默认贴图（无过渡，无旋转）
+	if terrain != ChunkGenerator.TerrainType.GRASS:
+		var default_atlas: Vector2i = _TERRAIN_ATLAS.get(terrain, Vector2i.ZERO)
+		return {atlas = default_atlas, alt = 0}
 
-	# 性能优化：chunk 内部 tile（非边缘）的 8 邻居全在同一 chunk 的 data 里，
-	# 直接用数组索引取，跳过 _get_tile_type_at（省掉 Dictionary 查找 + 函数调用）。
-	# 196/256=77% 的 tile 走这条快速路径。结果完全相同（data 里的值就是 get_tile_type 的输出）。
-	if local_x > 0 and local_x < CS - 1 and local_y > 0 and local_y < CS - 1:
-		var row_up: int = (local_y - 1) * CS
-		var row_mid: int = local_y * CS
-		var row_dn: int = (local_y + 1) * CS
-		t_top = data[row_up + local_x]
-		t_top_right = data[row_up + local_x + 1]
-		t_right = data[row_mid + local_x + 1]
-		t_bottom_right = data[row_dn + local_x + 1]
-		t_bottom = data[row_dn + local_x]
-		t_bottom_left = data[row_dn + local_x - 1]
-		t_left = data[row_mid + local_x - 1]
-		t_top_left = data[row_up + local_x - 1]
-	else:
-		# 边缘 tile：邻居可能跨 chunk，走通用查询
-		t_top = _get_tile_type_at(world_tile_x, world_tile_y - 1)
-		t_top_right = _get_tile_type_at(world_tile_x + 1, world_tile_y - 1)
-		t_right = _get_tile_type_at(world_tile_x + 1, world_tile_y)
-		t_bottom_right = _get_tile_type_at(world_tile_x + 1, world_tile_y + 1)
-		t_bottom = _get_tile_type_at(world_tile_x, world_tile_y + 1)
-		t_bottom_left = _get_tile_type_at(world_tile_x - 1, world_tile_y + 1)
-		t_left = _get_tile_type_at(world_tile_x - 1, world_tile_y)
-		t_top_left = _get_tile_type_at(world_tile_x - 1, world_tile_y - 1)
+	# 草地：根据 block 8 邻居类型算形态
+	var bx: int = int(floor(float(world_tile_x) / _BLOCK_SIZE))
+	var by: int = int(floor(float(world_tile_y) / _BLOCK_SIZE))
 
-	# 算 8 位掩码
-	var form8: int = TerrainTransition.compute_form_8(
-		t_top == terrain, t_top_right == terrain,
-		t_right == terrain, t_bottom_right == terrain,
-		t_bottom == terrain, t_bottom_left == terrain,
-		t_left == terrain, t_top_left == terrain
-	)
+	# 算 block 的 8 邻居掩码（邻居非草地 → bit=1）
+	var form8: int = _compute_form8_for_block(bx, by)
 
-	# 纯地块变体：form8=255（8邻居全同类）= 真正的内部 tile
-	# 用变体打破视觉重复（如草地有多个平替贴图，按权重分布）
-	if form8 == 255 and _TERRAIN_VARIANTS.has(terrain) and not _TERRAIN_VARIANTS[terrain].is_empty():
-		return _pick_variant(terrain, world_tile_x, world_tile_y)
+	# 旋转归一化：取 4 次旋转中的最小值作为查表 key
+	var norm: Dictionary = _normalize_form8(form8)
+	var base_form: int = norm.form
+	var rotations: int = norm.rotations
 
-	# fallback 链 1：查 8 邻居完整贴图表
-	var table_8: Dictionary = _TERRAIN_TRANSITION_ATLAS_8.get(terrain, {})
-	if table_8.has(form8):
-		return table_8[form8]
+	# 查草地形态表（先查 8 邻居表，没找到退化到 4 正方向）
+	var mtc: MyTiledCell = _GRASS_FORMS.get(base_form, null)
+	if mtc == null:
+		# 退化：丢弃 4 个对角方向（bit 1/3/5/7），只保留 4 正方向（bit 0/2/4/6）
+		# 例如 form 7（上+右上+右）退化成 form 5（上+右），用 2 边贴图近似 3 邻居情况
+		var form4: int = form8 & 0b01010101
+		var norm4: Dictionary = _normalize_form8(form4)
+		mtc = _GRASS_FORMS.get(norm4.form, null)
+		rotations = norm4.rotations
+	if mtc == null:
+		# fallback 到全草地
+		mtc = _GRASS_FORMS.get(0, null)
+		rotations = 0
+	if mtc == null:
+		return {atlas = _TERRAIN_ATLAS.get(terrain, Vector2i.ZERO), alt = 0}
 
-	# fallback 链 2：取边位算 4 边形态，查边形态贴图表
-	var form4: int = TerrainTransition.extract_edge_form(form8)
-	var table_edge: Dictionary = _TERRAIN_EDGE_ATLAS.get(terrain, {})
-	if table_edge.has(form4):
-		return table_edge[form4]
+	# 旋转 MyTiledCell（整体旋转：位置重排 + dir+1）
+	# 归一化时 form8 顺时针转 N 次得到 min_form，所以 mtc 需要顺时针转 (4-N) 次回到 form8 方向
+	if rotations > 0:
+		mtc = _rotate_my_tiled_cell(mtc, (4 - rotations) % 4)
 
-	# fallback 链 3：纯地块贴图
-	return _TERRAIN_ATLAS.get(terrain, Vector2i.ZERO)
+	# 算 tile 在 block 内的局部位置 → index 0=TL, 1=TR, 2=BL, 3=BR
+	var local_bx: int = world_tile_x - bx * _BLOCK_SIZE
+	var local_by: int = world_tile_y - by * _BLOCK_SIZE
+	var local_idx: int = local_bx + local_by * 2
+
+	# 从候选数组按权重抽取 TiledCell
+	var candidates: Array = mtc.get_candidates(local_idx)
+	var tc: TiledCell = _pick_tiled_cell(candidates, world_tile_x, world_tile_y)
+
+	# 获取或创建 alternative_tile（dir>0 时动态创建旋转变体）
+	var alt: int = _get_or_create_alt_tile(tc.assets_pos, tc.dir)
+	return {atlas = tc.assets_pos, alt = alt}
 
 
-## 变体选择：根据 tile 世界坐标 hash，按权重选一个变体贴图
-## 输入：地形类型 + tile 世界坐标
-## 输出：atlas coord
-##
-## 算法：
-##   1. 用 _variant_hash 算 hash(tile_x, tile_y) → [0, 1)
-##   2. hash * 总权重 = target（落在 [0, 总权重) 区间）
-##   3. 累加权重，target 落在哪个变体的区间就选哪个
-##
-## 为什么不用 ChunkGenerator._hash_2d：
-##   - _hash_2d 是 (seed*A) ^ (x*B) ^ (y*C) 简单 XOR 结构，
-##     设计用于 value noise（通过 smoothstep 插值产生平滑噪声）
-##   - 变体选择是单点查询无插值，相邻 tile 的 hash 值相关性高，
-##     会导致权重小的变体大片连续出现（空间聚集）
-##   - 变体是纯渲染层，不需要双端一致（服务端不关心贴图），可以用强 hash
-##
-## _variant_hash 用 MurmurHash3 finalizer（avalanche）：
-##   输入差 1，输出约一半位翻转，相邻 tile hash 差异极大，分布均匀。
-static func _pick_variant(terrain: int, tile_x: int, tile_y: int) -> Vector2i:
-	var variants: Array = _TERRAIN_VARIANTS.get(terrain, [])
-	if variants.is_empty():
-		return _TERRAIN_ATLAS.get(terrain, Vector2i.ZERO)
+## 计算 block 的 8 邻居掩码
+## bit 0=上 1=右上 2=右 3=右下 4=下 5=左下 6=左 7=左上
+## bit=1 表示该方向邻居是非草地（非 GRASS）
+func _compute_form8_for_block(block_x: int, block_y: int) -> int:
+	# 8 邻居偏移（顺时针：上、右上、右、右下、下、左下、左、左上）
+	const offsets: Array = [
+		Vector2i(0, -1), Vector2i(1, -1), Vector2i(1, 0), Vector2i(1, 1),
+		Vector2i(0, 1), Vector2i(-1, 1), Vector2i(-1, 0), Vector2i(-1, -1),
+	]
+	var form: int = 0
+	for i in range(8):
+		var nx: int = block_x + offsets[i].x
+		var ny: int = block_y + offsets[i].y
+		var nt: int = _get_block_type_at(nx, ny)
+		if nt != ChunkGenerator.TerrainType.GRASS:
+			form |= (1 << i)
+	return form
 
-	# 算总权重
+
+## 查询 block 类型（优先从 cache，否则单点查询）
+func _get_block_type_at(block_x: int, block_y: int) -> int:
+	# block 的世界 tile 坐标 = block * BLOCK_SIZE（取 block 左上角 tile）
+	var wx: int = block_x * _BLOCK_SIZE
+	var wy: int = block_y * _BLOCK_SIZE
+	return _get_tile_type_at(wx, wy)
+
+
+## 8 位掩码顺时针旋转 90°
+## bit 映射：上(0)→右(2), 右上(1)→右下(3), 右(2)→下(4), 右下(3)→左下(5)
+##           下(4)→左(6), 左下(5)→左上(7), 左(6)→上(0), 左上(7)→右上(1)
+static func _rotate_form8_cw(form: int) -> int:
+	var result: int = 0
+	if form & (1 << 0): result |= (1 << 2)  # 上→右
+	if form & (1 << 1): result |= (1 << 3)  # 右上→右下
+	if form & (1 << 2): result |= (1 << 4)  # 右→下
+	if form & (1 << 3): result |= (1 << 5)  # 右下→左下
+	if form & (1 << 4): result |= (1 << 6)  # 下→左
+	if form & (1 << 5): result |= (1 << 7)  # 左下→左上
+	if form & (1 << 6): result |= (1 << 0)  # 左→上
+	if form & (1 << 7): result |= (1 << 1)  # 左上→右上
+	return result
+
+
+## 旋转归一化 —— 取 4 次旋转中的最小值作为查表 key
+## 返回 {form: int, rotations: int}
+## form = 最小值（查表 key），rotations = 从原 form 旋转到最小值的次数
+## 配置时只需定义最小值形态，其他朝向自动派生
+static func _normalize_form8(form: int) -> Dictionary:
+	var min_form: int = form
+	var rotations: int = 0
+	var current: int = form
+	for i in range(1, 4):
+		current = _rotate_form8_cw(current)
+		if current < min_form:
+			min_form = current
+			rotations = i
+	return {form = min_form, rotations = rotations}
+
+
+## 旋转 MyTiledCell（整体旋转，Godot 式）
+## 每次 90° 顺时针：
+##   1. 4 个 cell 位置重排（旧(0,0)→新(0,1), 旧(0,1)→新(1,1), 旧(1,0)→新(0,0), 旧(1,1)→新(1,0)）
+##   2. 每个 TiledCell 的 dir +1（mod 4）
+## 省略形式（cell 长度 1）：4 个位置都一样，旋转后还是省略形式（只加 dir）
+static func _rotate_my_tiled_cell(mtc: MyTiledCell, times: int) -> MyTiledCell:
+	var result: MyTiledCell = mtc
+	for _i in range(times):
+		result = _rotate_my_tiled_cell_90(result)
+	return result
+
+
+static func _rotate_my_tiled_cell_90(mtc: MyTiledCell) -> MyTiledCell:
+	# 省略形式（cell 长度 1）：4 个位置都一样，只加 dir
+	if mtc.cell.size() == 1:
+		var new_candidates: Array = _rotate_tiled_cells_cw(mtc.cell[0])
+		return MyTiledCell.new(mtc.tiledtype, [new_candidates])
+
+	# 完整形式（cell 长度 4）：位置重排 + dir+1
+	# cell index: 0=TL(0,0), 1=TR(1,0), 2=BL(0,1), 3=BR(1,1)
+	# 顺时针 90°：TL←BL, TR←TL, BL←BR, BR←TR
+	# 新[0]=旧[2], 新[1]=旧[0], 新[2]=旧[3], 新[3]=旧[1]
+	var new_cell: Array = [
+		_rotate_tiled_cells_cw(mtc.cell[2]),
+		_rotate_tiled_cells_cw(mtc.cell[0]),
+		_rotate_tiled_cells_cw(mtc.cell[3]),
+		_rotate_tiled_cells_cw(mtc.cell[1]),
+	]
+	return MyTiledCell.new(mtc.tiledtype, new_cell)
+
+
+## 旋转候选 TiledCell 数组（每个 dir +1 mod 4）
+static func _rotate_tiled_cells_cw(candidates: Array) -> Array:
+	var result: Array = []
+	for tc in candidates:
+		result.append(TiledCell.new(tc.assets_pos, (tc.dir + 1) % 4, tc.weight))
+	return result
+
+
+## 按权重从候选 TiledCell 数组中抽取一个
+## 用 _variant_hash 确保同一 tile 永远选同一个（移动时不跳变）
+static func _pick_tiled_cell(candidates: Array, tile_x: int, tile_y: int) -> TiledCell:
+	if candidates.is_empty():
+		return TiledCell.new()
+	if candidates.size() == 1:
+		return candidates[0]
+
 	var total_weight: int = 0
-	for v in variants:
-		total_weight += v.weight
+	for tc in candidates:
+		total_weight += tc.weight
 	if total_weight <= 0:
-		return _TERRAIN_ATLAS.get(terrain, Vector2i.ZERO)
+		return candidates[0]
 
-	# hash → [0, 1) → target ∈ [0, total_weight)
 	var h: float = _variant_hash(tile_x, tile_y)
 	var target: int = int(h * total_weight)
 
-	# 累加权重找区间
 	var acc: int = 0
-	for v in variants:
-		acc += v.weight
+	for tc in candidates:
+		acc += tc.weight
 		if target < acc:
-			return v.atlas
+			return tc
+	return candidates.back()
 
-	# 兜底（浮点精度边界，理论上不会到这）
-	return variants.back().atlas
+
+## 获取或创建 alternative_tile（旋转变体）
+## dir=0 → alt=0（默认，无变换）
+## dir=1 → 90° CW = transpose + flip_h
+## dir=2 → 180° = flip_h + flip_v
+## dir=3 → 270° CW = transpose + flip_v
+##
+## 运行时动态创建，避免用户在 TileSet 编辑器中手动创建旋转变体。
+func _get_or_create_alt_tile(atlas_coord: Vector2i, dir: int) -> int:
+	if dir == 0:
+		return 0
+	var key: Array = [atlas_coord.x, atlas_coord.y, dir]
+	if _alt_tile_cache.has(key):
+		return _alt_tile_cache[key]
+
+	var tile_set: TileSet = _tile_map_layer.tile_set
+	if tile_set == null:
+		push_warning("[InfiniteTileMap] TileSet 为 null，无法创建旋转变体")
+		return 0
+	var source: TileSetAtlasSource = tile_set.get_source(0)
+	if not source.has_tile(atlas_coord):
+		push_warning("[InfiniteTileMap] atlas %s 处没有 base tile，无法创建旋转变体" % atlas_coord)
+		return 0
+	var alt_id: int = source.create_alternative_tile(atlas_coord)
+	if alt_id < 0:
+		return 0
+	var tile_data: TileData = source.get_tile_data(atlas_coord, alt_id)
+	if tile_data == null:
+		return 0
+	match dir:
+		1:  # 90° CW = flip_h + transpose
+			tile_data.flip_h = true
+			tile_data.transpose = true
+		2:  # 180° = flip_h + flip_v
+			tile_data.flip_h = true
+			tile_data.flip_v = true
+		3:  # 270° CW = flip_v + transpose
+			tile_data.flip_v = true
+			tile_data.transpose = true
+	_alt_tile_cache[key] = alt_id
+	return alt_id
 
 
 ## 变体专用 hash：比 ChunkGenerator._hash_2d 更强的随机分布

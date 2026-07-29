@@ -1,0 +1,77 @@
+[gd_scene format=3 uid="uid://ce7pw2rstud5w"]
+
+[ext_resource type="Script" uid="uid://curq5n42riq5x" path="res://Script/UI/Base/ScorllDemo.gd" id="1_8rugc"]
+[ext_resource type="Script" uid="uid://52eapvc35t36" path="res://Script/UI/debug/TiledCellList.gd" id="1_tartp"]
+[ext_resource type="Texture2D" uid="uid://b27deyshkigia" path="res://prefab/CommonTexture/panelInset_blue.png" id="2_tartp"]
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_tartp"]
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_plb0q"]
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_4kubc"]
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_7q2q5"]
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_c80to"]
+
+[node name="CellSelectScroll2" type="Node2D" unique_id=1358986346]
+script = ExtResource("1_tartp")
+
+[node name="ScrollNode" type="Node2D" parent="." unique_id=570022658]
+script = ExtResource("1_8rugc")
+
+[node name="NinePatchRect" type="NinePatchRect" parent="ScrollNode" unique_id=880644851]
+offset_right = 509.0
+offset_bottom = 74.0
+texture = ExtResource("2_tartp")
+region_rect = Rect2(0, 0, 93, 94)
+patch_margin_left = 20
+patch_margin_top = 27
+patch_margin_right = 52
+patch_margin_bottom = 39
+
+[node name="ScrollContainer" type="ScrollContainer" parent="ScrollNode" unique_id=1083401174]
+offset_right = 509.0
+offset_bottom = 74.0
+
+[node name="ScrollItem" type="Control" parent="ScrollNode" unique_id=1413093272]
+custom_minimum_size = Vector2(64, 80)
+layout_mode = 3
+anchors_preset = 0
+offset_right = 64.0
+offset_bottom = 80.0
+
+[node name="Image" type="TextureRect" parent="ScrollNode/ScrollItem" unique_id=2139534088]
+layout_mode = 0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 48.0
+offset_bottom = 48.0
+
+[node name="Name" type="RichTextLabel" parent="ScrollNode/ScrollItem" unique_id=565137797]
+layout_mode = 0
+offset_top = 50.0
+offset_right = 64.0
+offset_bottom = 100.0
+theme_override_colors/default_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/normal_font_size = 14
+theme_override_font_sizes/bold_font_size = 14
+theme_override_font_sizes/bold_italics_font_size = 14
+theme_override_font_sizes/italics_font_size = 14
+theme_override_font_sizes/mono_font_size = 14
+text = "右边+下边"
+fit_content = true
+scroll_active = false
+horizontal_alignment = 1
+
+[node name="Button" type="Button" parent="ScrollNode/ScrollItem" unique_id=2024151997]
+layout_mode = 0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 48.0
+offset_bottom = 48.0
+theme_override_styles/normal = SubResource("StyleBoxTexture_tartp")
+theme_override_styles/pressed = SubResource("StyleBoxTexture_plb0q")
+theme_override_styles/hover = SubResource("StyleBoxTexture_4kubc")
+theme_override_styles/disabled = SubResource("StyleBoxTexture_7q2q5")
+theme_override_styles/focus = SubResource("StyleBoxTexture_c80to")

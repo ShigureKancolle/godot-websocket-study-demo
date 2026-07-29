@@ -1,0 +1,57 @@
+[gd_scene format=3 uid="uid://cdp4pvtrcjcsn"]
+
+[ext_resource type="Script" uid="uid://curq5n42riq5x" path="res://Script/UI/Base/ScorllDemo.gd" id="1_8rugc"]
+[ext_resource type="Script" uid="uid://52eapvc35t36" path="res://Script/UI/debug/TiledCellList.gd" id="1_tartp"]
+[ext_resource type="Texture2D" uid="uid://b27deyshkigia" path="res://prefab/CommonTexture/panelInset_blue.png" id="2_tartp"]
+
+[node name="CellSelectScroll" type="Node" unique_id=1854609326]
+script = ExtResource("1_tartp")
+
+[node name="ScrollNode" type="Node2D" parent="." unique_id=1809868262]
+script = ExtResource("1_8rugc")
+
+[node name="NinePatchRect" type="NinePatchRect" parent="ScrollNode" unique_id=1941276315]
+offset_right = 509.0
+offset_bottom = 74.0
+texture = ExtResource("2_tartp")
+region_rect = Rect2(0, 0, 93, 94)
+patch_margin_left = 20
+patch_margin_top = 27
+patch_margin_right = 52
+patch_margin_bottom = 39
+
+[node name="ScrollContainer" type="ScrollContainer" parent="ScrollNode" unique_id=833406682]
+offset_right = 509.0
+offset_bottom = 74.0
+
+[node name="ScrollItem" type="Control" parent="ScrollNode" unique_id=777908111]
+custom_minimum_size = Vector2(64, 80)
+layout_mode = 3
+anchors_preset = 0
+offset_right = 64.0
+offset_bottom = 80.0
+
+[node name="TextureRect" type="TextureRect" parent="ScrollNode/ScrollItem" unique_id=1315618595]
+layout_mode = 0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 48.0
+offset_bottom = 48.0
+mouse_behavior_recursive = 2
+mouse_default_cursor_shape = 13
+
+[node name="Name" type="RichTextLabel" parent="ScrollNode/ScrollItem" unique_id=1790207723]
+layout_mode = 0
+offset_top = 50.0
+offset_right = 64.0
+offset_bottom = 100.0
+theme_override_colors/default_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/normal_font_size = 14
+theme_override_font_sizes/bold_font_size = 14
+theme_override_font_sizes/bold_italics_font_size = 14
+theme_override_font_sizes/italics_font_size = 14
+theme_override_font_sizes/mono_font_size = 14
+text = "右边+下边"
+fit_content = true
+scroll_active = false
+horizontal_alignment = 1

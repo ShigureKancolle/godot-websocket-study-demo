@@ -33,8 +33,12 @@ var move_dir: Vector2 = Vector2.ZERO
 # 由鼠标位置 或 手柄右摇杆 转成世界坐标得到
 var look_target: Vector2 = Vector2.ZERO
 
+# 是否按了攻击键(鼠标左键/手柄右扳机)
+var attack_pressed: bool = false
+
 
 ## 重置所有意图字段(每帧采集前调用)
 func reset() -> void:
 	move_dir = Vector2.ZERO
 	look_target = Vector2.ZERO
+	attack_pressed = false

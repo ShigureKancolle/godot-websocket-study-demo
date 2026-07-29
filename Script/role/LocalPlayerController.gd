@@ -22,7 +22,7 @@ class_name LocalPlayerController
     1. 这里读 intent,算出「想移动到哪个坐标」「想朝哪个方向」
     2. 发 PlayerMove / PlayerFacing 消息给服务端(这是「请求」,不是「声明」)
     3. 服务端 apply_move / apply_facing 更新权威状态,广播给所有人(含自己)
-    4. 客户端 StateMirror 收到 → player_updated 信号 → Role.on_player_updated
+    4. 客户端 StateMirror 收到 → entity_updated 信号 → Role.on_entity_updated
        → 更新坐标 + 转发 facing 给 PlayerVisual
 
 注意第4步:本地玩家的坐标和朝向也是由 StateMirror 信号更新的,不是这里直接改的。
@@ -71,7 +71,7 @@ var _was_moving: bool = false
 
 ## 初始化: 接收玩家信息(当前未使用,但保留接口和 PlayerVisual.setup 对称)
 ## 后续如需根据玩家信息调整控制参数(如不同角色移速不同),在这里实现
-func setup(_info: Dictionary) -> void:
+func setup(_info: ClientEntityInfo) -> void:
 	pass
 
 
@@ -81,6 +81,39 @@ func _process(_delta: float) -> void:
 	var intent: InputIntent = InputIntentProvider.get_intent()
 	if intent == null:
 		return  # Provider 还没初始化(第一帧前),跳过
+
+	# 攻击(从 intent.attack_pressed 发 AttackStart)
+	# 用 local_entity_id() / get_entity() 替代旧的 local_player_id() / get_player()
+	# (统一 Entity 模型重构后,API 名字和服务端对齐)
+	# get_entity 返回 ClientEntityInfo 强类型,字段访问用 .state 而非 ["state"]
+	var mirror = ClientStateMirror.instance()
+	var player: ClientEntityInfo = mirror.get_entity(mirror.local_entity_id())
+	if player == null:
+		return  # 镜像还没拿到本地玩家信息(PlayerJoin 未到),跳过
+	var my_state: String = player.state
+	# state=="attacking" 时禁止移动/朝向/再次攻击(和服务端 apply_attack_start 设的 state 对齐)
+	# 之前用 "attack" 是误称,服务端实际设的是 "attacking"
+	if my_state == "attacking":
+		print("当前正在attacking,不发移动和朝向消息")
+		return
+
+	if intent.attack_pressed:
+		print("attack pressed, send AttackStart")
+		# 发送字段名用 entity_id(和 proto 一致,原 role_id 已废弃)
+		# 注:服务端 handler 实际用 ctx.player_id 而非读 client 发的 entity_id,
+		# 但为了契约一致性,客户端仍然填上 entity_id 字段
+		MessageBus.instance().send("game.AttackStart", {
+			"entity_id": mirror.local_entity_id(),
+			"atk_id": 1001
+		})
+
+		# 预判玩家状态为攻击中,不发移动和朝向消息
+		# 用 "attacking" 和服务端对齐(避免等 AttackStart 广播回来才切状态造成的延迟感)
+		# 注意:这里直接改 mirror 里的 ClientEntityInfo(强类型对象的字段),
+		# 不是改 dict——StateMirror 的 _on_attack_start 也会改,但本地预判先改避免延迟感
+		player.state = "attacking"
+		return
+
 
 	# 1. 移动(从 intent.move_dir 算 target)
 	# moving 状态机:

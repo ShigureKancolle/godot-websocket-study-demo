@@ -683,149 +683,66 @@ class PBPacker:
 ############### USER DATA BEGIN ################
 
 
-class EntityInfo:
+class PlayerInfo:
 	extends RefCounted
 	func _init():
 		var service
 		
-		__entity_id = PBField.new("entity_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
+		__player_id = PBField.new("player_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
 		service = PBServiceField.new()
-		service.field = __entity_id
-		data[__entity_id.tag] = service
+		service.field = __player_id
+		data[__player_id.tag] = service
 		
-		__entity_type = PBField.new("entity_type", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 2, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
-		service = PBServiceField.new()
-		service.field = __entity_type
-		data[__entity_type.tag] = service
-		
-		__x = PBField.new("x", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 3, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
-		service = PBServiceField.new()
-		service.field = __x
-		data[__x.tag] = service
-		
-		__y = PBField.new("y", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 4, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
-		service = PBServiceField.new()
-		service.field = __y
-		data[__y.tag] = service
-		
-		__facing = PBField.new("facing", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 5, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
-		service = PBServiceField.new()
-		service.field = __facing
-		data[__facing.tag] = service
-		
-		__state = PBField.new("state", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 6, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
-		service = PBServiceField.new()
-		service.field = __state
-		data[__state.tag] = service
-		
-		__radius = PBField.new("radius", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 7, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
-		service = PBServiceField.new()
-		service.field = __radius
-		data[__radius.tag] = service
-		
-		__player_name = PBField.new("player_name", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 8, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
+		__player_name = PBField.new("player_name", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 2, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
 		service = PBServiceField.new()
 		service.field = __player_name
 		data[__player_name.tag] = service
 		
-		__moving = PBField.new("moving", PB_DATA_TYPE.BOOL, PB_RULE.OPTIONAL, 9, true, DEFAULT_VALUES_3[PB_DATA_TYPE.BOOL])
+		__level = PBField.new("level", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 3, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
 		service = PBServiceField.new()
-		service.field = __moving
-		data[__moving.tag] = service
+		service.field = __level
+		data[__level.tag] = service
 		
+		__score = PBField.new("score", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 4, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
+		service = PBServiceField.new()
+		service.field = __score
+		data[__score.tag] = service
+		
+		__x = PBField.new("x", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 5, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
+		service = PBServiceField.new()
+		service.field = __x
+		data[__x.tag] = service
+		
+		__y = PBField.new("y", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 6, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
+		service = PBServiceField.new()
+		service.field = __y
+		data[__y.tag] = service
+		
+		__facing = PBField.new("facing", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 7, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
+		service = PBServiceField.new()
+		service.field = __facing
+		data[__facing.tag] = service
+
+		__state = PBField.new("state", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 8, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
+		service = PBServiceField.new()
+		service.field = __state
+		data[__state.tag] = service
+
 	var data = {}
-	
-	var __entity_id: PBField
-	func has_entity_id() -> bool:
-		if __entity_id.value != null:
+
+	var __player_id: PBField
+	func has_player_id() -> bool:
+		if __player_id.value != null:
 			return true
 		return false
-	func get_entity_id() -> String:
-		return __entity_id.value
-	func clear_entity_id() -> void:
+	func get_player_id() -> String:
+		return __player_id.value
+	func clear_player_id() -> void:
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__entity_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
-	func set_entity_id(value : String) -> void:
-		__entity_id.value = value
-	
-	var __entity_type: PBField
-	func has_entity_type() -> bool:
-		if __entity_type.value != null:
-			return true
-		return false
-	func get_entity_type() -> String:
-		return __entity_type.value
-	func clear_entity_type() -> void:
-		data[2].state = PB_SERVICE_STATE.UNFILLED
-		__entity_type.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
-	func set_entity_type(value : String) -> void:
-		__entity_type.value = value
-	
-	var __x: PBField
-	func has_x() -> bool:
-		if __x.value != null:
-			return true
-		return false
-	func get_x() -> float:
-		return __x.value
-	func clear_x() -> void:
-		data[3].state = PB_SERVICE_STATE.UNFILLED
-		__x.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
-	func set_x(value : float) -> void:
-		__x.value = value
-	
-	var __y: PBField
-	func has_y() -> bool:
-		if __y.value != null:
-			return true
-		return false
-	func get_y() -> float:
-		return __y.value
-	func clear_y() -> void:
-		data[4].state = PB_SERVICE_STATE.UNFILLED
-		__y.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
-	func set_y(value : float) -> void:
-		__y.value = value
-	
-	var __facing: PBField
-	func has_facing() -> bool:
-		if __facing.value != null:
-			return true
-		return false
-	func get_facing() -> float:
-		return __facing.value
-	func clear_facing() -> void:
-		data[5].state = PB_SERVICE_STATE.UNFILLED
-		__facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
-	func set_facing(value : float) -> void:
-		__facing.value = value
-	
-	var __state: PBField
-	func has_state() -> bool:
-		if __state.value != null:
-			return true
-		return false
-	func get_state() -> String:
-		return __state.value
-	func clear_state() -> void:
-		data[6].state = PB_SERVICE_STATE.UNFILLED
-		__state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
-	func set_state(value : String) -> void:
-		__state.value = value
-	
-	var __radius: PBField
-	func has_radius() -> bool:
-		if __radius.value != null:
-			return true
-		return false
-	func get_radius() -> float:
-		return __radius.value
-	func clear_radius() -> void:
-		data[7].state = PB_SERVICE_STATE.UNFILLED
-		__radius.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
-	func set_radius(value : float) -> void:
-		__radius.value = value
-	
+		__player_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
+	func set_player_id(value : String) -> void:
+		__player_id.value = value
+
 	var __player_name: PBField
 	func has_player_name() -> bool:
 		if __player_name.value != null:
@@ -834,24 +751,89 @@ class EntityInfo:
 	func get_player_name() -> String:
 		return __player_name.value
 	func clear_player_name() -> void:
-		data[8].state = PB_SERVICE_STATE.UNFILLED
+		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_name.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
 	func set_player_name(value : String) -> void:
 		__player_name.value = value
-	
-	var __moving: PBField
-	func has_moving() -> bool:
-		if __moving.value != null:
+
+	var __level: PBField
+	func has_level() -> bool:
+		if __level.value != null:
 			return true
 		return false
-	func get_moving() -> bool:
-		return __moving.value
-	func clear_moving() -> void:
-		data[9].state = PB_SERVICE_STATE.UNFILLED
-		__moving.value = DEFAULT_VALUES_3[PB_DATA_TYPE.BOOL]
-	func set_moving(value : bool) -> void:
-		__moving.value = value
-	
+	func get_level() -> int:
+		return __level.value
+	func clear_level() -> void:
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__level.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
+	func set_level(value : int) -> void:
+		__level.value = value
+
+	var __score: PBField
+	func has_score() -> bool:
+		if __score.value != null:
+			return true
+		return false
+	func get_score() -> int:
+		return __score.value
+	func clear_score() -> void:
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__score.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
+	func set_score(value : int) -> void:
+		__score.value = value
+
+	var __x: PBField
+	func has_x() -> bool:
+		if __x.value != null:
+			return true
+		return false
+	func get_x() -> float:
+		return __x.value
+	func clear_x() -> void:
+		data[5].state = PB_SERVICE_STATE.UNFILLED
+		__x.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
+	func set_x(value : float) -> void:
+		__x.value = value
+
+	var __y: PBField
+	func has_y() -> bool:
+		if __y.value != null:
+			return true
+		return false
+	func get_y() -> float:
+		return __y.value
+	func clear_y() -> void:
+		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__y.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
+	func set_y(value : float) -> void:
+		__y.value = value
+
+	var __facing: PBField
+	func has_facing() -> bool:
+		if __facing.value != null:
+			return true
+		return false
+	func get_facing() -> float:
+		return __facing.value
+	func clear_facing() -> void:
+		data[7].state = PB_SERVICE_STATE.UNFILLED
+		__facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
+	func set_facing(value : float) -> void:
+		__facing.value = value
+
+	var __state: PBField
+	func has_state() -> bool:
+		if __state.value != null:
+			return true
+		return false
+	func get_state() -> String:
+		return __state.value
+	func clear_state() -> void:
+		data[8].state = PB_SERVICE_STATE.UNFILLED
+		__state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
+	func set_state(value : String) -> void:
+		__state.value = value
+
 	func _to_string() -> String:
 		return PBPacker.message_to_string(data)
 		
@@ -978,10 +960,10 @@ class PlayerMove:
 	func _init():
 		var service
 		
-		__entity_id = PBField.new("entity_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
+		__player_id = PBField.new("player_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
 		service = PBServiceField.new()
-		service.field = __entity_id
-		data[__entity_id.tag] = service
+		service.field = __player_id
+		data[__player_id.tag] = service
 		
 		__x = PBField.new("x", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 2, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
 		service = PBServiceField.new()
@@ -997,27 +979,27 @@ class PlayerMove:
 		service = PBServiceField.new()
 		service.field = __speed
 		data[__speed.tag] = service
-		
+
 		__moving = PBField.new("moving", PB_DATA_TYPE.BOOL, PB_RULE.OPTIONAL, 5, true, DEFAULT_VALUES_3[PB_DATA_TYPE.BOOL])
 		service = PBServiceField.new()
 		service.field = __moving
 		data[__moving.tag] = service
-		
+
 	var data = {}
-	
-	var __entity_id: PBField
-	func has_entity_id() -> bool:
-		if __entity_id.value != null:
+
+	var __player_id: PBField
+	func has_player_id() -> bool:
+		if __player_id.value != null:
 			return true
 		return false
-	func get_entity_id() -> String:
-		return __entity_id.value
-	func clear_entity_id() -> void:
+	func get_player_id() -> String:
+		return __player_id.value
+	func clear_player_id() -> void:
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__entity_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
-	func set_entity_id(value : String) -> void:
-		__entity_id.value = value
-	
+		__player_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
+	func set_player_id(value : String) -> void:
+		__player_id.value = value
+
 	var __x: PBField
 	func has_x() -> bool:
 		if __x.value != null:
@@ -1030,7 +1012,7 @@ class PlayerMove:
 		__x.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
 	func set_x(value : float) -> void:
 		__x.value = value
-	
+
 	var __y: PBField
 	func has_y() -> bool:
 		if __y.value != null:
@@ -1043,7 +1025,7 @@ class PlayerMove:
 		__y.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
 	func set_y(value : float) -> void:
 		__y.value = value
-	
+
 	var __speed: PBField
 	func has_speed() -> bool:
 		if __speed.value != null:
@@ -1056,7 +1038,7 @@ class PlayerMove:
 		__speed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
 	func set_speed(value : float) -> void:
 		__speed.value = value
-	
+
 	var __moving: PBField
 	func has_moving() -> bool:
 		if __moving.value != null:
@@ -1069,7 +1051,7 @@ class PlayerMove:
 		__moving.value = DEFAULT_VALUES_3[PB_DATA_TYPE.BOOL]
 	func set_moving(value : bool) -> void:
 		__moving.value = value
-	
+
 	func _to_string() -> String:
 		return PBPacker.message_to_string(data)
 		
@@ -1096,10 +1078,10 @@ class PlayerFacing:
 	func _init():
 		var service
 		
-		__entity_id = PBField.new("entity_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
+		__player_id = PBField.new("player_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
 		service = PBServiceField.new()
-		service.field = __entity_id
-		data[__entity_id.tag] = service
+		service.field = __player_id
+		data[__player_id.tag] = service
 		
 		__facing = PBField.new("facing", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 2, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
 		service = PBServiceField.new()
@@ -1108,18 +1090,18 @@ class PlayerFacing:
 		
 	var data = {}
 	
-	var __entity_id: PBField
-	func has_entity_id() -> bool:
-		if __entity_id.value != null:
+	var __player_id: PBField
+	func has_player_id() -> bool:
+		if __player_id.value != null:
 			return true
 		return false
-	func get_entity_id() -> String:
-		return __entity_id.value
-	func clear_entity_id() -> void:
+	func get_player_id() -> String:
+		return __player_id.value
+	func clear_player_id() -> void:
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__entity_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
-	func set_entity_id(value : String) -> void:
-		__entity_id.value = value
+		__player_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
+	func set_player_id(value : String) -> void:
+		__player_id.value = value
 	
 	var __facing: PBField
 	func has_facing() -> bool:
@@ -1160,27 +1142,27 @@ class PlayerJoin:
 	func _init():
 		var service
 		
-		__entity_info = PBField.new("entity_info", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		__player_info = PBField.new("player_info", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
 		service = PBServiceField.new()
-		service.field = __entity_info
-		service.func_ref = Callable(self, "new_entity_info")
-		data[__entity_info.tag] = service
+		service.field = __player_info
+		service.func_ref = Callable(self, "new_player_info")
+		data[__player_info.tag] = service
 		
 	var data = {}
 	
-	var __entity_info: PBField
-	func has_entity_info() -> bool:
-		if __entity_info.value != null:
+	var __player_info: PBField
+	func has_player_info() -> bool:
+		if __player_info.value != null:
 			return true
 		return false
-	func get_entity_info() -> EntityInfo:
-		return __entity_info.value
-	func clear_entity_info() -> void:
+	func get_player_info() -> PlayerInfo:
+		return __player_info.value
+	func clear_player_info() -> void:
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__entity_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-	func new_entity_info() -> EntityInfo:
-		__entity_info.value = EntityInfo.new()
-		return __entity_info.value
+		__player_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_player_info() -> PlayerInfo:
+		__player_info.value = PlayerInfo.new()
+		return __player_info.value
 	
 	func _to_string() -> String:
 		return PBPacker.message_to_string(data)
@@ -1208,214 +1190,25 @@ class PlayerLeave:
 	func _init():
 		var service
 		
-		__entity_id = PBField.new("entity_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
+		__player_id = PBField.new("player_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
 		service = PBServiceField.new()
-		service.field = __entity_id
-		data[__entity_id.tag] = service
+		service.field = __player_id
+		data[__player_id.tag] = service
 		
 	var data = {}
 	
-	var __entity_id: PBField
-	func has_entity_id() -> bool:
-		if __entity_id.value != null:
+	var __player_id: PBField
+	func has_player_id() -> bool:
+		if __player_id.value != null:
 			return true
 		return false
-	func get_entity_id() -> String:
-		return __entity_id.value
-	func clear_entity_id() -> void:
+	func get_player_id() -> String:
+		return __player_id.value
+	func clear_player_id() -> void:
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__entity_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
-	func set_entity_id(value : String) -> void:
-		__entity_id.value = value
-	
-	func _to_string() -> String:
-		return PBPacker.message_to_string(data)
-		
-	func to_bytes() -> PackedByteArray:
-		return PBPacker.pack_message(data)
-		
-	func from_bytes(bytes : PackedByteArray, offset : int = 0, limit : int = -1) -> int:
-		var cur_limit = bytes.size()
-		if limit != -1:
-			cur_limit = limit
-		var result = PBPacker.unpack_message(data, bytes, offset, cur_limit)
-		if result == cur_limit:
-			if PBPacker.check_required(data):
-				if limit == -1:
-					return PB_ERR.NO_ERRORS
-			else:
-				return PB_ERR.REQUIRED_FIELDS
-		elif limit == -1 && result > 0:
-			return PB_ERR.PARSE_INCOMPLETE
-		return result
-	
-class AttackStart:
-	extends RefCounted
-	func _init():
-		var service
-		
-		__entity_id = PBField.new("entity_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
-		service = PBServiceField.new()
-		service.field = __entity_id
-		data[__entity_id.tag] = service
-		
-		__atk_id = PBField.new("atk_id", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 2, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
-		service = PBServiceField.new()
-		service.field = __atk_id
-		data[__atk_id.tag] = service
-		
-	var data = {}
-	
-	var __entity_id: PBField
-	func has_entity_id() -> bool:
-		if __entity_id.value != null:
-			return true
-		return false
-	func get_entity_id() -> String:
-		return __entity_id.value
-	func clear_entity_id() -> void:
-		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__entity_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
-	func set_entity_id(value : String) -> void:
-		__entity_id.value = value
-	
-	var __atk_id: PBField
-	func has_atk_id() -> bool:
-		if __atk_id.value != null:
-			return true
-		return false
-	func get_atk_id() -> int:
-		return __atk_id.value
-	func clear_atk_id() -> void:
-		data[2].state = PB_SERVICE_STATE.UNFILLED
-		__atk_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
-	func set_atk_id(value : int) -> void:
-		__atk_id.value = value
-	
-	func _to_string() -> String:
-		return PBPacker.message_to_string(data)
-		
-	func to_bytes() -> PackedByteArray:
-		return PBPacker.pack_message(data)
-		
-	func from_bytes(bytes : PackedByteArray, offset : int = 0, limit : int = -1) -> int:
-		var cur_limit = bytes.size()
-		if limit != -1:
-			cur_limit = limit
-		var result = PBPacker.unpack_message(data, bytes, offset, cur_limit)
-		if result == cur_limit:
-			if PBPacker.check_required(data):
-				if limit == -1:
-					return PB_ERR.NO_ERRORS
-			else:
-				return PB_ERR.REQUIRED_FIELDS
-		elif limit == -1 && result > 0:
-			return PB_ERR.PARSE_INCOMPLETE
-		return result
-	
-class AttackHit:
-	extends RefCounted
-	func _init():
-		var service
-		
-		__attacker_id = PBField.new("attacker_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
-		service = PBServiceField.new()
-		service.field = __attacker_id
-		data[__attacker_id.tag] = service
-		
-		var __hit_list_default: Array[String] = []
-		__hit_list = PBField.new("hit_list", PB_DATA_TYPE.STRING, PB_RULE.REPEATED, 2, true, __hit_list_default)
-		service = PBServiceField.new()
-		service.field = __hit_list
-		data[__hit_list.tag] = service
-		
-		__atk_id = PBField.new("atk_id", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 3, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
-		service = PBServiceField.new()
-		service.field = __atk_id
-		data[__atk_id.tag] = service
-		
-	var data = {}
-	
-	var __attacker_id: PBField
-	func has_attacker_id() -> bool:
-		if __attacker_id.value != null:
-			return true
-		return false
-	func get_attacker_id() -> String:
-		return __attacker_id.value
-	func clear_attacker_id() -> void:
-		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__attacker_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
-	func set_attacker_id(value : String) -> void:
-		__attacker_id.value = value
-	
-	var __hit_list: PBField
-	func get_hit_list() -> Array[String]:
-		return __hit_list.value
-	func clear_hit_list() -> void:
-		data[2].state = PB_SERVICE_STATE.UNFILLED
-		__hit_list.value.clear()
-	func add_hit_list(value : String) -> void:
-		__hit_list.value.append(value)
-	
-	var __atk_id: PBField
-	func has_atk_id() -> bool:
-		if __atk_id.value != null:
-			return true
-		return false
-	func get_atk_id() -> int:
-		return __atk_id.value
-	func clear_atk_id() -> void:
-		data[3].state = PB_SERVICE_STATE.UNFILLED
-		__atk_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
-	func set_atk_id(value : int) -> void:
-		__atk_id.value = value
-	
-	func _to_string() -> String:
-		return PBPacker.message_to_string(data)
-		
-	func to_bytes() -> PackedByteArray:
-		return PBPacker.pack_message(data)
-		
-	func from_bytes(bytes : PackedByteArray, offset : int = 0, limit : int = -1) -> int:
-		var cur_limit = bytes.size()
-		if limit != -1:
-			cur_limit = limit
-		var result = PBPacker.unpack_message(data, bytes, offset, cur_limit)
-		if result == cur_limit:
-			if PBPacker.check_required(data):
-				if limit == -1:
-					return PB_ERR.NO_ERRORS
-			else:
-				return PB_ERR.REQUIRED_FIELDS
-		elif limit == -1 && result > 0:
-			return PB_ERR.PARSE_INCOMPLETE
-		return result
-	
-class AttackEnd:
-	extends RefCounted
-	func _init():
-		var service
-		
-		__entity_id = PBField.new("entity_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
-		service = PBServiceField.new()
-		service.field = __entity_id
-		data[__entity_id.tag] = service
-		
-	var data = {}
-	
-	var __entity_id: PBField
-	func has_entity_id() -> bool:
-		if __entity_id.value != null:
-			return true
-		return false
-	func get_entity_id() -> String:
-		return __entity_id.value
-	func clear_entity_id() -> void:
-		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__entity_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
-	func set_entity_id(value : String) -> void:
-		__entity_id.value = value
+		__player_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
+	func set_player_id(value : String) -> void:
+		__player_id.value = value
 	
 	func _to_string() -> String:
 		return PBPacker.message_to_string(data)
@@ -1443,12 +1236,12 @@ class GameState:
 	func _init():
 		var service
 		
-		var __entities_default: Array[EntityInfo] = []
-		__entities = PBField.new("entities", PB_DATA_TYPE.MESSAGE, PB_RULE.REPEATED, 1, true, __entities_default)
+		var __players_default: Array[PlayerInfo] = []
+		__players = PBField.new("players", PB_DATA_TYPE.MESSAGE, PB_RULE.REPEATED, 1, true, __players_default)
 		service = PBServiceField.new()
-		service.field = __entities
-		service.func_ref = Callable(self, "add_entities")
-		data[__entities.tag] = service
+		service.field = __players
+		service.func_ref = Callable(self, "add_players")
+		data[__players.tag] = service
 		
 		__timestamp = PBField.new("timestamp", PB_DATA_TYPE.INT64, PB_RULE.OPTIONAL, 2, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT64])
 		service = PBServiceField.new()
@@ -1457,15 +1250,15 @@ class GameState:
 		
 	var data = {}
 	
-	var __entities: PBField
-	func get_entities() -> Array[EntityInfo]:
-		return __entities.value
-	func clear_entities() -> void:
+	var __players: PBField
+	func get_players() -> Array[PlayerInfo]:
+		return __players.value
+	func clear_players() -> void:
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__entities.value.clear()
-	func add_entities() -> EntityInfo:
-		var element = EntityInfo.new()
-		__entities.value.append(element)
+		__players.value.clear()
+	func add_players() -> PlayerInfo:
+		var element = PlayerInfo.new()
+		__players.value.append(element)
 		return element
 	
 	var __timestamp: PBField
@@ -1595,24 +1388,6 @@ class GameMessage:
 		service.func_ref = Callable(self, "new_player_facing")
 		data[__player_facing.tag] = service
 		
-		__attack_start = PBField.new("attack_start", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 8, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
-		service = PBServiceField.new()
-		service.field = __attack_start
-		service.func_ref = Callable(self, "new_attack_start")
-		data[__attack_start.tag] = service
-		
-		__attack_hit = PBField.new("attack_hit", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 9, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
-		service = PBServiceField.new()
-		service.field = __attack_hit
-		service.func_ref = Callable(self, "new_attack_hit")
-		data[__attack_hit.tag] = service
-		
-		__attack_end = PBField.new("attack_end", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 10, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
-		service = PBServiceField.new()
-		service.field = __attack_end
-		service.func_ref = Callable(self, "new_attack_end")
-		data[__attack_end.tag] = service
-		
 	var data = {}
 	
 	enum MessageTypeCase {
@@ -1624,9 +1399,6 @@ class GameMessage:
 		GAME_STATE = 5,
 		HEARTBEAT = 6,
 		PLAYER_FACING = 7,
-		ATTACK_START = 8,
-		ATTACK_HIT = 9,
-		ATTACK_END = 10,
 	}
 	var _message_type_case: int = 0
 
@@ -1653,12 +1425,6 @@ class GameMessage:
 		data[6].state = PB_SERVICE_STATE.UNFILLED
 		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[7].state = PB_SERVICE_STATE.UNFILLED
-		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[8].state = PB_SERVICE_STATE.UNFILLED
-		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[9].state = PB_SERVICE_STATE.UNFILLED
-		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[10].state = PB_SERVICE_STATE.UNFILLED
 		__player_join.value = PlayerJoin.new()
 		return __player_join.value
 	
@@ -1685,12 +1451,6 @@ class GameMessage:
 		data[6].state = PB_SERVICE_STATE.UNFILLED
 		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[7].state = PB_SERVICE_STATE.UNFILLED
-		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[8].state = PB_SERVICE_STATE.UNFILLED
-		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[9].state = PB_SERVICE_STATE.UNFILLED
-		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[10].state = PB_SERVICE_STATE.UNFILLED
 		__player_leave.value = PlayerLeave.new()
 		return __player_leave.value
 	
@@ -1717,12 +1477,6 @@ class GameMessage:
 		data[6].state = PB_SERVICE_STATE.UNFILLED
 		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[7].state = PB_SERVICE_STATE.UNFILLED
-		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[8].state = PB_SERVICE_STATE.UNFILLED
-		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[9].state = PB_SERVICE_STATE.UNFILLED
-		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[10].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = PlayerMove.new()
 		return __player_move.value
 	
@@ -1749,12 +1503,6 @@ class GameMessage:
 		data[6].state = PB_SERVICE_STATE.UNFILLED
 		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[7].state = PB_SERVICE_STATE.UNFILLED
-		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[8].state = PB_SERVICE_STATE.UNFILLED
-		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[9].state = PB_SERVICE_STATE.UNFILLED
-		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[10].state = PB_SERVICE_STATE.UNFILLED
 		__chat_message.value = ChatMessage.new()
 		return __chat_message.value
 	
@@ -1781,12 +1529,6 @@ class GameMessage:
 		data[6].state = PB_SERVICE_STATE.UNFILLED
 		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[7].state = PB_SERVICE_STATE.UNFILLED
-		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[8].state = PB_SERVICE_STATE.UNFILLED
-		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[9].state = PB_SERVICE_STATE.UNFILLED
-		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[10].state = PB_SERVICE_STATE.UNFILLED
 		__game_state.value = GameState.new()
 		return __game_state.value
 	
@@ -1813,12 +1555,6 @@ class GameMessage:
 		_message_type_case = 6
 		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[7].state = PB_SERVICE_STATE.UNFILLED
-		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[8].state = PB_SERVICE_STATE.UNFILLED
-		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[9].state = PB_SERVICE_STATE.UNFILLED
-		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[10].state = PB_SERVICE_STATE.UNFILLED
 		__heartbeat.value = Heartbeat.new()
 		return __heartbeat.value
 	
@@ -1845,110 +1581,8 @@ class GameMessage:
 		data[6].state = PB_SERVICE_STATE.UNFILLED
 		data[7].state = PB_SERVICE_STATE.FILLED
 		_message_type_case = 7
-		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[8].state = PB_SERVICE_STATE.UNFILLED
-		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[9].state = PB_SERVICE_STATE.UNFILLED
-		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[10].state = PB_SERVICE_STATE.UNFILLED
 		__player_facing.value = PlayerFacing.new()
 		return __player_facing.value
-	
-	var __attack_start: PBField
-	func has_attack_start() -> bool:
-		return data[8].state == PB_SERVICE_STATE.FILLED
-	func get_attack_start() -> AttackStart:
-		return __attack_start.value
-	func clear_attack_start() -> void:
-		data[8].state = PB_SERVICE_STATE.UNFILLED
-		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-	func new_attack_start() -> AttackStart:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[2].state = PB_SERVICE_STATE.UNFILLED
-		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[3].state = PB_SERVICE_STATE.UNFILLED
-		__chat_message.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[4].state = PB_SERVICE_STATE.UNFILLED
-		__game_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[5].state = PB_SERVICE_STATE.UNFILLED
-		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[6].state = PB_SERVICE_STATE.UNFILLED
-		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[7].state = PB_SERVICE_STATE.UNFILLED
-		data[8].state = PB_SERVICE_STATE.FILLED
-		_message_type_case = 8
-		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[9].state = PB_SERVICE_STATE.UNFILLED
-		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[10].state = PB_SERVICE_STATE.UNFILLED
-		__attack_start.value = AttackStart.new()
-		return __attack_start.value
-	
-	var __attack_hit: PBField
-	func has_attack_hit() -> bool:
-		return data[9].state == PB_SERVICE_STATE.FILLED
-	func get_attack_hit() -> AttackHit:
-		return __attack_hit.value
-	func clear_attack_hit() -> void:
-		data[9].state = PB_SERVICE_STATE.UNFILLED
-		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-	func new_attack_hit() -> AttackHit:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[2].state = PB_SERVICE_STATE.UNFILLED
-		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[3].state = PB_SERVICE_STATE.UNFILLED
-		__chat_message.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[4].state = PB_SERVICE_STATE.UNFILLED
-		__game_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[5].state = PB_SERVICE_STATE.UNFILLED
-		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[6].state = PB_SERVICE_STATE.UNFILLED
-		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[7].state = PB_SERVICE_STATE.UNFILLED
-		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[8].state = PB_SERVICE_STATE.UNFILLED
-		data[9].state = PB_SERVICE_STATE.FILLED
-		_message_type_case = 9
-		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[10].state = PB_SERVICE_STATE.UNFILLED
-		__attack_hit.value = AttackHit.new()
-		return __attack_hit.value
-	
-	var __attack_end: PBField
-	func has_attack_end() -> bool:
-		return data[10].state == PB_SERVICE_STATE.FILLED
-	func get_attack_end() -> AttackEnd:
-		return __attack_end.value
-	func clear_attack_end() -> void:
-		data[10].state = PB_SERVICE_STATE.UNFILLED
-		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-	func new_attack_end() -> AttackEnd:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[2].state = PB_SERVICE_STATE.UNFILLED
-		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[3].state = PB_SERVICE_STATE.UNFILLED
-		__chat_message.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[4].state = PB_SERVICE_STATE.UNFILLED
-		__game_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[5].state = PB_SERVICE_STATE.UNFILLED
-		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[6].state = PB_SERVICE_STATE.UNFILLED
-		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[7].state = PB_SERVICE_STATE.UNFILLED
-		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[8].state = PB_SERVICE_STATE.UNFILLED
-		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-		data[9].state = PB_SERVICE_STATE.UNFILLED
-		data[10].state = PB_SERVICE_STATE.FILLED
-		_message_type_case = 10
-		__attack_end.value = AttackEnd.new()
-		return __attack_end.value
 	
 	func get_message_type_case() -> int:
 		return _message_type_case

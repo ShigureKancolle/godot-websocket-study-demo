@@ -32,7 +32,6 @@ class_name KeyboardMouseDevice
 # 注意:InputBinding 是 static,改键后下次 poll 自动生效(因为 is_action_pressed 每帧重查)
 var _intent := InputIntent.new()
 
-
 ## 每帧采集键鼠输入,写入 intent
 ## 由 InputIntentProvider._process 调用
 func poll(intent: InputIntent) -> void:
@@ -59,3 +58,9 @@ func poll(intent: InputIntent) -> void:
 	var camera := get_viewport().get_camera_2d()
 	if camera != null:
 		intent.look_target = camera.get_global_mouse_position()
+
+	# 3. 读攻击键 → attack_pressed
+	if InputBinding.is_action_pressed("attack"):
+		print("attack pressed")
+		intent.attack_pressed = true
+		

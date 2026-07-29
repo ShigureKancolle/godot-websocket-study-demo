@@ -2,7 +2,9 @@
 
 [ext_resource type="Texture2D" uid="uid://dqn426cyblmg" path="res://tiledmap/Tileset.png" id="1_hhwcd"]
 [ext_resource type="Script" uid="uid://baakp84a8a7mh" path="res://Script/tiledmap/InfiniteTileMap.gd" id="2_infinite"]
+[ext_resource type="Script" uid="uid://curq5n42riq5x" path="res://Script/UI/Base/ScorllDemo.gd" id="3_3qc6h"]
 [ext_resource type="Script" uid="uid://beax8c4m0yb5u" path="res://Script/tiledmap/DebugCursor.gd" id="3_cursor"]
+[ext_resource type="Texture2D" uid="uid://b27deyshkigia" path="res://prefab/CommonTexture/panelInset_blue.png" id="4_aj2lf"]
 
 [sub_resource type="TileMapPattern" id="TileMapPattern_wbej7"]
 tile_data = PackedInt32Array(0, 262144, 6, 65536, 262144, 7, 131072, 262144, 8, 1, 327680, 6, 65537, 327680, 7, 131073, 327680, 8)
@@ -488,6 +490,53 @@ offset_top = 10.0
 offset_right = 140.0
 offset_bottom = 40.0
 text = "调试边框: 关"
+
+[node name="ScrollNode" type="Node2D" parent="DebugUI" unique_id=1183398862]
+script = ExtResource("3_3qc6h")
+
+[node name="NinePatchRect" type="NinePatchRect" parent="DebugUI/ScrollNode" unique_id=465260033]
+offset_right = 509.0
+offset_bottom = 74.0
+texture = ExtResource("4_aj2lf")
+region_rect = Rect2(0, 0, 93, 94)
+patch_margin_left = 20
+patch_margin_top = 27
+patch_margin_right = 52
+patch_margin_bottom = 39
+
+[node name="ScrollContainer" type="ScrollContainer" parent="DebugUI/ScrollNode" unique_id=821505374]
+offset_right = 509.0
+offset_bottom = 74.0
+
+[node name="ScrollItem" type="Control" parent="DebugUI/ScrollNode" unique_id=907113613]
+custom_minimum_size = Vector2(64, 80)
+layout_mode = 3
+anchors_preset = 0
+offset_right = 64.0
+offset_bottom = 80.0
+
+[node name="Name" type="RichTextLabel" parent="DebugUI/ScrollNode/ScrollItem" unique_id=533689239]
+layout_mode = 0
+offset_top = 50.0
+offset_right = 64.0
+offset_bottom = 100.0
+theme_override_colors/default_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/normal_font_size = 14
+theme_override_font_sizes/bold_font_size = 14
+theme_override_font_sizes/bold_italics_font_size = 14
+theme_override_font_sizes/italics_font_size = 14
+theme_override_font_sizes/mono_font_size = 14
+text = "右边+下边"
+fit_content = true
+scroll_active = false
+horizontal_alignment = 1
+
+[node name="TextureRect" type="TextureRect" parent="DebugUI/ScrollNode/ScrollItem" unique_id=13891390]
+layout_mode = 0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 48.0
+offset_bottom = 48.0
 
 [node name="DebugCursor" type="Node2D" parent="." unique_id=1773891959]
 script = ExtResource("3_cursor")

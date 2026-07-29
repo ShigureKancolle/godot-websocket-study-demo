@@ -32,10 +32,8 @@ func poll() -> WebSocketPeer.State:
 			print("连接成功")
 			_is_connected = true
 			MessageBus.instance().send("game.PlayerJoin", {
-				"player_info": {
+				"entity_info": {
 					"player_name": "测试名字",
-					"level": 1,
-					"score": 0,
 					"x": 0.0,
 					"y": 0.0
 				}
@@ -54,7 +52,7 @@ func poll() -> WebSocketPeer.State:
 	elif state == WebSocketPeer.STATE_CLOSED:
 		var code = _ws.get_close_code()
 		var reason = _ws.get_close_reason()
-		print("WebSocket 已关闭，代码：%d，原因 %s。干净得体：%s" % [code, reason, code != -1])
+		print("WebSocket 已关闭。 code: %d, reason: %s. code != -1: %s" % [code, reason, code != -1])
 
 	return state
 

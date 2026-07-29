@@ -16,7 +16,7 @@ GDScript 没有 eval,所以这里是「命令解析器」——
  解耦设计(核心)
 ============================================================================
 本脚本只「单向调用」现有单例:
-    - ClientStateMirror.all_players() / local_player_id() 等只读方法
+    - ClientStateMirror.all_entities() / local_entity_id() 等只读方法
     - MessageBus.send() / list_messages() / list_handlers()
     - MessageContract.get_message() / is_loaded()
     - SignalMgr.fire_signal()

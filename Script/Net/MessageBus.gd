@@ -51,10 +51,22 @@ func _init():
 		_auto_register()
 		onproto("game.PlayerJoin", _on_player_join)
 
+# 收到 PlayerJoin 广播时,把服务端分配的 entity_id 提取出来,存到 ClientStateMirror
+# 的 _local_entity_id(渲染层用这个区分本地玩家 vs 远程玩家)
+#
+# 字段从 entity_info.entity_id 取(统一 Entity 模型后,proto 用 EntityInfo 替代 PlayerInfo):
+#   - 之前是 msg["player_info"]["player_id"]
+#   - 现在是 msg["entity_info"]["entity_id"]
+#
+# _player_id 静态变量保留作为兼容别名(部分老代码如 chat_main 仍引用),
+# 但推荐用 ClientStateMirror.local_entity_id() 访问——那里是「单一真相源」
 static func _on_player_join(msg: Dictionary):
-	# 注意: 这里取的是 player_id，不是 player_name
-	# 之前错误地用了 player_name 赋给 _player_id，导致 chat_main.gd 发消息时 player_id 是名字而非 ID
-	_player_id = msg["player_info"]["player_id"]
+	var entity_info: Dictionary = msg.get("entity_info", {})
+	var eid: String = entity_info.get("entity_id", "")
+	if eid == "":
+		return
+	MessageBus._player_id = eid
+	ClientStateMirror.instance()._local_entity_id = eid
 
 # snake_case -> PascalCase（player_join -> PlayerJoin）
 static func _snake_to_pascal(s: String) -> String:
@@ -251,7 +263,8 @@ func send(protoname: String, protodata: Dictionary = {}, websocket = null) -> vo
 	if ws == null:
 		push_error("未设置 websocket 连接，请先调用 set_websocket 或传入 websocket 参数")
 		return
-	print("发送消息C->S %s" % [full_name])
+	if "Attack" in full_name:
+		print("发送消息C->S %s" % [full_name])
 	await ws.send(data)
 
 # 分发接收到的消息：bytes -> protobuf -> 字典 -> 调用 handler
@@ -285,7 +298,8 @@ func dispatch(data: PackedByteArray, ctx: MessageContext = null) -> bool:
 			var data_dict := _message_to_dict(sub_msg)
 
 			if MessageBus._handlers.has(full_name):
-				print("接收消息S->C %s" % [full_name])
+				if "Attack" in full_name:
+					print("接收消息S->C %s" % [full_name])
 				var handler: Callable = MessageBus._handlers[full_name]
 				if ctx != null:
 					await handler.call(data_dict, ctx)

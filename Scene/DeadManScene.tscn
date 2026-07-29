@@ -3,6 +3,7 @@
 [ext_resource type="Script" uid="uid://brcxfjw0gjems" path="res://Script/dead_man_scene.gd" id="1_kxmo5"]
 [ext_resource type="Texture2D" uid="uid://dhyj7gac1tpxk" path="res://prefab/CommonTexture/panel_beige.png" id="2_vsqur"]
 [ext_resource type="Texture2D" uid="uid://csdd00cnx8evu" path="res://prefab/CommonTexture/buttonRound_beige.png" id="3_xbt3w"]
+[ext_resource type="Script" uid="uid://bsya6e2ymvueq" path="res://Script/role/CameraFollow.gd" id="4_cv315"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_xbt3w"]
 
@@ -44,3 +45,4 @@ icon_alignment = 1
 
 [node name="Camera2D" type="Camera2D" parent="." unique_id=1667873834]
 position = Vector2(576, 359)
+script = ExtResource("4_cv315")

@@ -13,7 +13,7 @@ extends RefCounted
     - 通过 console.print_line 输出结果
 
 本文件只「单向调用」现有单例,不修改核心代码:
-    - ClientStateMirror(只读:all_players/local_player_id/player_count/get_player)
+    - ClientStateMirror(只读:all_entities/local_entity_id/entity_count/get_entity)
     - MessageBus(send / list_messages / list_handlers)
     - MessageContract(get_message / is_loaded / is_valid_outbound)
     - SignalMgr(fire_signal)
@@ -59,27 +59,27 @@ func cmd_clear(_args: PackedStringArray) -> void:
 # ---------------------------------------------------------------------------
 func cmd_state(_args: PackedStringArray) -> void:
 	var mirror = ClientStateMirror.instance()
-	var players = mirror.all_players()
-	console.print_line("[color=#ffff7f]镜像状态 (玩家数: %d):[/color]" % players.size())
-	for p in players:
-		console.print_line("  %s" % str(p))
+	var entities = mirror.all_entities()
+	console.print_line("[color=#ffff7f]镜像状态 (实体数: %d):[/color]" % entities.size())
+	for e in entities:
+		console.print_line("  %s" % str(e))
 
 
 func cmd_me(_args: PackedStringArray) -> void:
 	var mirror = ClientStateMirror.instance()
-	var pid := mirror.local_player_id()
-	if pid == "":
-		console.print_line("[color=#ff7f7f]本地玩家ID未设置(可能还没收到 PlayerJoin 响应)[/color]")
+	var eid := mirror.local_entity_id()
+	if eid == "":
+		console.print_line("[color=#ff7f7f]本地玩家 entity_id 未设置(可能还没收到 PlayerJoin 响应)[/color]")
 		return
-	console.print_line("本地玩家ID: %s" % pid)
-	var p = mirror.get_player(pid)
-	if p != null:
-		console.print_line("  信息: %s" % str(p))
+	console.print_line("本地玩家 entity_id: %s" % eid)
+	var e = mirror.get_entity(eid)
+	if e != null:
+		console.print_line("  信息: %s" % str(e))
 
 
 func cmd_count(_args: PackedStringArray) -> void:
 	var mirror = ClientStateMirror.instance()
-	console.print_line("镜像玩家数: %d" % mirror.player_count())
+	console.print_line("镜像实体数: %d" % mirror.entity_count())
 
 
 func cmd_ws(_args: PackedStringArray) -> void:
@@ -146,7 +146,7 @@ func cmd_contract(args: PackedStringArray) -> void:
 func cmd_send(args: PackedStringArray) -> void:
 	if args.size() < 2:
 		console.print_line("[color=#ff7f7f]用法: send <name> <json>[/color]")
-		console.print_line("例: send PlayerMove '{\"player_id\":\"xxx\",\"x\":100,\"y\":200}'")
+		console.print_line("例: send PlayerMove '{\"entity_id\":\"player:xxx\",\"x\":100,\"y\":200}'")
 		return
 	var name := args[0]
 	var json_str := args[1]
