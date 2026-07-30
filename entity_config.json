@@ -1,0 +1,29 @@
+{
+    "_comment": "实体配置表(单数据源,双端共享。改完跑 tools/sync_config.py 同步)",
+    "_body_shape_values": "circle|rect|sector|ring(和服务端 ShapeType enum 的 value 对齐)",
+    "_angle_unit": "body_params 里的 angle 用角度(degree),loader 读取时转弧度",
+
+    "player": {
+        "_desc": "玩家:可移动/可攻击/可被攻击/可断连,圆形碰撞半径 24",
+        "capabilities": {
+            "can_move": true,
+            "can_attack": true,
+            "can_be_hurt": true,
+            "can_disconnect": true
+        },
+        "body_shape": "circle",
+        "body_params": {"radius": 24.0}
+    },
+
+    "stake": {
+        "_desc": "木桩:不可移动/不可攻击/可被攻击/不断连,圆形碰撞半径 30",
+        "capabilities": {
+            "can_move": false,
+            "can_attack": false,
+            "can_be_hurt": true,
+            "can_disconnect": false
+        },
+        "body_shape": "circle",
+        "body_params": {"radius": 30.0}
+    }
+}
