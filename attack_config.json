@@ -10,7 +10,9 @@
                 "shape": "sector",
                 "params": {"radius": 35.0, "angle": 120.0},
                 "duration": 583,
-                "hit_time": 83
+                "hit_time": 83,
+                "hit_mask": 2,
+                "damage_multiplier": 1.1
             }
         ]
     },
@@ -22,13 +24,15 @@
                 "shape": "sector",
                 "params": {"radius": 35.0, "angle": 120.0},
                 "duration": 583,
-                "hit_time": 83
+                "hit_time": 83,
+                "damage_multiplier": 0.7
             },
             {
                 "shape": "sector",
                 "params": {"radius": 35.0, "angle": 120.0},
                 "duration": 583,
-                "hit_time": 83
+                "hit_time": 83,
+                "damage_multiplier": 0.9
             }
         ]
     }
