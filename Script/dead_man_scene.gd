@@ -18,13 +18,13 @@ const RoleScript = preload("res://Script/role/Role.gd")
 # 实体节点表: entity_id -> Role 实例
 # 所有可交互物体(玩家+木桩)都在这一张表里,和服务端 _entities 对齐
 # 用它快速查找某个 entity_id 对应的 Role,收到 entity_updated 信号时更新它
-var _entities: Dictionary = {}
+var _entities: Dictionary[String, Role] = {}
 var _entity_layer: Node2D = null  # 所有 Role 的父节点,方便统一管理
 var _effect_layer: Node2D = null  # 所有 Effect 的父节点,方便统一管理
 
 
 func _ready() -> void:
-	$E_Back.connect("pressed", _on_back_pressed)
+	$UILayer/E_Back.connect("pressed", _on_back_pressed)
 	_entity_layer = $EntityLayer
 	_effect_layer = $EffectLayer
 
@@ -34,13 +34,16 @@ func _ready() -> void:
 	mirror.state_replaced.connect(_on_state_replaced)
 	mirror.entity_updated.connect(_on_entity_updated)
 	mirror.entity_removed.connect(_on_entity_removed)
+	mirror.entity_hurt_effect.connect(_on_entity_hurt_effect)
+	mirror.stats_inited.connect(_on_stats_inited)
+	mirror.stats_changed.connect(_on_stats_changed)
+	mirror.hp_changed.connect(_on_hp_changed)
 
 	# 如果 StateMirror 里已经有状态（比如进入场景前就收到了 GameState），
 	# 主动用现有状态刷一次——否则要等下一次 state_replaced 才显示
 	# 这种「进入场景时主动拉取一次」的写法很常见，避免信号漏接
 	if mirror.entity_count() > 0:
 		_on_state_replaced(mirror.all_entities())
-
 
 # StateMirror.state_replaced 信号: 全量替换
 # 服务端发 GameState 快照时触发，收到一份完整的实体列表(玩家+木桩)
@@ -81,6 +84,32 @@ func _on_entity_removed(entity_id: String) -> void:
 		_entities[entity_id].queue_free()
 		_entities.erase(entity_id)
 
+# StateMirror.entity_hurt_effect 信号: 实体受击特效
+# 播受击特效(渲染层监听这个信号,在受击者位置播特效)
+func _on_entity_hurt_effect(pos: Vector2, atk_id: int) -> void:
+	# 播受击特效(在受击者位置播特效
+	# TODO 后期再改造成effectmgr用对象池
+	if atk_id == 1001:
+		var effect = preload("res://prefab/effect/PlayerHitEffect.tscn").instantiate()
+		effect.position = pos
+		effect.get_node("AnimatedSprite2D").animation_finished.connect(effect.queue_free)  # 播完自动删除
+		_effect_layer.add_child(effect)
+
+func _on_stats_inited(combats: Array[ClientStateMirror.ClientCombatStats]) -> void:
+	for combat in combats:
+		if _entities.has(combat.entity_id):
+			_entities[combat.entity_id].on_stats_updated(combat)
+
+func _on_stats_changed(combat: ClientStateMirror.ClientCombatStats) -> void:
+	if _entities.has(combat.entity_id):
+		_entities[combat.entity_id].on_stats_updated(combat)
+
+func _on_hp_changed(entity_id: String, cur_hp: int, damage: int, attacker_id: String, atk_id: int, atk_shape_idx: int) -> void:
+	if damage != 0:
+		print("Damage:", damage)
+	if _entities.has(entity_id):
+		_entities[entity_id].on_hp_changed(cur_hp, damage, attacker_id, atk_id, atk_shape_idx)
+
 
 # 创建一个 Role 实例并加入场景
 # info 是 ClientEntityInfo(强类型),含 entity_id / entity_type / x / y / facing / state 等
@@ -90,8 +119,16 @@ func _create_role(info: ClientEntityInfo) -> void:
 	role.setup(info)
 	_entity_layer.add_child(role)
 	_entities[info.entity_id] = role
+	var mirror = ClientStateMirror.instance()
+	if mirror.get_combat(info.entity_id) != null:
+		role.on_stats_updated(mirror.get_combat(info.entity_id))
+		role.on_hp_changed(mirror.get_combat(info.entity_id).cur_hp, 0, "", 0, 0)
+	role.on_entity_updated(info)
 
 
 func _on_back_pressed() -> void:
+	# 清空 StateMirror 镜像数据,避免跨场景脏数据
+	# (木桩场景和正式地图场景共享同一个 StateMirror 单例,不清空会残留旧实体)
+	ClientStateMirror.instance().clear()
 	# 返回大厅
 	get_tree().change_scene_to_file.call_deferred("res://prefab/main/MainScene.tscn")

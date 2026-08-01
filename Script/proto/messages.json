@@ -93,6 +93,36 @@
             "category": "meta",
             "state_affecting": false,
             "comment": "双向心跳，保活用，不碰状态"
+        },
+        "StatsInit": {
+            "direction": "S2C",
+            "category": "snapshot",
+            "state_affecting": false,
+            "comment": "战斗属性全量快照(新玩家加入时发给该玩家)。entries 是 CombatStatsEntry 数组,含 entity_id/max_hp/cur_hp/attack_power/defense。客户端据此初始化本地 _combats 战斗属性表。state_affecting=false 因为是快照同步,不是状态变更"
+        },
+        "StatsChanged": {
+            "direction": "S2C",
+            "category": "snapshot",
+            "state_affecting": true,
+            "comment": "单个实体战斗属性变更(强化时广播,新玩家加入时给其他人发新玩家属性)。字段:entity_id/max_hp/attack_power/defense(不含 cur_hp,cur_hp 走 HpChanged)。客户端更新 _combats 表对应条目"
+        },
+        "HpChanged": {
+            "direction": "S2C",
+            "category": "event",
+            "state_affecting": true,
+            "comment": "血量变更(每次 hurt 时广播,含飘字数据)。字段:entity_id(被打的人)/cur_hp(剩余血量)/damage(本次伤害,飘字数字)/attacker_id(谁打的,飘字定位用)/atk_id/atk_shape_idx(算命中点用)。damage=0 表示非伤害性血量同步(如新玩家加入时初始化)。客户端更新 cur_hp + 发伤害飘字"
+        },
+        "EntityDead": {
+            "direction": "S2C",
+            "category": "event",
+            "state_affecting": true,
+            "comment": "实体死亡(服务端 apply_hurt 判定 hp<=0 且 can_die=True 时广播)。字段:entity_id(死亡者)/attacker_id(击杀者)/atk_id(致死攻击)。客户端收到后切 DeadState 播死亡动画,但不移除节点——等 EntityRemove 来才 queue_free。服务端立即判定死亡但延迟移除实体(DeadTimer 控制),让客户端有时间播死亡动画。玩家 can_die=False 不会触发此消息(死亡流程暂不实现)"
+        },
+        "EntityRemove": {
+            "direction": "S2C",
+            "category": "meta",
+            "state_affecting": true,
+            "comment": "实体移除(DeadTimer 到期后服务端调 remove_entity + 广播)。字段:entity_id。客户端收到后 queue_free 对应 Role 节点。和 PlayerLeave 的区别:PlayerLeave 是断连(实体直接消失),EntityRemove 是死亡(播完死亡动画后才移除)。木桩不会触发(不会死),玩家不会触发(can_die=False)"
         }
     }
 }

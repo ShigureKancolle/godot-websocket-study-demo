@@ -46,7 +46,7 @@ Role 的「坐标」不归自己管:
  强类型 ClientEntityInfo(本次重构)
 ============================================================================
 setup/on_entity_updated 的参数从 Dictionary 改为 ClientEntityInfo:
-    - 字段访问用 info.x / info.state 而非 info["x"] / info["state"]
+	- 字段访问用 info.x / info.state 而非 info["x"] / info["state"]
     - entity_type 从 String 改为 ClientEntityInfo.EntityType 枚举
     - match 用 EntityType.PLAYER / EntityType.STAKE 做穷尽性检查
 """
@@ -60,6 +60,9 @@ var entity_id: String = ""
 # setup 时从 info.entity_type 取出并缓存,用于决定挂什么组件、如何更新
 # 用枚举而非字符串:match 有穷尽性检查,拼错编译期报错
 var entity_type: ClientEntityInfo.EntityType = ClientEntityInfo.EntityType.UNKNOWN
+
+# 战斗数据
+var entity_combat: ClientStateMirror.ClientCombatStats = null
 
 
 ## 初始化 Role: 根据 ClientEntityInfo 决定挂什么组件
@@ -76,6 +79,8 @@ func setup(info: ClientEntityInfo) -> void:
 	_remove_component("PlayerVisual")
 	_remove_component("LocalPlayerController")
 	_remove_component("AnimStateMachine")
+	_remove_component("HpProgressBar")
+	_remove_component("MpProgressBar")
 
 	# 按 entity_type 分发挂载组件
 	# 当前实现:
@@ -87,6 +92,10 @@ func setup(info: ClientEntityInfo) -> void:
 			_setup_player(info)
 		ClientEntityInfo.EntityType.STAKE:
 			_setup_stake(info)
+		ClientEntityInfo.EntityType.ENEMY_SLIME:
+			_setup_enemy(info)
+		ClientEntityInfo.EntityType.ENEMY_SKELETON:
+			_setup_enemy(info)
 		_:
 			# 未知类型:按 player 处理(兼容性兜底,日志告警便于发现配置错误)
 			push_warning("Role.setup: 未知 entity_type=%s,按 player 处理" % info.type_string())
@@ -124,6 +133,14 @@ func _setup_player(info: ClientEntityInfo) -> void:
 		add_child(controller)
 		controller.setup(info)
 
+	# 血条
+	var hp_bar = preload("res://prefab/role/ProgressBar.tscn").instantiate()
+	hp_bar.name = "HpProgressBar"
+	add_child(hp_bar)
+	hp_bar.set_type("hp")
+	hp_bar.set_auto_hide(false)
+	hp_bar.position = Vector2(0, -39)
+
 
 ## 设置木桩类型实体: 当前简化为只挂 PlayerVisual(占位)
 ## 未来可换成专门的 StakeVisual(用木桩贴图,不挂 AnimatedSprite2D)
@@ -135,6 +152,7 @@ func _setup_stake(info: ClientEntityInfo) -> void:
 	visual.name = "PlayerVisual"
 	add_child(visual)
 	visual.setup(info)
+	visual.set_entity_name("木桩")
 	# AnimStateMachine(没有动画状态切换需求,简化)
 	var anim_machine = preload("res://Script/statemachine/AnimState/AnimStateMachine.gd").new()
 	anim_machine.name = "AnimStateMachine"
@@ -143,6 +161,37 @@ func _setup_stake(info: ClientEntityInfo) -> void:
 	# 木桩不挂 LocalPlayerController(不被本地控制)
 	# 如果未来木桩需要 hurt 动画,通过 entity_updated 信号里的 state 字段驱动即可
 	# (StateMirror._on_attack_hit 会设 state="hurt" 并 emit entity_updated)
+
+	# 血条
+	var hp_bar = preload("res://prefab/role/ProgressBar.tscn").instantiate()
+	hp_bar.name = "HpProgressBar"
+	add_child(hp_bar)
+	hp_bar.set_type("hp")
+	hp_bar.set_auto_hide(false)
+	hp_bar.position = Vector2(0, -39)
+
+func _setup_enemy(info: ClientEntityInfo) -> void:
+	_setup_player(info)
+	var visual = get_node_or_null("PlayerVisual")
+	if visual != null:
+		visual.set_entity_name(info.enum_type_string())
+
+func on_hp_changed(cur_hp: int, damage: int, attacker_id: String, atk_id: int, atk_shape_idx: int) -> void:
+	# damage为0时是初始化 不跳字
+	var hp_bar = get_node_or_null("HpProgressBar")
+	if hp_bar != null:
+		hp_bar.set_value(cur_hp)
+		hp_bar.set_percentage(cur_hp * 1.0 / entity_combat.max_hp)
+
+func on_stats_updated(combat: ClientStateMirror.ClientCombatStats) -> void:
+	if entity_combat == null:
+		# 只有init的时候需要赋值一下 其他时候已经更新了combat了 直接处理其他逻辑
+		entity_combat = combat
+
+	# 显示之类的逻辑
+	var hp_bar = get_node_or_null("HpProgressBar")
+	if hp_bar != null:
+		hp_bar.set_max(combat.max_hp)
 
 
 ## 收到 StateMirror 的 entity_updated 信号时调用,更新坐标、朝向、动画状态

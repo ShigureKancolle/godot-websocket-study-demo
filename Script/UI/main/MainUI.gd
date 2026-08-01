@@ -7,14 +7,26 @@ var connect_time = 0.0
 func _ready():
 	SignalMgr.register_handler("websocket_connected", Callable(self, "_on_websocket_connected"))
 	$Bg/E_Chat.pressed.connect(_on_click_chat)
-	# 进入游戏场景（木桩场景）的按钮
-	# 当前 dead_man_scene 只做玩家同步验证，后续会加木桩玩法
+	# 进入木桩测试场景的按钮
 	$Bg/E_Game.pressed.connect(_on_click_game)
 	# 进入无限地图调试场景的按钮
 	# 无限地图当前是纯客户端独立场景（不需要 WebSocket），所以一开始就可见
 	$Bg/E_Map.pressed.connect(_on_click_map)
+	# 进入正式游戏场景的按钮(接入无限地图 + 玩家同步 + 战斗)
+	$Bg/E_GameReal.pressed.connect(_on_click_game_real)
 	$Bg/E_Chat.visible = false
 	$Bg/E_Game.visible = false
+	$Bg/E_GameReal.visible = false
+
+	# 返回大厅时 MainScene 会被重新实例化,WebSocket 是 autoload 跨场景存活
+	# 所以这里要检查当前状态:已连就直接显示"已连接"+显示按钮,不用等信号
+	# (信号 websocket_connected 只在首次连接时发一次,返回大厅时不会再发)
+	if MyWebSocketClient.instance().is_connected_to_server():
+		$Bg/E_WebScoketState.text = "已连接"
+		$Bg/E_Chat.visible = true
+		$Bg/E_Game.visible = true
+		$Bg/E_GameReal.visible = true
+		ddd_idx = 3  # 跳过"连接中..."动画
 
 func _process(_delta):
 	if ddd_idx < 3:
@@ -37,6 +49,7 @@ func _on_websocket_connected(data: Dictionary):
 
 	$Bg/E_Chat.visible = true
 	$Bg/E_Game.visible = true
+	$Bg/E_GameReal.visible = true
 
 
 func _on_click_chat():
@@ -47,12 +60,35 @@ func _on_click_chat():
 
 
 func _on_click_game():
-	# 进入游戏场景（木桩场景）
-	# 和聊天界面一样用 instantiate 方式加到当前场景
-	# dead_man_scene.gd 的 _ready 会自动连接 StateMirror 信号显示玩家
-	var target_scene = load("res://Scene/DeadManScene.tscn")
-	var target_scene_instance = target_scene.instantiate()
-	add_child(target_scene_instance)
+	# 进入木桩测试场景
+	# 先发 PlayerJoin 让服务端创建实体,再切场景
+	# 切场景前发消息:WebSocket 是异步的,消息会在切场景期间被服务端处理,
+	# 切到 DeadManScene 时 _ready 会主动拉取 StateMirror 已有的镜像数据
+	MessageBus.instance().send("game.PlayerJoin", {
+		"entity_info": {
+			"player_name": "测试名字",
+			"x": 0.0,
+			"y": 0.0
+		}
+	})
+	# 用 change_scene_to_file 真正切场景(替换当前场景树)
+	# 原来用 add_child 叠加会导致 MainScene 按钮还能响应(背景场景仍存活)
+	# call_deferred:确保消息发出后再切场景(避免切场景打断消息发送)
+	get_tree().change_scene_to_file.call_deferred("res://Scene/DeadManScene.tscn")
+
+
+func _on_click_game_real():
+	# 进入正式游戏场景(接入无限地图)
+	# 和木桩场景一样:先发 PlayerJoin,再切场景
+	# GameScene 继承自 dead_man_scene,复用全部实体/战斗逻辑,额外接入 InfiniteTileMap
+	MessageBus.instance().send("game.PlayerJoin", {
+		"entity_info": {
+			"player_name": "测试名字",
+			"x": 0.0,
+			"y": 0.0
+		}
+	})
+	get_tree().change_scene_to_file.call_deferred("res://Scene/GameScene.tscn")
 
 
 func _on_click_map():

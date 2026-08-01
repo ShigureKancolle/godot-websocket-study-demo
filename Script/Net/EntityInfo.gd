@@ -11,8 +11,8 @@ class_name ClientEntityInfo
 之前 StateMirror._entities 存 Dictionary,字段was访问靠字符串 key(entity["state"]),
 问题:
     - 字段名拼错运行时才报错,IDE 无法补全/检查
-    - 类型不明确,entity["facing"] 是 float 还是 int 全sdsd靠记忆
-    - 容易写出 entity["atk_id"] = ... 这种往字典塞非 EntityInfo 字段的代码
+	- 类型不明确,entity["facing"] 是 float 还是 int 全sdsd靠记忆
+	- 容易写出 entity["atk_id"] = ... 这种往字典塞非 EntityInfo 字段的代码
 
 改用强类型 RefCounted:
     - 字段类型在编辑器/IDE 可见,拼错编译期报错
@@ -25,7 +25,7 @@ class_name ClientEntityInfo
 服务端是 Python dataclass(server/game/game_room.py),这里是 GDScript RefCounted。
 字段对齐(服务端是权威,客户端镜像):
     - entity_id: String         (服务端 str)
-    - entity_type: EntityType   (服务端 str "player"/"stake",客户端枚举)
+	- entity_type: EntityType   (服务端 str "player"/"stake",客户端枚举)
     - x, y: float               (服务端 float)
     - facing: float             (服务端 float,弧度)
     - state: String             (服务端 str: idle/run/attacking/hurt)
@@ -55,6 +55,8 @@ class_name ClientEntityInfo
 enum EntityType {
 	PLAYER,   # 玩家(可移动/可攻击/可被攻击)
 	STAKE,    # 木桩(不可移动/不可攻击/可被攻击)
+	ENEMY_SLIME, # 敌人(可移动/可攻击/可被攻击)
+	ENEMY_SKELETON,	# 敌人(可移动/可攻击/可被攻击)
 	UNKNOWN,  # 未知类型(兜底:from_string 找不到匹配时返回,match 走默认分支)
 }
 
@@ -90,6 +92,10 @@ var player_name: String = ""
 # 注:目前客户端没有读取此字段的逻辑,保留是为了和原 dict 行为一致
 var atk_id: int = 0
 
+# 注:body_color 不在这里——它是「类型级显示属性」,由 entity_type 决定,
+# 走 ConfigLoader.get_capability(entity_type).body_color 本地查表,不进网络消息、不进状态镜像。
+# 和 speed 同原则:类型属性本地查表,实例状态才走服务端同步。
+
 
 # ---------------------------------------------------------------------------
 # 静态构造(从 dict 转换)
@@ -119,6 +125,10 @@ static func from_string(s: String) -> EntityType:
 			return EntityType.PLAYER
 		"stake":
 			return EntityType.STAKE
+		"enemy_slime":
+			return EntityType.ENEMY_SLIME
+		"enemy_skeleton":
+			return EntityType.ENEMY_SKELETON
 		_:
 			return EntityType.UNKNOWN
 
@@ -130,6 +140,10 @@ static func type_to_string(t: EntityType) -> String:
 			return "player"
 		EntityType.STAKE:
 			return "stake"
+		EntityType.ENEMY_SLIME:
+			return "enemy_slime"
+		EntityType.ENEMY_SKELETON:
+			return "enemy_skeleton"
 		_:
 			return "unknown"
 

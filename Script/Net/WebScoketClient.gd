@@ -19,6 +19,10 @@ func connect_to_url(url: String):
 	_ws = WebSocketPeer.new()
 	print("连接服务器: %s" % url)
 	_ws.connect_to_url(url)
+
+## 当前是否已连上(供 UI 层查询,避免 MainScene 重建后状态显示错误)
+func is_connected_to_server() -> bool:
+	return _is_connected and _ws != null and _ws.get_ready_state() == WebSocketPeer.STATE_OPEN
 	
 func poll() -> WebSocketPeer.State:
 	_ws.poll()
@@ -31,13 +35,9 @@ func poll() -> WebSocketPeer.State:
 		if not _is_connected:
 			print("连接成功")
 			_is_connected = true
-			MessageBus.instance().send("game.PlayerJoin", {
-				"entity_info": {
-					"player_name": "测试名字",
-					"x": 0.0,
-					"y": 0.0
-				}
-			})
+			# PlayerJoin 不在这里自动发——改为用户点击「开始游戏」时发
+			# 原因:自动发会导致一开游戏就进游戏流程,没有大厅停留
+			# 且 DeadManScene 还没实例化时 StatsInit 信号无人接收,造成时序问题
 			SignalMgr.fire_signal("websocket_connected", {"message": "WebSocket 已连接"})
 		while _ws.get_available_packet_count():
 			var packet = _ws.get_packet()

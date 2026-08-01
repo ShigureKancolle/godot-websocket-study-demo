@@ -17,8 +17,11 @@ func _register_gd_script_constants():
 func _process(_delta):
 	var state = MyWebSocketClient.instance().poll()
 	if state == WebSocketPeer.STATE_CLOSED:
-		print("WebSocket 已关闭")
-	set_process(state != WebSocketPeer.STATE_CLOSED)
+		# 不用 set_process(false) 停止轮询——
+		# 后续要做断线重连,需要持续 poll 触发重连逻辑
+		# 现在先只打印日志,重连功能留待后面实现
+		# (原代码 set_process(false) 会让 WebSocket 永远无法恢复)
+		pass
 
 func _init_websocket():
 	var mb = MessageBus.instance()

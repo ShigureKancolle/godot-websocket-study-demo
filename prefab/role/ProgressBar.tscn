@@ -1,0 +1,44 @@
+[gd_scene format=3 uid="uid://vdrmdp0ec2f7"]
+
+[ext_resource type="Script" uid="uid://bn5n5gqbua2go" path="res://Script/role/progressBar.gd" id="1_c3de4"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_c3de4"]
+bg_color = Color(0.115162335, 0.115162335, 0.115162335, 0.5019608)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_h13ic"]
+bg_color = Color(0.1254902, 0.41960785, 1, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.8, 0.8, 0.8, 0)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[node name="HpBar" type="Node2D" unique_id=2036777738]
+script = ExtResource("1_c3de4")
+
+[node name="ProgressBar" type="ProgressBar" parent="." unique_id=1247145707]
+offset_left = -24.0
+offset_top = -10.0
+offset_right = 24.0
+theme_override_styles/background = SubResource("StyleBoxFlat_c3de4")
+theme_override_styles/fill = SubResource("StyleBoxFlat_h13ic")
+value = 50.0
+show_percentage = false
+
+[node name="ProgressValue" type="Label" parent="ProgressBar" unique_id=89960429]
+layout_mode = 0
+offset_top = -1.0
+offset_right = 48.0
+offset_bottom = 11.0
+theme_override_font_sizes/font_size = 8
+text = "10/100"
+horizontal_alignment = 1
+vertical_alignment = 1

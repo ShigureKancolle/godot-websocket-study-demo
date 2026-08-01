@@ -81,7 +81,7 @@ theme_override_styles/pressed = SubResource("StyleBoxEmpty_cbmu2")
 theme_override_styles/hover = SubResource("StyleBoxEmpty_1q0pk")
 theme_override_styles/disabled = SubResource("StyleBoxEmpty_aor65")
 theme_override_styles/focus = SubResource("StyleBoxEmpty_k0nax")
-text = "游戏"
+text = "木桩"
 icon_alignment = 1
 
 [node name="E_Map" type="Button" parent="Bg" unique_id=2002370606]
@@ -97,4 +97,19 @@ theme_override_styles/hover = SubResource("StyleBoxEmpty_1q0pk")
 theme_override_styles/disabled = SubResource("StyleBoxEmpty_aor65")
 theme_override_styles/focus = SubResource("StyleBoxEmpty_k0nax")
 text = "地图"
+icon_alignment = 1
+
+[node name="E_GameReal" type="Button" parent="Bg" unique_id=2002370607]
+layout_mode = 0
+offset_left = 153.0
+offset_top = 39.0
+offset_right = 188.0
+offset_bottom = 77.0
+theme_override_icons/icon = ExtResource("4_game")
+theme_override_styles/normal = SubResource("StyleBoxEmpty_jl56r")
+theme_override_styles/pressed = SubResource("StyleBoxEmpty_cbmu2")
+theme_override_styles/hover = SubResource("StyleBoxEmpty_1q0pk")
+theme_override_styles/disabled = SubResource("StyleBoxEmpty_aor65")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_k0nax")
+text = "游戏"
 icon_alignment = 1

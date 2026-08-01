@@ -56,6 +56,7 @@ var entity_id: String = ""
 # 预制体里的节点引用(setup 时即时取,不用 @onready 避免 _ready 时机问题)
 # 原因: Role.setup 在 add_child 后立即调 setup,@onready 要等 _ready 才赋值,会拿到 null
 var _body: AnimatedSprite2D
+var _body_color: Color = Color.WHITE
 var _facing_arrow: Sprite2D
 var _name_label: Label
 
@@ -66,6 +67,11 @@ var _facing_dir: String = "Down"
 # 用途: facing 变化但 state 不变时(如朝右跑→朝上跑,state 一直是 run),
 #       要用新方向前缀重新播放同一状态动画(切到 Up_Run)
 var _current_state: String = "idle"
+
+func set_entity_name(entity_name: String) -> void:
+	player_name = entity_name
+	if _name_label != null:
+		_name_label.text = player_name
 
 
 ## 初始化: 传入 ClientEntityInfo 强类型实体信息,设置动态视觉
@@ -104,9 +110,14 @@ func setup(info: ClientEntityInfo) -> void:
 	if is_local:
 		_name_label.text = player_name + " (你)"
 
-func apply_attr() -> void:
-	$Body.modulate = color
-	$NameLabel.text = player_name
+	# body_color 是「类型级显示属性」,由 entity_type 决定,走本地 ConfigLoader 查表。
+	# 不从服务端消息读——服务端 proto 不传 body_color(它是纯客户端显示信息)。
+	# 和 speed 同原则:类型属性本地查表,实例状态才走服务端同步。
+	# enum_type_string() 把 EntityType 枚举转成 "player"/"enemy_slime" 等字符串给 ConfigLoader 用;
+	# 未知类型走 ConfigLoader 的零值兜底(body_color="#ffffff"),不会崩。
+	var body_color_hex: String = ConfigLoader.get_capability(info.enum_type_string()).body_color
+	_body_color = Color(body_color_hex)
+	_body.modulate = _body_color
 
 
 ## 更新朝向指示器 + 切换四方向动画

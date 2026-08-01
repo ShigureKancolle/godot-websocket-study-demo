@@ -37,23 +37,24 @@ class_name LocalPlayerController
     服务端 apply_move 只改 x/y,apply_facing 只改 facing,互不干扰。
 
 ============================================================================
- 移动模型:方向移动 → target 坐标
+ 移动模型:方向移动 → target 坐标(帧率无关)
 ============================================================================
 当前 proto 的 PlayerMove 是「目标坐标」(target x/y),不是「方向」。
-    键盘方向移动要转换:target = 当前位置 + move_dir * 固定步长。
+    键盘方向移动要转换:target = 当前位置 + move_dir * (speed * delta)。
     每帧发一次(或间隔发),服务端收到后直接落地目标坐标(简化模型)。
+
+步长 = speed * delta,其中 speed 来自 entity_config.json 的 player.speed
+    (像素/秒)。这样移动距离和帧率解耦:60fps 每帧走 speed/60,30fps 每帧走
+    speed/30,每秒总位移都是 speed 像素——不会因为帧率高低导致移速变化。
 
 未来做连续移动模型时,服务端按 tick 推进 new_pos = old_pos + velocity * dt,
     那时 proto 可以加 direction 字段,但当前保持 target 模型不变。
 """
 
-# 移动步长(每帧发一次 target = 当前位置 + move_dir * MOVE_STEP)
-# 当前服务端是「直接落地目标坐标」模型,所以步长就是实际移动距离
-# 第3步做 tick 限速后会改成「服务端按速度积分」,这里发的是方向+速度
-const MOVE_STEP: float = 5.0
-
-# 移动速度(proto 的 speed 字段,当前服务端未使用,但按 proto 要求发)
-const MOVE_SPEED: float = 100.0
+# 玩家移动速度(像素/秒)——从 entity_config.json 读取,不再硬编码。
+# 不同实体类型有不同 speed(player>敌人=可摆脱),统一走 ConfigLoader.get_speed。
+# _process 里每帧读(ConfigLoader 内部有缓存,只是 dict 查询,开销可忽略)。
+# 用变量而非 const:const 不能调用函数,且未来若支持运行时改速度(减速 buff)更方便。
 
 # 上次发送朝向时的 facing 弧度,用于判断是否变化(避免无变化时高频发消息)
 var _last_facing: float = 0.0
@@ -75,7 +76,7 @@ func setup(_info: ClientEntityInfo) -> void:
 	pass
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	# 从 InputIntentProvider 获取归一化意图
 	# 这是接收端和输入端的唯一接口——输入端变更对接收端透明
 	var intent: InputIntent = InputIntentProvider.get_intent()
@@ -121,14 +122,19 @@ func _process(_delta: float) -> void:
 	#   - 刚停止(上一帧在动,这帧不动):发一次 moving=false,服务端设 state="idle"
 	#   - 持续静止:不发(避免无意义发包)
 	# 这样停止时只发一次停止信号,不会高频发包
+	#
+	# 步长 = speed * delta:帧率无关移动。speed 来自 entity_config.json(player=300),
+	# 60fps 时 step=5(和原来硬编码 MOVE_STEP=5 行为一致),30fps 时 step=10(自动补偿)。
 	var role_pos: Vector2 = get_parent().position  # Role 的位置
+	var move_speed: float = ConfigLoader.get_speed("player")  # 像素/秒
 	var moving: bool = intent.move_dir != Vector2.ZERO
 	if moving:
-		var target: Vector2 = role_pos + intent.move_dir * MOVE_STEP
+		var step: float = move_speed * delta
+		var target: Vector2 = role_pos + intent.move_dir * step
 		MessageBus.instance().send("game.PlayerMove", {
 			"x": target.x,
 			"y": target.y,
-			"speed": MOVE_SPEED,
+			"speed": move_speed,
 			"moving": true
 		})
 	elif _was_moving:
@@ -137,7 +143,7 @@ func _process(_delta: float) -> void:
 		MessageBus.instance().send("game.PlayerMove", {
 			"x": role_pos.x,
 			"y": role_pos.y,
-			"speed": MOVE_SPEED,
+			"speed": move_speed,
 			"moving": false
 		})
 	_was_moving = moving

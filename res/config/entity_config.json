@@ -1,0 +1,97 @@
+{
+	"_comment": "实体配置表(单数据源,双端共享。改完跑 tools/sync_config.py 同步)",
+	"_body_shape_values": "circle|rect|sector|ring(和服务端 ShapeType enum 的 value 对齐)",
+	"_angle_unit": "body_params 里的 angle 用角度(degree),loader 读取时转弧度",
+	"_combat_stats_desc": "combat_stats 是该类型的基础战斗属性(类型级,非实例级)。EntityInfo 初始化时从这里拷贝,运行时强化只改实例不改这里",
+	"_speed_desc": "speed 是该类型的移动速度(像素/秒,类型级)。can_move=false 的实体填 0。玩家>敌人=可摆脱,同类型同速",
+	"_can_die_desc": "can_die 表示该类型能否进入死亡流程(hp<=0 时判定)。player=false 表示玩家死亡流程暂不实现;stake=false 木桩不会死(每 tick 回血);敌人=true",
+	"_dead_duration_ms_desc": "dead_duration_ms 是死亡动画时长(毫秒),DeadTimer 到期后移除实体。can_die=false 的类型填 0",
+
+	"player": {
+		"_desc": "玩家:可移动/可攻击/可被攻击/可断连,圆形碰撞半径 24,移速 300px/s。死亡流程暂不实现(can_die=false)",
+		"capabilities": {
+			"can_move": true,
+			"can_attack": true,
+			"can_be_hurt": true,
+			"can_disconnect": true,
+			"can_die": false
+		},
+		"body_shape": "circle",
+		"body_params": {"radius": 24.0},
+		"body_color": "#ffffff",
+		"hit_layer": 1,
+		"speed": 300.0,
+		"dead_duration_ms": 0,
+		"combat_stats": {
+			"max_hp": 100,
+			"attack_power": 20,
+			"defense": 5
+		}
+	},
+
+	"stake": {
+		"_desc": "木桩:不可移动/不可攻击/可被攻击/不断连,圆形碰撞半径 30,血厚便于反复测试伤害。不会死(每 tick 回满血)",
+		"capabilities": {
+			"can_move": false,
+			"can_attack": false,
+			"can_be_hurt": true,
+			"can_disconnect": false,
+			"can_die": false
+		},
+		"body_shape": "circle",
+		"body_params": {"radius": 30.0},
+		"body_color": "#aaaaaa",
+		"hit_layer": 2,
+		"speed": 0.0,
+		"dead_duration_ms": 0,
+		"combat_stats": {
+			"max_hp": 9999,
+			"attack_power": 0,
+			"defense": 0
+		}
+	},
+
+	"enemy_slime": {
+		"_desc": "敌人:可移动/可攻击/可被攻击/可断连,圆形碰撞半径 20,移速 150px/s(玩家一半,易摆脱)。死亡动画 8 秒",
+		"capabilities": {
+			"can_move": true,
+			"can_attack": true,
+			"can_be_hurt": true,
+			"can_disconnect": true,
+			"can_die": true
+		},
+		"body_shape": "circle",
+		"body_color": "#ff8080",
+		"body_params": {"radius": 20.0},
+		"hit_layer": 2,
+		"speed": 150.0,
+		"dead_duration_ms": 8000,
+		"combat_stats": {
+			"max_hp": 50,
+			"attack_power": 10,
+			"defense": 2
+		}
+	},
+
+	"enemy_skeleton": {
+		"_desc": "敌人:可移动/可攻击/可被攻击/可断连,圆形碰撞半径 20,移速 200px/s(比玩家慢,比史莱姆快)。死亡动画 12 秒",
+		"capabilities": {
+			"can_move": true,
+			"can_attack": true,
+			"can_be_hurt": true,
+			"can_disconnect": true,
+			"can_die": true
+		},
+		"body_shape": "circle",
+		"body_color": "#801480",
+		"body_params": {"radius": 20.0},
+		"hit_layer": 2,
+		"speed": 200.0,
+		"dead_duration_ms": 12000,
+		"combat_stats": {
+			"max_hp": 50,
+			"attack_power": 10,
+			"defense": 2
+		}
+	}
+}

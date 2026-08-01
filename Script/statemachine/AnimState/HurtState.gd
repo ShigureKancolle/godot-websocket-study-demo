@@ -9,9 +9,9 @@ class_name HurtState
 退出状态时不做事(下一个状态的 _enter_state 会接管动画)。
 
 _reenter_state 处理连击场景:
-    服务端 hurt 定时器被 cancel+restart 时不会重发 state="hurt"(state 没变),
+	服务端 hurt 定时器被 cancel+restart 时不会重发 state="hurt"(state 没变),
     但客户端会再收到一次 AttackHit——AnimStateMachine.change_state 检测到
-    "相同状态"时调 _reenter_state,这里重启动画实现受击反馈立即响应。
+	"相同状态"时调 _reenter_state,这里重启动画实现受击反馈立即响应。
     (若不重启,连击时 hurt 动画只播第一次,后续命中无视觉反馈)
 """
 

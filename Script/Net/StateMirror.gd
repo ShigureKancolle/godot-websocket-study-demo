@@ -28,10 +28,10 @@ class_name ClientStateMirror
 ============================================================================
 和服务端对齐:所有可交互物体(玩家/木桩/箱子/陷阱)统一用 _entities 一张表存,
     不再区分 _players。
-    - entity_id 带类型前缀: "player:uuid-xxx" / "entity:stake_1"
+	- entity_id 带类型前缀: "player:uuid-xxx" / "entity:stake_1"
     - entity_type 用 ClientEntityInfo.EntityType 枚举(从服务端字符串转换)
     - _entities 存的是 ClientEntityInfo(强类型 RefCounted),不再存 Dictionary
-    - 字段访问用 info.x / info.state 而非 info["x"] / info["state"]
+	- 字段访问用 info.x / info.state 而非 info["x"] / info["state"]
 
 为什么改强类型:见 EntityInfo.gd 文件头说明。简言之:拼错字段名编译期报错、
 IDE 补全、字段集合显式。
@@ -86,6 +86,54 @@ signal entity_updated(entity_info: ClientEntityInfo)
 # 参数:entity_id(String),离开的实体ID
 signal entity_removed(entity_id: String)
 
+# 实体受击特效信号:某实体被击中了(玩家被攻击)。
+# 渲染层收到后「播放受击特效」。
+# 参数:pos(Vector2),受击特效位置
+signal entity_hurt_effect(pos: Vector2, atk_id: int)
+
+# 战斗属性全量同步信号:收到 StatsInit,本地 _combats 表整体替换了。
+# 渲染层收到后初始化所有血条。
+# 参数:combats(Array[ClientCombatStats]),当前所有战斗属性
+signal stats_inited(combats: Array[ClientCombatStats])
+
+# 单个实体战斗属性变更信号:强化或新玩家加入时触发。
+# 渲染层收到后更新对应血条的最大值。
+# 参数:combat(ClientCombatStats),变更的战斗属性
+signal stats_changed(combat: ClientCombatStats)
+
+# 血量变更信号:某实体扣血了,渲染层收到后更新血条 + 播伤害飘字。
+# 参数:entity_id(被打的人), cur_hp(剩余血量), damage(本次伤害,0=非伤害性同步),
+#       attacker_id(谁打的,飘字定位用), atk_id, atk_shape_idx(算命中点用)
+signal hp_changed(entity_id: String, cur_hp: int, damage: int, attacker_id: String, atk_id: int, atk_shape_idx: int)
+
+
+# ===========================================================================
+# ClientCombatStats: 客户端镜像战斗属性(强类型,和服务端 CombatComponent 字段对齐)
+# ===========================================================================
+# 和 ConfigLoader.CombatStats 的区别:
+#   - ConfigLoader.CombatStats 是「类型级基础值」(从 JSON 读,只读)
+#   - ClientCombatStats 是「实例运行时状态」(从服务端镜像,会变:cur_hp 每次受伤都变)
+# 和 ClientEntityInfo 一样用 RefCounted + 强类型字段,from_dict 集中转换
+class ClientCombatStats:
+	extends RefCounted
+	var entity_id: String = ""
+	var max_hp: int = 0
+	var cur_hp: int = 0
+	var attack_power: int = 0
+	var defense: int = 0
+
+	static func from_dict(d: Dictionary) -> ClientCombatStats:
+		var s = ClientCombatStats.new()
+		s.entity_id = d.get("entity_id", "")
+		s.max_hp = int(d.get("max_hp", 0))
+		s.cur_hp = int(d.get("cur_hp", 0))
+		s.attack_power = int(d.get("attack_power", 0))
+		s.defense = int(d.get("defense", 0))
+		return s
+
+	func _to_string() -> String:
+		return "ClientCombatStats(id=%s, hp=%d/%d, atk=%d, def=%d)" % [entity_id, cur_hp, max_hp, attack_power, defense]
+
 
 # ---------------------------------------------------------------------------
 # 单例
@@ -109,6 +157,11 @@ static func instance() -> ClientStateMirror:
 #         客户端只能整体替换/接收更新(存的是 ClientEntityInfo RefCounted)。
 # 强类型:不再存 Dictionary,所有字段访问走 ClientEntityInfo 的属性
 var _entities: Dictionary = {}
+
+# 战斗属性镜像表:entity_id -> ClientCombatStats
+# 和服务端 GameRoom._combats 结构对齐(独立组件,不嵌在 EntityInfo 里)
+# 和 _entities 平级,通过 entity_id 关联
+var _combats: Dictionary[String, ClientCombatStats] = {}
 
 # 本地玩家的 entity_id(服务端在 PlayerJoin 响应里回传的)
 # 渲染层用它区分「自己」和「别人」(比如自己的角色高亮显示)
@@ -137,6 +190,23 @@ func local_entity_id() -> String:
 func entity_count() -> int:
 	return _entities.size()
 
+## 清空镜像数据(返回大厅/切换场景时调用)
+## 清空 _entities / _combats / _local_entity_id,避免跨场景脏数据
+## 不清信号连接(信号连接由各场景 _ready 自行管理,切场景时旧场景的连接自动销毁)
+func clear() -> void:
+	_entities.clear()
+	_combats.clear()
+	_local_entity_id = ""
+
+
+## 获取单个实体的战斗属性。不存在则返回 null。
+func get_combat(entity_id: String) -> ClientCombatStats:
+	return _combats.get(entity_id)
+
+## 获取所有战斗属性(只读意图)。返回 Array,元素是 ClientCombatStats
+func all_combats() -> Array[ClientCombatStats]:
+	return _combats.values()
+
 
 # ---------------------------------------------------------------------------
 # 状态更新(被 MessageBus handler 调用,不是给业务代码调的)
@@ -162,6 +232,11 @@ func register_handlers() -> void:
 	mb.onproto("game.AttackEnd", _on_attack_end)
 	mb.onproto("game.AttackHit", _on_attack_hit)
 	mb.onproto("game.HurtEnd", _on_hurt_end) 
+	mb.onproto("game.StatsInit", _on_stats_init)
+	mb.onproto("game.StatsChanged", _on_stats_changed)
+	mb.onproto("game.HpChanged", _on_hp_changed)
+	mb.onproto("game.EntityRemove", _on_entity_remove)
+	mb.onproto("game.EntityDead", _on_entity_dead)
 
 
 ## 收到 GameState 快照:整体替换本地镜像
@@ -345,18 +420,38 @@ func _on_attack_end(data: Dictionary) -> void:
 func _on_attack_hit(data: Dictionary) -> void:
 	## 收到攻击命中广播:服务端已算好 hit_list(被命中者 entity_id 列表)
 	## 遍历 hit_list 把每个被命中者的 state 设为 "hurt"
+	## (注:扣血/飘字数据走 HpChanged 消息,不走这里。这里只处理状态+受击特效)
 	##
 	## 注意:attacker_id 是攻击者,不是被攻击者——
 	## 客户端不需要在这里处理攻击者(攻击者的 state 由 AttackStart 设为 "attacking")
 	## 只需要处理被命中者
 	var hit_list: Array = data.get("hit_list", [])
+	var attacker_id: String = data.get("attacker_id", "")
+	var atk_id: int = data.get("atk_id", 1001)
+	var atk_shape_idx: int = data.get("atk_shape_idx", 0)
+	# 取攻击者位置/朝向算命中点(飘字/特效定位用)
+	var attacker: ClientEntityInfo = _entities.get(attacker_id)
 	for hurt_id in hit_list:
 		var entity: ClientEntityInfo = _entities.get(hurt_id)
 		if entity == null:
 			continue
-		# 服务端 apply_hurt 设 state="hurt",客户端镜像同步
-		entity.state = "hurt"
+		# 服务端 apply_hurt 设 state="hurt" 或 "dead",客户端镜像同步
+		# (死亡状态也由 HpChanged 触发,但 state 在这里设最直接)
+		# 注:apply_hurt 死亡时 state="dead",这里先设 hurt,死亡由 entity_updated 修正
+		if entity.state != "dead":
+			entity.state = "hurt"
 		entity_updated.emit(entity)
+		# 受击特效位置:用攻击者位置+朝向算命中点(更贴合"攻击打到的位置")
+		# 攻击者不存在时用被命中者位置兜底
+		var hurt_pos: Vector2
+		if attacker != null:
+			hurt_pos = AttackCalc.calc_hit_position(
+				Vector2(attacker.x, attacker.y), attacker.facing,
+				atk_id, atk_shape_idx,
+				Vector2(entity.x, entity.y), null)
+		else:
+			hurt_pos = Vector2(entity.x, entity.y)
+		entity_hurt_effect.emit(hurt_pos, atk_id)  # 播受击特效(渲染层监听这个信号,在受击者位置播特效)
 
 func _on_hurt_end(data: Dictionary) -> void:
 	var eid: String = data.get("hurt_id", "")
@@ -370,4 +465,97 @@ func _on_hurt_end(data: Dictionary) -> void:
 
 	# 服务端 apply_hurt_end 设 state="idle",客户端镜像同步
 	entity.state = "idle"	
+	entity_updated.emit(entity)
+
+func _on_stats_init(data: Dictionary) -> void:
+	## 收到 StatsInit:战斗属性全量快照(新玩家加入时服务端发来)
+	## 整体替换本地 _combats 表(和 _on_game_state 整体替换 _entities 同理)
+	##
+	## 为什么敢直接覆盖:服务端是唯一权威,它发的就是真相。本地缓存可能过期。
+	## 为什么不和 _on_game_state 合并:战斗属性是独立组件,走独立消息流,
+	## 避免每次 GameState 快照都带战斗属性(低频数据走增量,高频数据走快照)
+	var entries: Array = data.get("entries", [])
+	_combats.clear()
+	for e in entries:
+		var combat = ClientCombatStats.from_dict(e)
+		if combat.entity_id != "":
+			_combats[combat.entity_id] = combat
+	# 通知渲染层:战斗属性整体替换了,请全量刷新血条
+	stats_inited.emit(_combats.values())
+
+
+func _on_stats_changed(data: Dictionary) -> void:
+	## 收到 StatsChanged:单个实体战斗属性变更(强化时广播,或新玩家加入时给其他人发)
+	## 增量更新 _combats 表里该实体的 max_hp/attack_power/defense
+	## (不含 cur_hp,cur_hp 走 HpChanged)
+	var eid: String = data.get("entity_id", "")
+	if eid == "":
+		return
+
+	# 取现有 combat 或新建(新玩家加入时本地还没有它的 combat)
+	var combat: ClientCombatStats = _combats.get(eid)
+	if combat == null:
+		combat = ClientCombatStats.new()
+		combat.entity_id = eid
+		_combats[eid] = combat
+
+	# 只更新 max_hp/attack_power/defense,不动 cur_hp
+	# (cur_hp 走 HpChanged 单独同步,避免强化时把当前血量重置)
+	combat.max_hp = int(data.get("max_hp", 0))
+	combat.attack_power = int(data.get("attack_power", 0))
+	combat.defense = int(data.get("defense", 0))
+
+	# 通知渲染层:这个实体的战斗属性变了(更新血条最大值)
+	stats_changed.emit(combat)
+
+
+func _on_hp_changed(data: Dictionary) -> void:
+	## 收到 HpChanged:某实体扣血了(或新玩家加入时初始化血量)
+	## 更新 _combats 表的 cur_hp + 发 hp_changed 信号(血条更新 + 伤害飘字)
+	##
+	## damage=0 表示非伤害性血量同步(如新玩家加入时让别人知道新玩家满血),
+	## 渲染层收到 damage=0 时只更新血条不播飘字
+	var eid: String = data.get("entity_id", "")
+	if eid == "":
+		return
+
+	var cur_hp: int = int(data.get("cur_hp", 0))
+	var damage: int = int(data.get("damage", 0))
+	var attacker_id: String = data.get("attacker_id", "")
+	var atk_id: int = int(data.get("atk_id", 0))
+	var atk_shape_idx: int = int(data.get("atk_shape_idx", 0))
+
+	# 更新 combat 的 cur_hp
+	# combat 不存在时新建(容错:StatsInit 丢了或乱序时 HpChanged 先到)
+	var combat: ClientCombatStats = _combats.get(eid)
+	if combat == null:
+		combat = ClientCombatStats.new()
+		combat.entity_id = eid
+		_combats[eid] = combat
+	combat.cur_hp = cur_hp
+
+	# 通知渲染层:血量变了(血条更新 + 飘字)
+	# 渲染层通过 damage==0 判断要不要播飘字
+	hp_changed.emit(eid, cur_hp, damage, attacker_id, atk_id, atk_shape_idx)
+
+func _on_entity_remove(data: Dictionary) -> void:
+	## 收到 EntityRemove:某实体被移除了(或新玩家加入时服务端发来)
+	## 从 _entities 表里移除该实体
+	var eid: String = data.get("entity_id", "")
+	if eid == "":
+		return
+	_entities.erase(eid)
+	_combats.erase(eid)
+	entity_removed.emit(eid)
+
+func _on_entity_dead(data: Dictionary) -> void:
+	## 收到 EntityDead:某实体死亡了(服务端算好死亡条件后发来)
+	## 只改 state="dead",不移除实体(实体还在场景里,只是死了)
+	var eid: String = data.get("entity_id", "")
+	if eid == "":
+		return
+	var entity: ClientEntityInfo = _entities.get(eid)
+	if entity == null:
+		return
+	entity.state = "dead"
 	entity_updated.emit(entity)

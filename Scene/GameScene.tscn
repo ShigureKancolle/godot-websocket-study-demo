@@ -1,9 +1,10 @@
-[gd_scene format=3 uid="uid://cytibtjlykk44"]
+[gd_scene format=3 uid="uid://d1a0we2qsncpb"]
 
-[ext_resource type="Script" uid="uid://brcxfjw0gjems" path="res://Script/dead_man_scene.gd" id="1_kxmo5"]
-[ext_resource type="Texture2D" uid="uid://dhyj7gac1tpxk" path="res://prefab/CommonTexture/panel_beige.png" id="2_vsqur"]
+[ext_resource type="Script" uid="uid://dj15gfns7dce8" path="res://Script/game_scene.gd" id="1_game"]
 [ext_resource type="Texture2D" uid="uid://csdd00cnx8evu" path="res://prefab/CommonTexture/buttonRound_beige.png" id="3_xbt3w"]
 [ext_resource type="Script" uid="uid://bsya6e2ymvueq" path="res://Script/role/CameraFollow.gd" id="4_cv315"]
+[ext_resource type="Script" uid="uid://baakp84a8a7mh" path="res://Script/tiledmap/InfiniteTileMap.gd" id="5_infinite"]
+[ext_resource type="TileSet" uid="uid://b457v31ayifv6" path="res://tiledmap/Tileset.tres" id="6_tileset"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_xbt3w"]
 
@@ -15,25 +16,22 @@
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_jnysw"]
 
-[node name="DeadManScene" type="Node2D" unique_id=1985196160]
-script = ExtResource("1_kxmo5")
+[node name="GameScene" type="Node2D" unique_id=59896391]
+script = ExtResource("1_game")
 
-[node name="Bg" type="NinePatchRect" parent="." unique_id=1932924694]
-offset_right = 1152.0
-offset_bottom = 720.0
-texture = ExtResource("2_vsqur")
-patch_margin_left = 62
-patch_margin_top = 36
-patch_margin_right = 14
-patch_margin_bottom = 37
+[node name="InfiniteTileMap" type="Node2D" parent="." unique_id=991795041]
+script = ExtResource("5_infinite")
 
-[node name="EntityLayer" type="Node2D" parent="." unique_id=1317972687]
+[node name="TileMapLayer" type="TileMapLayer" parent="InfiniteTileMap" unique_id=1637803598]
+tile_set = ExtResource("6_tileset")
 
-[node name="EffectLayer" type="Node2D" parent="." unique_id=2085122232]
+[node name="EntityLayer" type="Node2D" parent="." unique_id=643260576]
 
-[node name="UILayer" type="CanvasLayer" parent="." unique_id=1444426619]
+[node name="EffectLayer" type="Node2D" parent="." unique_id=820982504]
 
-[node name="E_Back" type="Button" parent="UILayer" unique_id=419275881]
+[node name="UILayer" type="CanvasLayer" parent="." unique_id=843776507]
+
+[node name="E_Back" type="Button" parent="UILayer" unique_id=1011072487]
 offset_left = 1091.0
 offset_top = 20.0
 offset_right = 1126.0
@@ -49,6 +47,6 @@ theme_override_styles/focus = SubResource("StyleBoxEmpty_jnysw")
 text = "返回"
 icon_alignment = 1
 
-[node name="Camera2D" type="Camera2D" parent="." unique_id=1667873834]
+[node name="Camera2D" type="Camera2D" parent="." unique_id=489058747]
 position = Vector2(576, 359)
 script = ExtResource("4_cv315")
