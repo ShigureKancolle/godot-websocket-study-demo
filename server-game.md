@@ -1,16 +1,17 @@
 # 服务端游戏逻辑层 (server-game)
 
-覆盖:`server/game/*`
-职责:唯一游戏状态持有者 GameRoom + 消息处理器 handlers
+覆盖:`server/game/*` + `server/config/*`
+职责:唯一游戏状态持有者 GameRoom + 消息处理器 handlers + 配置加载层
 
 ## 文件清单
 
 | 文件 | 职责 |
 |------|------|
-| [game/game_room.py](file:///d:/work2/godot_demo/server/game/game_room.py) | GameRoom 类(状态持有者)+ EntityInfo dataclass + 攻击配置数据类 |
-| [game/entity_config.py](file:///d:/work2/godot_demo/server/game/entity_config.py) | 实体能力配置表:EntityCapability + ENTITY_CAPABILITIES(按 entity_type 决定 can_move/can_attack/can_be_hurt/can_disconnect) |
+| [game/game_room.py](file:///d:/work2/godot_demo/server/game/game_room.py) | GameRoom 类(状态持有者)+ EntityInfo dataclass |
+| [game/entity_config.py](file:///d:/work2/godot_demo/server/game/entity_config.py) | 实体能力配置表:entity_config 是 config_loader 的薄包装,提供 get_capability API |
 | [game/timer_mgr.py](file:///d:/work2/godot_demo/server/game/timer_mgr.py) | AttackTimer + TimerManager:攻击生命周期定时器(判定帧+结束两个时间点回调) |
 | [game/collision.py](file:///d:/work2/godot_demo/server/game/collision.py) | 纯几何碰撞判定:形状定义(Circle/Sector)+ 相交判定函数,无外部依赖,可独立单测 |
+| [config/config_loader.py](file:///d:/work2/godot_demo/server/config/config_loader.py) | 配置加载层:读 server/config/*.json 构造对象(攻击配置+实体能力+全局常量) |
 | [game/handlers/__init__.py](file:///d:/work2/godot_demo/server/game/handlers/__init__.py) | handlers 统一入口:register_all(server) 遍历子模块注册 |
 | [game/handlers/player_handlers.py](file:///d:/work2/godot_demo/server/game/handlers/player_handlers.py) | 玩家 handler:PlayerJoin/PlayerMove/PlayerFacing/AttackStart |
 | [game/handlers/chat_handlers.py](file:///d:/work2/godot_demo/server/game/handlers/chat_handlers.py) | 聊天 handler:ChatMessage/Heartbeat |
@@ -56,7 +57,8 @@ ID 格式统一带类型前缀:`player:uuid-xxx` / `entity:stake_1`。
 
 ### 内部结构
 - `_entities: Dict[entity_id, EntityInfo]` — 实体表,dict 而非 list(O(1) 查找+天然 entity_id 唯一)
-- `EntityInfo` dataclass 字段:entity_id/entity_type/x/y/facing/state/radius/player_name/moving(后两个是 player 特有)
+- `EntityInfo` dataclass 字段:entity_id/entity_type/x/y/facing/state/player_name/moving(后两个是 player 特有)
+- **注**:原 `radius` 字段已删除——碰撞形状改由 entity_type 查 entity_config 决定(形状是类型属性,所有同类型实体形状相同)
 
 ### 只读方法
 - `get_entity(entity_id) -> EntityInfo` — 返回内部 dataclass 引用(约定只读不改,要改走变更方法)
@@ -80,16 +82,18 @@ ID 格式统一带类型前缀:`player:uuid-xxx` / `entity:stake_1`。
   - 取攻击者位置/朝向 + atk_shape.shape_params 构造 collision.Sector
   - direction 直接用 facing 弧度(0=右逆时针正,和 collision.Sector.direction 语义对齐),不量化到四方向
   - **遍历 _entities 一张表,跳过自己,用 can_be_hurt 能力过滤**(墙/水地等自动跳过)
-  - 每个目标用自己的 radius 构造 collision.Circle(支持不同体积)
+  - 每个目标用 entity_config 的 body_shape/body_params 构造 collision.Circle(碰撞形状由类型决定,不再存 EntityInfo)
   - 命中者 entity_id 加入返回列表(带前缀,调用方不用分流)
   - 调用方:web_server._process_tick 的 hit_cb 调本方法取 hit_list 广播 AttackHit
 
-### 攻击配置数据类(从 web_server.py 迁移过来)
-- `AttackShapeType(Enum)` — 形状枚举(SECTOR/RECT/CIRCLE/RING,当前只实现 SECTOR)
-- `ShapeParams / SectorParams` — 形状参数基类/扇形子类(radius=80, angle=120°)
-- `AttackShape` — 单个攻击形状(shape + shape_params + duration + hit_time,单位毫秒)
-- `AttackConfig` — 攻击配置(shape_list 支持多段攻击)
-- `ATTACK_CONFIG: Dict[int, AttackConfig]` — 配置表:1001(单段扇形)/1002(双段扇形)
+### 攻击配置 / 形状数据类已移到 config/config_loader.py
+原来在 game_room.py 的 AttackShapeType/ShapeParams/SectorParams/AttackShape/AttackConfig/ATTACK_CONFIG/HURT_DURATION_MS 已迁移到 [config_loader.py](file:///d:/work2/godot_demo/server/config/config_loader.py)(JSON 单数据源方案):
+- `ShapeType`(字符串常量,非 Enum)— 形状类型:sector/rect/circle/ring,实体和攻击共用
+- `ShapeParams / SectorParams / CircleParams / RectParams` — 形状参数 dataclass
+- `AttackShape / AttackConfig` — 攻击形状/配置 dataclass
+- `EntityCapability` — 实体能力 + 碰撞形状 + 基础战斗属性 dataclass(can_move/can_attack/can_be_hurt/can_disconnect + body_shape/body_params + combat_stats)
+- `CombatStats` — 类型级基础战斗属性 dataclass(max_hp/attack_power/defense),EntityInfo 初始化时拷贝一份作实例运行时状态
+- 访问 API:`config_loader.get_attack_config(atk_id)` / `config_loader.get_capability(entity_type)` / `config_loader.get_combat_stats(entity_type)` / `config_loader.get_hurt_duration_ms()`
 
 ### apply_move / apply_facing 的演进路径
 当前是"目标坐标/朝向直接落地"的简化版。moving 参数驱动 state(动画状态),未来可加:
@@ -106,13 +110,14 @@ ID 格式统一带类型前缀:`player:uuid-xxx` / `entity:stake_1`。
 - 保留参数位:handler 签名和 proto 字段一一对应;后续连续移动模型时立刻可用
 
 ### 状态 vs 事件的区分
-- **状态**(持续存在):位置(x/y)、朝向(facing)、动画状态(state)、半径(radius) — 存在 EntityInfo 里
+- **状态**(持续存在):位置(x/y)、朝向(facing)、动画状态(state) — 存在 EntityInfo 里
   - state 是动画状态字段:idle/run/attacking/hurt,客户端动画状态机读它切换动画
 - **事件**(瞬时发生):一次移动、一次朝向变更、一次攻击 — speed 是移动事件属性,不存入 EntityInfo 状态
   - moving 是 PlayerMove 的事件属性:客户端告诉服务端是否正在移动(瞬时输入),不直接声明 state
 - proto 里 EntityInfo 没有 speed、PlayerMove 有 speed,正好对应这个区分
 - facing 是状态(存在 EntityInfo),PlayerFacing 是事件(瞬时朝向变更),对应 apply_facing 只改状态里的 facing
 - 服务端 apply_move 用 moving 推 state:客户端发"我在动/没在动"(事件),服务端定"处于 run/idle"(状态),客户端不直接声明 state
+- **碰撞形状是类型属性**(不是实例状态):由 entity_type 查 entity_config 决定,不存 EntityInfo。所有同类型实体形状相同(玩家一样大,木桩一样大)
 
 ### 刻意不做的事(防过度设计)
 - 不做网络 I/O:纯内存逻辑
@@ -121,29 +126,27 @@ ID 格式统一带类型前缀:`player:uuid-xxx` / `entity:stake_1`。
 - 不做房间分区:当前只有一个全局房间
 - 不做 tick 调度:由 GameServer(网络层)决定是否定时广播,GameRoom 不知道 tick 存在
 
-## entity_config.py — 实体能力配置表
+## entity_config.py — 实体能力配置表(config_loader 薄包装)
 
 ### 为什么单独一个文件
 不同 entity_type(player/stake/box/...)的行为能力不同,把这些"谁能做什么"的配置抽出来:
 1. GameRoom 的 apply_xxx 方法不用 if-else 判断类型,统一查表
-2. 加新类型只改本文件,不用动 GameRoom/handlers
+2. 加新类型只改 shared_config/entity_config.json,不用动 GameRoom/handlers
 3. 能力是"白名单":没列在表里的类型默认零能力(安全的默认值)
 
-### EntityCapability dataclass
+### EntityCapability dataclass(定义在 config_loader,本文件复用)
 - `can_move: bool` — 能否移动(apply_move 校验)。玩家 True,木桩 False
 - `can_attack: bool` — 能否发起攻击(apply_attack_start 校验)。玩家 True,木桩 False
 - `can_be_hurt: bool` — 能否被攻击命中(get_attack_hits 过滤 + apply_hurt 校验)。玩家/木桩 True,墙/水地 False
 - `can_disconnect: bool` — 是否会断连(cleanup_player 用,避免误删非玩家实体)。玩家 True,其他 False
+- `body_shape: str` — 碰撞形状类型(ShapeType.CIRCLE/RECT/...),由 entity_type 决定
+- `body_params: ShapeParams` — 碰撞形状参数(如 CircleParams.radius),由 entity_type 决定
 
-### ENTITY_CAPABILITIES 映射表
-```python
-"player": EntityCapability(can_move=True, can_attack=True, can_be_hurt=True, can_disconnect=True)
-"stake":  EntityCapability(can_move=False, can_attack=False, can_be_hurt=True, can_disconnect=False)
-```
-加新类型只需在这里加一行。
+### 配置数据来源
+本文件不硬编码配置,转调 `config_loader.get_capability(entity_type)`,实际数据从 `shared_config/entity_config.json` 加载(由 sync_config.py 同步到 server/config/)。
 
 ### get_capability(entity_type) -> EntityCapability
-取某个类型的能力配置。未列在表里的类型返回零能力 EntityCapability(安全的默认值),避免加新类型时忘记配能力导致崩溃。
+取某个类型的能力配置(含碰撞形状)。未列在表里的类型返回零能力 EntityCapability(安全的默认值),避免加新类型时忘记配能力导致崩溃。
 
 ## handlers — 消息处理器
 
@@ -258,14 +261,15 @@ web_server._process_tick 的 hit_cb(判定帧触发)
 GameRoom.get_attack_hits
     ↓ 取 attacker 状态(x/y/facing) + shape.shape_params(SectorParams)
     ↓ 构造 collision.Sector(pos, radius, angle, direction=facing)
-    ↓ 遍历 _entities,跳过自己,用 can_be_hurt 过滤,每个目标用自己的 radius 构造 Circle
+    ↓ 遍历 _entities,跳过自己,用 can_be_hurt 过滤
+    ↓ 每个目标查 entity_config.get_capability 取 body_shape/body_params 构造 Circle
     ↓ 调 collision.intersect_circle_sector(circle, sector)
     ↓ 收集命中者 entity_id 列表
 web_server.hit_cb
     ↓ 遍历 hit_list 逐个调 room.apply_hurt(hurt_id, atk_id)
-    ↓ 逐个调 timer_mgr.start_hurt(hurt_id, HURT_DURATION_MS, hurt_end_cb)
+    ↓ 逐个调 timer_mgr.start_hurt(hurt_id, config_loader.get_hurt_duration_ms(), hurt_end_cb)
         ↓ start_hurt 内部 cancel 旧 attack timers(攻击被中断)+ cancel 旧 hurt timer(连击重置)
-    ↓ broadcast("AttackHit", {attacker_id, hit_list, atk_id, hurt_duration})
+    ↓ broadcast("AttackHit", {attacker_id, hit_list, atk_id, hurt_duration, atk_shape_idx})
 
 hurt 定时器到期
     ↓ hurt_end_cb 调 room.apply_hurt_end(hurt_id) 设 state="idle"
@@ -274,7 +278,7 @@ hurt 定时器到期
 
 ### 当前状态
 - collision.py 已实现:Circle/Sector 形状 + 三个相交判定函数 + 内部辅助函数,冒烟测试通过
-- GameRoom.get_attack_hits 已实现并接入:统一遍历 _entities,用能力过滤,每个目标用自己的 radius
+- GameRoom.get_attack_hits 已实现并接入:统一遍历 _entities,用能力过滤,每个目标查 entity_config 取 body_params 构造 Circle
 - 冒烟测试通过:A 攻击命中 entity:stake_1(80,0);apply_hurt 设 stake state='hurt' 成功;木桩 apply_move 被能力配置拒绝
 
 ## 当前是"混合模型"不是纯快照
@@ -283,8 +287,9 @@ hurt 定时器到期
 后续可演进为纯快照:把 `broadcast("PlayerMove", ...)` 换成 `broadcast("GameState", room.snapshot())`,GameRoom 不用改。
 
 ## 依赖关系
-- GameRoom:依赖 game.collision(纯几何判定) + game.entity_config(能力配置)
-- entity_config:无外部依赖,只用标准库 dataclasses
+- GameRoom:依赖 game.collision(纯几何判定) + game.entity_config(能力配置) + config.config_loader(攻击配置+常量)
+- entity_config:依赖 config.config_loader(转调 get_capability)
+- config_loader:无外部依赖,只用标准库 json/math/dataclasses
 - collision:无外部依赖,只用标准库 math/dataclasses
 - handlers:依赖 server-net(GameServer/MessageBus)和 server-game(GameRoom)
 - 被 main.py 装配启动(handlers.register_all + room.add_entity 注册木桩)
@@ -294,10 +299,12 @@ hurt 定时器到期
 - **entity_config.py 已建立**:EntityCapability 能力配置表,apply_xxx 方法先查能力再改状态
 - **ID 统一加前缀**:player:uuid-xxx / entity:stake_1
 - GameRoom 功能完整:实体加入/离开/移动/朝向状态管理已实现,所有方法带能力校验
-- **hurt 硬直已实现**:apply_move/apply_facing/apply_attack_start 在 state=="hurt" 时拒绝输入;apply_hurt_end 恢复 idle;HURT_DURATION_MS=666ms
+- **hurt 硬直已实现**:apply_move/apply_facing/apply_attack_start 在 state=="hurt" 时拒绝输入;apply_hurt_end 恢复 idle;config_loader.get_hurt_duration_ms()=666ms
 - 攻击状态三件套已实现:apply_attack_start/apply_attack_end/apply_hurt(原 apply_attack_hurt 改名,统一处理玩家和木桩)
-- 攻击命中判定已接入:get_attack_hits 遍历 _entities,用 can_be_hurt 过滤,每个目标用自己的 radius
-- ATTACK_CONFIG 等攻击配置数据类已从 web_server.py 迁移到 game_room.py
+- 攻击命中判定已接入:get_attack_hits 遍历 _entities,用 can_be_hurt 过滤,每个目标查 entity_config 取 body_params 构造 Circle
+- **配置已迁移到 JSON 单数据源**:ATTACK_CONFIG / ENTITY_CAPABILITIES / HURT_DURATION_MS 改为读 shared_config/*.json(由 sync_config.py 同步)
+- **EntityInfo.radius 字段已删除**:碰撞形状改由 entity_type 查 entity_config.body_shape/body_params 决定(形状是类型属性)
+- **ShapeType 改名**:原 AttackShapeType → ShapeType,实体碰撞和攻击形状共用
 - handlers 已从 web_server.py 拆分,按功能分文件,PlayerJoin 用 EntityInfo dataclass
 - main.py 启动时硬编码注册 entity:stake_1 木桩(位置和客户端场景一致)
 - **timer_mgr.py 已实现 AttackTimer + HurtTimer + TimerManager**:attack 三段定时器 + hurt 单段定时器,start_hurt 内部 cancel 旧 attack(攻击被中断)+ 旧 hurt(连击重置)
