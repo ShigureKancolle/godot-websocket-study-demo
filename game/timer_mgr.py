@@ -196,6 +196,41 @@ class HurtTimer(StateTimer):
             return
 
 
+class DeadTimer(StateTimer):
+    """
+    单次死亡的定时器
+    管死亡动画时长(duration),到期后调 end_cb(remove_entity + 广播 EntityRemove)
+
+    生命周期:
+        start() → await duration → 调 end_cb
+        cancel() 可在任意时刻取消,end_cb 不触发
+
+    和 HurtTimer 结构完全一样(单段 await + 到期回调),但语义独立:
+        - HurtTimer:硬直结束,恢复 idle
+        - DeadTimer:死亡动画播完,移除实体
+    保持独立类而非复用 HurtTimer,因为死亡流程未来可能加逻辑(如死亡时还能被推动、
+    死亡时播放特定音效等),届时只改 DeadTimer 不影响 hurt 逻辑。
+
+    时间单位:毫秒(ms),和 HurtTimer 一致
+    """
+
+    def __init__(self, duration_ms: int, end_callback: AsyncCallback):
+        super().__init__()
+        self._duration_ms = duration_ms
+        self._end_cb = end_callback
+
+    async def _run(self) -> None:
+        try:
+            await asyncio.sleep(self._duration_ms / 1000.0)
+            try:
+                await self._end_cb()
+            except Exception as e:
+                logger.exception(f"DeadTimer end_callback 异常: {e}")
+        except asyncio.CancelledError:
+            logger.debug("DeadTimer 被取消,回调不再触发")
+            return
+
+
 
 class TimerManager:
     """
@@ -215,6 +250,8 @@ class TimerManager:
         self._timers: Dict[str, list] = {}
         # 同时只会有一个hurt_timer
         self._hurt_timers: Dict[str, HurtTimer] = {}
+        # 同时只会有一个dead_timer(死亡期间不会再死)
+        self._dead_timers: Dict[str, DeadTimer] = {}
 
     def start_attack(self, player_id: str,
                      hit_time_ms: int, duration_ms: int,
@@ -244,21 +281,32 @@ class TimerManager:
 
     def cancel(self, player_id: str) -> None:
         """
-        取消该玩家的所有攻击定时器(注意:只取消 attack,不取消 hurt)
+        取消该玩家的所有攻击定时器 + hurt 定时器 + dead 定时器
         玩家断连时调(cleanup_player 里),防止对已删除玩家操作状态
 
         玩家不存在或无定时器时静默返回(幂等)
 
-        命名提醒:本方法叫 cancel 但只管 attack timers,不管 hurt timers。
-        hurt timers 由 start_hurt 内部自己 cancel+restart(连击场景)。
-        如需统一取消,调 cancel 后再单独处理 _hurt_timers(当前无此需求)。
+        命名提醒:本方法叫 cancel,范围是该玩家的所有定时器(attack/hurt/dead)。
+        断连清理需要全覆盖,避免任意一种定时器到期对已删除实体操作状态。
         """
+        # 1. 攻击定时器(可能有多个,如连击)
         timers = self._timers.pop(player_id, None)
-        if not timers:
-            return
-        for timer in timers:
-            timer.cancel()
-        logger.debug(f"玩家 {player_id} 的 {len(timers)} 个攻击定时器已取消")
+        if timers:
+            for timer in timers:
+                timer.cancel()
+            logger.debug(f"玩家 {player_id} 的 {len(timers)} 个攻击定时器已取消")
+
+        # 2. hurt 定时器(同时只有一个)
+        hurt_timer = self._hurt_timers.pop(player_id, None)
+        if hurt_timer is not None:
+            hurt_timer.cancel()
+            logger.debug(f"玩家 {player_id} 的 hurt 定时器已取消")
+
+        # 3. dead 定时器(同时只有一个)
+        dead_timer = self._dead_timers.pop(player_id, None)
+        if dead_timer is not None:
+            dead_timer.cancel()
+            logger.debug(f"玩家 {player_id} 的 dead 定时器已取消")
 
     def cleanup_done(self, player_id: str) -> None:
         """
@@ -289,11 +337,51 @@ class TimerManager:
 
         if player_id in self._timers:
             self.cancel(player_id)  # 剩余的攻击被打断了
-      
-        if self._hurt_timers.get(player_id, None) is not None:  
+
+        if self._hurt_timers.get(player_id, None) is not None:
             # 打断之前的 HurtTimer
             self._hurt_timers[player_id].cancel()
             del self._hurt_timers[player_id]
 
         self._hurt_timers[player_id] = timer
+        return timer
+
+    def start_dead(self, player_id: str, duration_ms: int, end_callback: AsyncCallback) -> DeadTimer:
+        """
+        为实体启动死亡定时器
+
+        死亡打断一切:内部先 cancel 该玩家的 attack timers + hurt timer,
+        再启 DeadTimer。理由:死亡是终态,之前的攻击/硬直都不该再继续。
+
+        DeadTimer 到期后调 end_callback(由调用方传入,通常是
+        room.remove_entity + 广播 EntityRemove)。
+
+        和 start_hurt 的区别:
+            - start_hurt:cancel 旧 hurt(连击重置硬直),不 cancel dead
+              (硬直期间不会被死亡打断——死亡实体不会走 hurt 分支)
+            - start_dead:cancel 所有 attack + hurt(死亡是最高优先级终态)
+
+        Args:
+            player_id: 死亡的实体ID
+            duration_ms: 死亡动画时长(毫秒,从 entity_config.get_dead_duration_ms 取)
+            end_callback: 到期回调(remove_entity + 广播 EntityRemove)
+
+        Returns:
+            创建的 DeadTimer
+        """
+        timer = DeadTimer(duration_ms, end_callback)
+        timer.start()
+
+        # 死亡打断一切:cancel 所有 attack + hurt timers
+        # (不能让攻击判定帧/结束广播在死亡后还触发,也不能让 hurt 恢复 idle)
+        self.cancel(player_id)
+
+        # cancel 已经把 _dead_timers 里的旧条目也清了(防御性),
+        # 但理论上死亡期间不会再死,这里再兜底一次
+        old_dead = self._dead_timers.pop(player_id, None)
+        if old_dead is not None:
+            old_dead.cancel()
+
+        self._dead_timers[player_id] = timer
+        logger.debug(f"实体 {player_id} 启动死亡定时器: duration={duration_ms}ms")
         return timer

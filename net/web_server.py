@@ -33,6 +33,7 @@ import net.message_bus as message_bus
 import net.message_contract as message_contract
 import game.game_room as game_room
 import game.timer_mgr as timer_mgr
+import config.config_loader as config_loader
 # game_pb2 是生成代码，由 message_bus 内部加入 sys.path，这里直接 import
 import game_pb2
 
@@ -347,32 +348,64 @@ class GameServer:
                         "entity_id": attacker_id,
                         "atk_id": a["atk_id"]
                     })
-                    config = game_room.ATTACK_CONFIG.get(a["atk_id"])
+                    config = config_loader.get_attack_config(a["atk_id"])
                     if config:
                         # 闭包陷阱修复:for 循环里定义 async def hit_cb 会捕获 shape 这个
                         # 循环变量,所有 hit_cb 实际都会用循环结束时的最后一个 shape 值。
                         # 用默认参数把当前 shape 绑定到 hit_cb 的局部作用域,绕开陷阱。
                         # (当前 ATTACK_CONFIG[1002] 两个 shape 配置相同,触发不了;但配置不同会出 bug)
-                        for shape in list(config.shape_list):
-                            logger.info(f"实体 {attacker_id} 发起攻击 atk_id={a['atk_id']}，形状 {shape.shape.value}")
+                        for shape_idx, shape in enumerate(list(config.shape_list)):
+                            logger.info(f"实体 {attacker_id} 发起攻击 atk_id={a['atk_id']}，形状 {shape.shape}")
                             # hit_cb: 判定帧触发,调 GameRoom 算命中列表并广播
                             # 命中判定逻辑在 game_room.get_attack_hits(状态层),不在网络层
                             # 统一 Entity 模型:hit_list 里可能同时含玩家和木桩,统一调 apply_hurt
                             # 注:hit_cb/end_cb 里也用 _queue_broadcast 而非 await broadcast——
                             # timer 回调虽然是独立协程,但仍不应被 I/O 阻塞(回调链可能很长)
-                            async def hit_cb(_shape=shape):
+                            async def hit_cb(_shape=shape, _shape_idx=shape_idx):
                                 hurt_list = self.room.get_attack_hits(_shape, attacker_id)
                                 # 逐个调 apply_hurt 改状态(状态变更方法都是单玩家的,
                                 # 遍历列表由调用方负责,保持原子性;apply_hurt 内部会查能力配置)
+                                _hurt_duration = config_loader.get_hurt_duration_ms()
                                 for hurt_id in hurt_list:
-                                    self.room.apply_hurt(hurt_id, a["atk_id"])
-                                    self.timer_mgr.start_hurt(hurt_id, game_room.HURT_DURATION_MS, self.get_hurt_end_callback(hurt_id, attacker_id, a["atk_id"], game_room.HURT_DURATION_MS))
+                                    damage = self.room.get_attack_damage(attacker_id, a["atk_id"], _shape_idx, hurt_id)
+                                    # apply_hurt 返回 HurtResult 枚举,区分 HURT/DEAD/FAILED
+                                    result = self.room.apply_hurt(hurt_id, a["atk_id"], _shape_idx, damage, attacker_id)
+                                    if result == game_room.HurtResult.HURT:
+                                        # 没死:启 hurt timer(硬直)
+                                        self.timer_mgr.start_hurt(hurt_id, _hurt_duration, self.get_hurt_end_callback(hurt_id, attacker_id, a["atk_id"], _hurt_duration))
+                                    elif result == game_room.HurtResult.DEAD:
+                                        # 死亡:启 dead timer(延迟移除实体,让客户端播死亡动画)
+                                        # 取死亡者类型的死亡动画时长(从 entity_config 查)
+                                        dead_entity = self.room.get_entity(hurt_id)
+                                        if dead_entity is not None:
+                                            _dead_duration = config_loader.get_dead_duration_ms(dead_entity.entity_type)
+                                            self.timer_mgr.start_dead(hurt_id, _dead_duration, self.get_dead_end_callback(hurt_id, attacker_id, a["atk_id"]))
+                                        # 广播 EntityDead(客户端切 DeadState 播死亡动画)
+                                        self._queue_broadcast("EntityDead", {
+                                            "entity_id": hurt_id,
+                                            "attacker_id": attacker_id,
+                                            "atk_id": a["atk_id"],
+                                        })
+                                    # FAILED:实体不存在/不能被攻击/无战斗组件,不做任何后续(防御性,get_attack_hits 已过滤)
+                                    # 广播 HpChanged(含 damage 给飘字,cur_hp 给血条)
+                                    # cur_hp 从 combat 取(apply_hurt 已扣过血)
+                                    hurt_combat = self.room.get_combat(hurt_id)
+                                    self._queue_broadcast("HpChanged", {
+                                        "entity_id": hurt_id,
+                                        "cur_hp": hurt_combat.cur_hp if hurt_combat else 0,
+                                        "damage": damage,
+                                        "attacker_id": attacker_id,
+                                        "atk_id": a["atk_id"],
+                                        "atk_shape_idx": _shape_idx,
+                                    })
+
                                 # 塞队列不阻塞 timer 回调
                                 self._queue_broadcast("AttackHit", {
                                     "attacker_id": attacker_id,
                                     "hit_list": hurt_list,
                                     "atk_id": a["atk_id"],
-                                    "hurt_duration": game_room.HURT_DURATION_MS
+                                    "hurt_duration": _hurt_duration,
+                                    "atk_shape_idx": _shape_idx,
                                 })
 
                             async def end_cb():
@@ -384,6 +417,21 @@ class GameServer:
 
                             self.timer_mgr.start_attack(attacker_id, shape.hit_time, shape.duration, hit_cb, end_cb)
 
+        # 每个tick都给木桩回满血
+        stakes = self.room.get_stakes()
+        for stake in stakes:
+            stake_combat = self.room.get_combat(stake.entity_id)
+            if stake_combat and stake_combat.cur_hp < stake_combat.max_hp:
+                stake_combat.cur_hp = stake_combat.max_hp
+                self._queue_broadcast("HpChanged", {
+                    "entity_id": stake.entity_id,
+                    "cur_hp": stake_combat.max_hp,
+                    "damage": 0,
+                    "attacker_id": "",
+                    "atk_id": 0,
+                    "atk_shape_idx": 0,
+                })
+        
 
         # 统一塞队列:一个 tick 内所有变更的消息按顺序发出
         # 注意:这里不 exclude 任何人——状态变更广播必须包含发起者
@@ -403,6 +451,28 @@ class GameServer:
                 "hurt_duration": hurt_duration,
             })
         return hurt_end
+
+    def get_dead_end_callback(self, dead_id: str, attacker_id: str, atk_id: int):
+        """
+        构造死亡定时器到期回调
+
+        DeadTimer 到期后调本回调:
+            1. remove_entity 从 GameRoom 移除实体(状态层)
+            2. 广播 EntityRemove 通知客户端 queue_free 节点
+
+        和 get_hurt_end_callback 的区别:
+            - hurt_end: apply_hurt_end 恢复 state=idle(实体还在)
+            - dead_end: remove_entity(实体消失)
+        """
+        async def dead_end():
+            # 实体可能已被 cleanup_player 移除(断连清理),幂等处理
+            if not self.room.has_entity(dead_id):
+                return
+            self.room.remove_entity(dead_id)
+            self._queue_broadcast("EntityRemove", {
+                "entity_id": dead_id,
+            })
+        return dead_end
         
 
     async def cleanup_player(self, player_id: str):

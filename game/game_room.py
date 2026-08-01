@@ -84,8 +84,19 @@ from typing import Dict, List, Optional
 # 项目模块用 `import game.xxx as xxx` 形式(热更约束+包前缀规范)
 import game.collision as collision
 import game.entity_config as entity_config
+import config.config_loader as config_loader
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# HurtResult: apply_hurt 的返回值,告知调用方受击后的状态分支
+# ============================================================================
+class HurtResult(enum.Enum):
+    """apply_hurt 返回值:区分"没死/死了/失败"三种状态,调用方据此决定后续流程"""
+    FAILED = 0   # 实体不存在/不能被攻击/无战斗组件,调用方不应有任何后续动作
+    HURT = 1     # 扣血但没死,调用方应启 HurtTimer(硬直)
+    DEAD = 2     # 扣血后 hp<=0 且 can_die=True,调用方应启 DeadTimer(死亡延迟移除)
 
 
 # ============================================================================
@@ -108,65 +119,30 @@ class EntityInfo:
     y: float = 0.0                          # Y坐标
     facing: float = 0.0                     # 朝向(弧度,0=右,逆时针正)。木桩永远 0
     state: str = "idle"                     # 动画状态:idle/run/attack/hurt/...
-    radius: float = 24.0                    # 碰撞半径(用于攻击命中判定)
+    # 注:碰撞形状不再存 EntityInfo,改由 entity_type 查 entity_config 决定
+    # (形状是类型属性:所有玩家一样大,所有木桩一样大,没必要每个实例存一份)
     # player 特有字段(其他类型不填,保持默认空值)
     player_name: str = ""                   # 玩家名称(只有 player 有)
     moving: bool = False                    # 是否正在移动(只有 player 有)
 
+@dataclass
+class CombatComponent:
+    entity_id: str                          # "player:uuid" | "entity:stake_1"
+    cur_hp: int = 0
+    max_hp: int = 0
+    attack_power: int = 0
+    defense: int = 0
+
+
 
 # ============================================================================
-# 攻击配置数据类
+# 攻击配置 / 形状数据类 / HURT_DURATION_MS 已移到 config/config_loader.py
 # ============================================================================
-# 时间单位:毫秒(ms),和 timer_mgr.py 一致
-# 选毫秒不选秒:配置可读性(583 比 0.583 直观)+ 避免浮点书写误差 + 行业惯例
-class AttackShapeType(enum.Enum):
-    SECTOR = "sector"   # 扇形
-    RECT = "rect"       # 矩形
-    CIRCLE = "circle"   # 圆形
-    RING = "ring"       # 环形
-
-
-@dataclass
-class ShapeParams:
-    """形状参数基类,实际参数由子类决定"""
-    pass
-
-
-@dataclass
-class SectorParams(ShapeParams):
-    radius: float = 35.0                     # 扇形半径,单位像素
-    angle: float = math.pi / 2 * (4 / 3)     # 扇形角度(±60°)
-
-
-@dataclass
-class AttackShape:
-    """单个攻击形状(一次攻击可由多个形状组成,如双段斩)"""
-    shape: AttackShapeType = AttackShapeType.SECTOR
-    shape_params: Optional[ShapeParams] = None  # 具体参数,根据 shape 决定
-    duration: int = 583  # 攻击持续时间(ms)
-    hit_time: int = 83   # 判定帧时间(从发起算,ms)
-
-
-@dataclass
-class AttackConfig:
-    """攻击配置:一个 atk_id 对应一组形状列表"""
-    # 用 field(default_factory=list) 避免可变默认值共享陷阱
-    shape_list: List[AttackShape] = field(default_factory=list)
-
-
-# 攻击配置表:atk_id -> AttackConfig
-# 当前硬编码在代码里,之后多了再考虑配表(读 json/csv)
-ATTACK_CONFIG: Dict[int, AttackConfig] = {
-    1001: AttackConfig(shape_list=[
-        AttackShape(AttackShapeType.SECTOR, SectorParams())
-    ]),  # 扇形一刀
-    1002: AttackConfig(shape_list=[
-        AttackShape(AttackShapeType.SECTOR, SectorParams()),
-        AttackShape(AttackShapeType.SECTOR, SectorParams())
-    ]),  # 扇形两刀
-}
-
-HURT_DURATION_MS = 666  # 666ms
+# 改成 JSON 单数据源(shared_config/)后,相关 dataclass 和常量集中到 config_loader,
+# 本文件只保留 EntityInfo(实体状态数据结构)和 GameRoom(状态持有者)。
+# 访问攻击配置:config_loader.get_attack_config(atk_id)
+# 访问 hurt 时长:config_loader.get_hurt_duration_ms()
+# 访问实体能力+形状:entity_config.get_capability(entity_type)(内部调 config_loader)
 
 
 # ============================================================================
@@ -209,6 +185,9 @@ class GameRoom:
         # 用下划线前缀暗示「内部实现」,外部应通过方法访问
         # (Python 没有真正的私有,下划线只是约定)
         self._entities: Dict[str, EntityInfo] = {}
+        self._combats: Dict[str, CombatComponent] = {}
+        import game.enemy_mgr as enemy_mgr
+        self.enemy_mgr = enemy_mgr.EnemyMgr()
 
     # ------------------------------------------------------------------
     # 只读访问
@@ -282,6 +261,13 @@ class GameRoom:
         # 强制覆盖 entity_id,保证不变式
         entity_info.entity_id = entity_id
         self._entities[entity_id] = entity_info
+
+        # 自动为有战斗属性的类型创建 CombatComponent
+        # (config 里 max_hp>0 的类型才需要战斗组件,纯装饰实体不创建)
+        combat_stats = config_loader.get_combat_stats(entity_info.entity_type)
+        if combat_stats.max_hp > 0:
+            self.add_combat(entity_id, entity_info.entity_type)
+
         logger.info(f"实体加入房间: type={entity_info.entity_type} id={entity_id}")
         return entity_info
 
@@ -300,6 +286,10 @@ class GameRoom:
         """
         removed = self._entities.pop(entity_id, None)
         if removed is not None:
+            # 连带清理战斗组件(和 _entities 同步,避免遗留幽灵 combat)
+            self._combats.pop(entity_id, None)
+            # 清理敌人 AI 状态(如果是敌人;非敌人 on_enemy_removed 是 no-op,安全)
+            self.enemy_mgr.on_enemy_removed(entity_id)
             logger.info(f"实体离开房间: type={removed.entity_type} id={entity_id}")
         return removed
 
@@ -310,6 +300,20 @@ class GameRoom:
     #   - 能做才改状态,不能做返回 False(如木桩 apply_move 直接拒)
     #   - 这样把"能不能做"和"怎么做"分离,加新类型只改 entity_config
     # ------------------------------------------------------------------
+
+    # 输入锁定状态集合:hurt(硬直)和 dead(死亡)期间拒绝所有玩家输入
+    # 抽成常量方便统一修改,避免散落在各 apply_xxx 方法里漏改
+    _INPUT_LOCKED_STATES = frozenset({"hurt", "dead"})
+
+    def _is_input_locked(self, info: EntityInfo) -> bool:
+        """
+        判断实体当前是否处于输入锁定状态(hurt 硬直 / dead 死亡)
+
+        所有 apply_xxx 输入方法(move/facing/attack_start)统一调本方法做拒绝判定,
+        避免每个方法各写一个 if state=="hurt" 然后漏掉 dead 之类的新状态。
+        新增锁定状态时只改 _INPUT_LOCKED_STATES,不用改各 apply_xxx 方法。
+        """
+        return info.state in self._INPUT_LOCKED_STATES
 
     def apply_move(self, entity_id: str, x: float, y: float,
                    speed: float = 1.0, moving: bool = False) -> bool:
@@ -337,10 +341,13 @@ class GameRoom:
         =========================================================================
          speed 参数当前未使用,但保留
         =========================================================================
-        speed 已存在于 proto 的 PlayerMove 里,客户端会发。
-        当前忽略它(直接落地目标坐标),保留参数位是为了:
+        speed 已存在于 proto 的 PlayerMove 里,客户端会发(值取自 entity_config.json
+        的 player.speed)。当前 apply_move 忽略它(直接落地目标坐标),保留参数位是为了:
             1. handler 签名和 proto 字段一一对应,读代码就能看出"消息里有什么"
             2. 后续做连续移动模型时,speed 立刻可用,不用再改接口
+        注意:speed 作为「类型属性」已在 entity_config.json 定义并由 config_loader 解析,
+        EnemyMgr 推进敌人位移走 config_loader.get_speed(entity_type),不读这里的参数。
+        这里的 speed 参数是「移动事件属性」(客户端这一次移动的瞬时速度),两者语义不同。
 
         =========================================================================
          moving 参数:驱动动画状态 state
@@ -369,12 +376,12 @@ class GameRoom:
             logger.warning(f"实体 {entity_id} (type={info.entity_type}) 不能移动,apply_move 被拒绝")
             return False
 
-        # 硬直校验:state=="hurt" 期间拒绝移动输入
-        # 服务端是唯一状态权威,hurt 期间客户端发的 PlayerMove 不应改状态。
+        # 输入锁定校验:hurt(硬直)/ dead(死亡)期间拒绝移动输入
+        # 服务端是唯一状态权威,锁定期间客户端发的 PlayerMove 不应改状态。
         # 这里拒绝后,web_server._process_tick 检查 apply_xxx 返回值,不会广播——
-        # 避免出现"客户端收到 X 在移动广播,但 X 实际还在 hurt"的状态矛盾。
-        if info.state == "hurt":
-            logger.debug(f"实体 {entity_id} 处于 hurt 硬直,apply_move 被拒绝")
+        # 避免出现"客户端收到 X 在移动广播,但 X 实际还在 hurt/dead"的状态矛盾。
+        if self._is_input_locked(info):
+            logger.debug(f"实体 {entity_id} 处于 {info.state} 锁定,apply_move 被拒绝")
             return False
 
         # 直接落地目标坐标(简化模型,见上方说明)
@@ -415,9 +422,9 @@ class GameRoom:
             logger.warning(f"实体 {entity_id} (type={info.entity_type}) 不能转向,apply_facing 被拒绝")
             return False
 
-        # 硬直校验:state=="hurt" 期间拒绝朝向输入(硬直期间朝向也锁)
-        if info.state == "hurt":
-            logger.debug(f"实体 {entity_id} 处于 hurt 硬直,apply_facing 被拒绝")
+        # 输入锁定校验:hurt/dead 期间拒绝朝向输入(锁定期间朝向也锁)
+        if self._is_input_locked(info):
+            logger.debug(f"实体 {entity_id} 处于 {info.state} 锁定,apply_facing 被拒绝")
             return False
 
         # 弧度归一到 [0, 2*PI),避免数值无限增长
@@ -448,10 +455,10 @@ class GameRoom:
             logger.warning(f"实体 {entity_id} (type={info.entity_type}) 不能攻击,apply_attack_start 被拒绝")
             return False
 
-        # 硬直校验:state=="hurt" 期间不能发起攻击
-        # (硬直被打断的不只是移动,新攻击也要拒绝,否则会出现"边硬直边攻击"的诡异状态)
-        if info.state == "hurt":
-            logger.debug(f"实体 {entity_id} 处于 hurt 硬直,apply_attack_start 被拒绝")
+        # 输入锁定校验:hurt/dead 期间不能发起攻击
+        # (锁定被打断的不只是移动,新攻击也要拒绝,否则会出现"边硬直/死亡边攻击"的诡异状态)
+        if self._is_input_locked(info):
+            logger.debug(f"实体 {entity_id} 处于 {info.state} 锁定,apply_attack_start 被拒绝")
             return False
 
         # 这里不做任何判定逻辑(如攻击范围/碰撞检测),只做状态变更
@@ -477,32 +484,93 @@ class GameRoom:
         logger.debug(f"实体 {entity_id} 攻击结束 atk_id={atk_id}")
         return True
 
-    def apply_hurt(self, target_id: str, atk_id: int) -> bool:
+    def apply_hurt(self, target_id: str, atk_id: int, atk_shape_idx: int, damage: int, attacker_id: str) -> HurtResult:
         """
-        应用一次受击到状态(设 state="hurt")
+        应用一次受击到状态:扣血 + 设 state(hurt 或 dead)
 
         能力校验:can_be_hurt=False 的实体(如墙/水地)不会进入 hurt 状态。
 
         注意:本方法不区分受击者是玩家还是木桩——所有可被攻击的实体统一处理。
         这正是统一 Entity 模型的好处:不用 if-else 分流,逻辑统一。
 
+        死亡判定:cur_hp<=0 且 can_die=True 时走死亡分支(设 state="dead",返回 DEAD);
+        否则设 state="hurt" 返回 HURT(调用方启 hurt timer)。
+        玩家 can_die=False,即使 hp 扣到 0 也走 HURT 分支(死亡流程暂不实现)。
+
         Args:
             target_id: 被命中者ID
-            atk_id: 攻击ID(当前未使用,未来加伤害公式时用来查 ATTACK_CONFIG)
+            atk_id: 攻击ID(当前未使用,保留给未来扩展如属性攻击)
+            atk_shape_idx: 攻击形状索引(当前未使用,保留给未来扩展)
+            damage: 伤害值(已由调用方算好,本方法只负责扣)
+            attacker_id: 攻击者ID(当前未使用,保留给未来扩展如仇恨表)
 
         Returns:
-            True 表示状态已更新;False 表示实体不存在或不能被攻击
+            HurtResult.DEAD: 被命中者死了(调用方应启 DeadTimer,不启 HurtTimer)
+            HurtResult.HURT: 没死(调用方应启 HurtTimer)
+            HurtResult.FAILED: 实体不存在/不能被攻击/无战斗组件(调用方不应有后续动作)
+        """
+        info = self._entities.get(target_id)
+        if info is None:
+            return HurtResult.FAILED
+
+        cap = entity_config.get_capability(info.entity_type)
+        if not cap.can_be_hurt:
+            logger.warning(f"实体 {target_id} (type={info.entity_type}) 不能被攻击,apply_hurt 被拒绝")
+            return HurtResult.FAILED
+
+        combat = self._combats.get(target_id)
+        if combat is None:
+            # 没有战斗组件(如纯装饰实体),无法扣血,按失败处理
+            return HurtResult.FAILED
+
+        combat.cur_hp -= damage
+
+        # 死亡判定:hp<=0 且 can_die=True 才走死亡分支
+        # 玩家 can_die=False(hp 扣到 0 也走 hurt,死亡流程暂不实现)
+        # 木桩 can_die=False(且每 tick 回满血,实际不会到 0)
+        if combat.cur_hp <= 0 and cap.can_die:
+            combat.cur_hp = 0  # 钳到 0,避免显示负血量
+            info.state = "dead"
+            logger.info(f"实体 {target_id} 死亡(攻击者 {attacker_id}, atk_id={atk_id})")
+            return HurtResult.DEAD
+
+        # 钳到 0 避免负血量(can_die=False 但 hp 扣到 0 的情况,如玩家)
+        if combat.cur_hp < 0:
+            combat.cur_hp = 0
+
+        # 没死:设 state="hurt",调用方启 hurt timer
+        info.state = "hurt"
+        logger.debug(f"实体 {target_id} 受击扣血 -{damage} → {combat.cur_hp}/{combat.max_hp}")
+        return HurtResult.HURT
+
+    def apply_dead(self, target_id: str, atk_id: int) -> bool:
+        """
+        应用死亡状态到实体(设 state="dead")
+
+        本方法由 apply_hurt 内部死亡分支调用,也可由外部(如 Boss 机制)直接调用。
+        能力校验:can_die=False 的实体不能进入死亡状态。
+
+        注意:本方法只设状态,不做 remove_entity。
+        实体移除由 DeadTimer 到期后调 remove_entity 完成——
+        这样客户端有时间播死亡动画(服务端"立即判定死亡"但"延迟移除实体")。
+
+        Args:
+            target_id: 死亡的实体ID
+            atk_id: 致死的攻击ID(当前未使用,保留给未来扩展如击杀日志)
+
+        Returns:
+            True 表示状态已更新;False 表示实体不存在或不能死
         """
         info = self._entities.get(target_id)
         if info is None:
             return False
 
-        if not entity_config.get_capability(info.entity_type).can_be_hurt:
-            logger.warning(f"实体 {target_id} (type={info.entity_type}) 不能被攻击,apply_hurt 被拒绝")
+        if not entity_config.get_capability(info.entity_type).can_die:
+            logger.warning(f"实体 {target_id} (type={info.entity_type}) 不能死亡,apply_dead 被拒绝")
             return False
 
-        info.state = "hurt"
-        logger.debug(f"实体 {target_id} 受到攻击 atk_id={atk_id}")
+        info.state = "dead"
+        logger.info(f"实体 {target_id} 进入死亡状态 atk_id={atk_id}")
         return True
 
     # ------------------------------------------------------------------
@@ -537,7 +605,7 @@ class GameRoom:
         - 量化到四方向是动画表现层的事,判定层必须用精确弧度
 
         Args:
-            atk_shape: 攻击形状配置(从 ATTACK_CONFIG 取出的单个 AttackShape)
+            atk_shape: 攻击形状配置(从 config_loader.get_attack_config 取出的单个 AttackShape)
             attacker_id: 攻击者的 entity_id
 
         Returns:
@@ -548,13 +616,13 @@ class GameRoom:
             return []
 
         # 目前只实现了扇形判定,其它形状未来扩展
-        if atk_shape.shape != AttackShapeType.SECTOR:
+        if atk_shape.shape != config_loader.ShapeType.SECTOR:
             logger.warning(f"未支持的攻击形状: {atk_shape.shape},跳过命中判定")
             return []
 
         # shape_params 类型是 ShapeParams 基类,扇形时实际是 SectorParams
         sector_params = atk_shape.shape_params
-        if not isinstance(sector_params, SectorParams):
+        if not isinstance(sector_params, config_loader.SectorParams):
             logger.warning(f"扇形攻击的 shape_params 不是 SectorParams: {type(sector_params)}")
             return []
 
@@ -573,12 +641,29 @@ class GameRoom:
             if target_id == attacker_id:
                 continue
             # 能力过滤:不能被攻击的实体跳过(墙/水地等)
-            if not entity_config.get_capability(target.entity_type).can_be_hurt:
+            # 同时取出 body_shape/body_params 用于构造碰撞形状
+            target_cap = entity_config.get_capability(target.entity_type)
+            if not target_cap.can_be_hurt:
                 continue
-            # 几何判定:用实体自己的 radius(支持不同体积)
+            # 死亡过滤:已经 dead 的实体不可再被攻击(避免鞭尸)
+            # 这和 can_be_hurt 正交:can_be_hurt 是能力层(能不能被打),
+            # state=="dead" 是状态层(当前还能不能被打)
+            if target.state == "dead":
+                continue
+            # 碰撞掩码过滤:攻击者的攻击掩码 & 目标的碰撞掩码 == 0 时跳过
+            if (atk_shape.hit_mask & target_cap.hit_layer) == 0:
+                continue
+            # 几何判定:用实体类型的碰撞形状(从 entity_config 查,而非 EntityInfo.radius)
+            # 目前实体碰撞只支持圆形,其他形状未来扩展
+            if target_cap.body_shape != config_loader.ShapeType.CIRCLE:
+                logger.warning(f"实体 {target_id} 的 body_shape={target_cap.body_shape} 暂不支持,跳过")
+                continue
+            if not isinstance(target_cap.body_params, config_loader.CircleParams):
+                logger.warning(f"实体 {target_id} 的 body_params 类型错误: {type(target_cap.body_params)}")
+                continue
             target_circle = collision.Circle(
                 pos=(target.x, target.y),
-                radius=target.radius,
+                radius=target_cap.body_params.radius,
             )
             if collision.intersect_circle_sector(target_circle, atk_sector):
                 hits.append(target_id)
@@ -595,3 +680,110 @@ class GameRoom:
 
         info.state = "idle"
         logger.debug(f"实体 {entity_id} 伤害结束")
+
+    def add_combat(self, entity_id, entity_type):
+        # — 从 config_loader.get_combat_stats 拷基础值初始化
+        combat_stats = config_loader.get_combat_stats(entity_type)
+        combat = CombatComponent(
+            entity_id=entity_id,
+            cur_hp=combat_stats.max_hp,
+            max_hp=combat_stats.max_hp,
+            attack_power=combat_stats.attack_power,
+            defense=combat_stats.defense
+        )
+        self._combats[entity_id] = combat
+        return combat
+
+    def remove_combat(self, entity_id):
+        # 幂等:不存在时不报错(和 remove_entity 一致的容错策略)
+        self._combats.pop(entity_id, None)
+
+    def get_combat(self, entity_id) -> Optional[CombatComponent]:
+        return self._combats.get(entity_id)
+
+    def snapshot_combats(self) -> List[CombatComponent]:
+        # StatsInit 用,返回 list(和 snapshot() 对称,调用方用 asdict 转 dict)
+        return list(self._combats.values())
+
+    def apply_stat_boost(self, entity_id, max_hp_delta, atk_delta, def_delta):
+        # 强化用(预留,阶段 1 可不实现)
+        # 后续实现:改 combat 实例字段 + 广播 StatsChanged
+        pass
+
+    def is_dead(self, entity_id) -> bool:
+        # state=="dead" 的便捷查询(state 在 EntityInfo,不在 CombatComponent)
+        info = self._entities.get(entity_id)
+        if info is None:
+            return False
+        return info.state == "dead"
+
+    def get_attack_damage(self, attacker_id, atk_id, atk_shape_idx, hurt_id) -> int:
+        """
+        计算伤害值(服务器权威,客户端不算)
+
+        公式:
+            raw = attacker.attack_power * atk_shape.damage_multiplier
+            reduction = target.defense / (target.defense + K)   # 减伤比例 0~1,K=100
+            damage = max(1, int(raw * (1 - reduction)))
+
+        减伤系数 K=100:defense=5 时减伤约 4.8%,defense=50 时减伤 33%
+        下限 max(1, ...):保证防御再高也至少扣 1 血,避免无敌
+        """
+        atk_combat = self._combats.get(attacker_id)
+        def_combat = self._combats.get(hurt_id)
+        if atk_combat is None or def_combat is None:
+            return 0
+        atk_config = config_loader.get_attack_config(atk_id)
+        if atk_config is None or atk_shape_idx < 0 or atk_shape_idx >= len(atk_config.shape_list):
+            return 0
+        atk_shape = atk_config.shape_list[atk_shape_idx]
+        # damage_multiplier 字段可能未配置,默认 1.0
+        multiplier = getattr(atk_shape, "damage_multiplier", 1.0)
+        raw = atk_combat.attack_power * multiplier
+        # 减伤公式:防御越高减伤越多,但有下限保证至少扣 1
+        K = 100
+        reduction = def_combat.defense / (def_combat.defense + K)
+        return max(1, int(raw * (1 - reduction)))
+
+    def get_stakes(self) -> List[EntityInfo]:
+        """
+        获取所有木桩实体的 EntityInfo 列表
+        """
+        return [entity for entity in self._entities.values() if entity.entity_type == "stake"]
+
+    def create_enemy(self, entity_type: str, pos: Tuple[float, float]) -> EntityInfo:
+        """
+        创建敌人实体的便捷方法(语法糖)
+
+        做三件事:
+            1. 分配 entity_id(格式 "enemy:{type}_{序号}",序号按该类型现有数量推算)
+            2. 构造 EntityInfo 并设好位置,调 add_entity 入房间
+               (add_entity 内部会按 entity_type 自动建 CombatComponent)
+            3. 调 EnemyMgr.on_enemy_created 挂上 AI 状态(为寻路预留)
+
+        Args:
+            entity_type: 敌人类型(需已在 entity_config.json 配置,如 "enemy_slime")
+            pos: 出生坐标 (x, y)
+
+        Returns:
+            入房间后的 EntityInfo(entity_id 已确定)
+
+        为什么位置在 add_entity 之前设好:
+            add_entity 内部将来若要广播快照/触发 on_join 回调,位置必须是正确的。
+            先 add 再设位置会让"加入瞬间"的位置是 (0,0),埋坑。
+        """
+        # 序号:统计该类型当前已有数量 +1 作为序号
+        # 不用单独维护计数器:计数器在敌人增删后会错位,用现有数量推算天然正确
+        count = sum(1 for e in self._entities.values() if e.entity_type == entity_type)
+        entity_id = f"enemy:{entity_type}_{count + 1}"
+
+        enemy = EntityInfo(
+            entity_id=entity_id,    # add_entity 会再强制覆盖一次,这里只是占位
+            entity_type=entity_type,
+            x=pos[0],
+            y=pos[1],
+            state="idle",
+        )
+        self.add_entity(entity_id, enemy)               # 共有状态 + 战斗组件
+        self.enemy_mgr.on_enemy_created(entity_id, entity_type)  # AI 状态
+        return enemy

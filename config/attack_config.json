@@ -1,0 +1,39 @@
+{
+    "_comment": "攻击配置表(单数据源,双端共享。改完跑 tools/sync_config.py 同步到 server/config 和 client/res/config)",
+    "_shape_type_values": "sector|rect|circle|ring(和服务端 ShapeType enum 的 value 对齐)",
+    "_angle_unit": "角度(degree),loader 读取时转弧度。理由:人读角度比弧度直观",
+
+    "1001": {
+        "_desc": "扇形一刀",
+        "shape_list": [
+            {
+                "shape": "sector",
+                "params": {"radius": 35.0, "angle": 120.0},
+                "duration": 583,
+                "hit_time": 83,
+                "hit_mask": 2,
+                "damage_multiplier": 1.1
+            }
+        ]
+    },
+
+    "1002": {
+        "_desc": "扇形两刀(当前两个 shape 配置相同)",
+        "shape_list": [
+            {
+                "shape": "sector",
+                "params": {"radius": 35.0, "angle": 120.0},
+                "duration": 583,
+                "hit_time": 83,
+                "damage_multiplier": 0.7
+            },
+            {
+                "shape": "sector",
+                "params": {"radius": 35.0, "angle": 120.0},
+                "duration": 583,
+                "hit_time": 83,
+                "damage_multiplier": 0.9
+            }
+        ]
+    }
+}

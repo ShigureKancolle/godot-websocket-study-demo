@@ -75,7 +75,6 @@ def register(server) -> None:
             y=float(player_info.get("y", 0.0)),
             facing=float(player_info.get("facing", 0.0)),
             state="idle",
-            radius=float(player_info.get("radius", 24.0)),
             player_name=player_info.get("player_name", "未命名"),
             moving=False,
         )
@@ -101,6 +100,33 @@ def register(server) -> None:
             "entities": entities_list,
             "timestamp": int(time.time() * 1000)
         }, websocket=ctx.websocket)
+
+        # 给「新玩家」发战斗属性全量快照(StatsInit),让它知道所有人的血量/属性
+        # snapshot_combats 返回 List[CombatComponent],转 dict 列表给 message_bus
+        combat_list = [dataclasses.asdict(c) for c in server.room.snapshot_combats()]
+        await bus.send("StatsInit", {
+            "entries": combat_list
+        }, websocket=ctx.websocket)
+
+        # 给「其他人」发新玩家的战斗属性(StatsChanged),让它们知道新玩家血量/属性
+        # (新玩家自己已经通过上面的 StatsInit 拿到了,不用再发)
+        new_combat = server.room.get_combat(ctx.player_id)
+        if new_combat is not None:
+            await server.broadcast("StatsChanged", {
+                "entity_id": ctx.player_id,
+                "max_hp": new_combat.max_hp,
+                "attack_power": new_combat.attack_power,
+                "defense": new_combat.defense,
+            }, exclude_player=ctx.player_id)
+            # 新玩家的 cur_hp 也要让其他人知道(走 HpChanged,因为 StatsChanged 不含 cur_hp)
+            await server.broadcast("HpChanged", {
+                "entity_id": ctx.player_id,
+                "cur_hp": new_combat.cur_hp,
+                "damage": 0,           # 0 表示非伤害性血量同步(初始化)
+                "attacker_id": "",
+                "atk_id": 0,
+                "atk_shape_idx": 0,
+            }, exclude_player=ctx.player_id)
 
     @bus.onproto("PlayerMove")
     async def on_player_move(data: dict, ctx):

@@ -13,12 +13,12 @@ package game;
 // ============================================================================
 message EntityInfo {
   string entity_id = 1;      // 实体ID,格式 "player:uuid" | "entity:stake_1"
-  string entity_type = 2;    // 类型:player/stake/...(决定行为能力,见 entity_config.py)
+  string entity_type = 2;    // 类型:player/stake/...(决定行为能力+碰撞形状,见 entity_config)
   float x = 3;               // X坐标
   float y = 4;               // Y坐标
   float facing = 5;          // 朝向角度(弧度),0=右,逆时针正(Godot 标准)。木桩永远 0
   string state = 6;          // 动画状态:idle/run/attack/hurt/...(服务端权威,客户端只读镜像)
-  float radius = 7;          // 碰撞半径(用于攻击命中判定)
+  // 注:radius 字段已删除——碰撞形状改由 entity_type 查 entity_config 决定
   // player 特有字段(其他类型不填)
   string player_name = 8;    // 玩家名称
   bool moving = 9;           // 是否正在移动(客户端发,服务端据此设 state=idle/run)
@@ -71,7 +71,7 @@ message AttackHit {
   repeated string hit_list = 2; // 命中目标ID列表
   int32 atk_id = 3;          // 攻击ID
   int32 hurt_duration = 4;   // 受击硬直时长(毫秒),客户端当前不读,留作未来预演/调试用
-  repeated float hit_pos = 5; // 命中坐标 x,y
+  int32 atk_shape_idx = 5;  // atk_id对应攻击的第几个形状
 }
 
 // 受击结束
@@ -98,6 +98,58 @@ message Heartbeat {
   int64 timestamp = 1;       // 时间戳
 }
 
+// 单个实体的战斗属性快照(用于 StatsInit 批量初始化)
+message CombatStatsEntry {
+    string entity_id = 1;
+    int32 max_hp = 2;
+    int32 cur_hp = 3;
+    int32 attack_power = 4;
+    int32 defense = 5;
+}
+
+// 战斗属性批量同步(新玩家加入时发)
+message StatsInit {
+    repeated CombatStatsEntry entries = 1;
+}
+
+// 战斗属性变更(强化时广播)
+message StatsChanged {
+    string entity_id = 1;
+    int32 max_hp = 2;
+    int32 attack_power = 3;
+    int32 defense = 4;
+    // 不含 cur_hp,cur_hp 走 HpChanged
+}
+
+// 血量变更(每次 hurt 时广播,含飘字数据)
+message HpChanged {
+    string entity_id = 1;       // 被打的人
+    int32 cur_hp = 2;           // 剩余血量
+    int32 damage = 3;           // 本次伤害(飘字数字)
+    string attacker_id = 4;     // 谁打的(飘字定位用,客户端取 attacker 位置)
+    int32 atk_id = 5;           // 哪个攻击(取形状算命中点)
+    int32 atk_shape_idx = 6;    // 第几段 shape(算命中点)
+}
+
+// 实体死亡(S2C 广播)
+// 服务端 apply_hurt 判定 hp<=0 且 can_die=True 时广播。
+// 客户端收到后切 DeadState 播死亡动画,但不立即移除节点——
+// 等 EntityRemove 消息来才 queue_free(让死亡动画播完)。
+// 服务端"立即判定死亡"但"延迟移除实体",由 DeadTimer 控制延迟时长。
+message EntityDead {
+    string entity_id = 1;       // 死亡的实体ID
+    string attacker_id = 2;     // 击杀者ID(未来击杀日志/功劳簿用)
+    int32 atk_id = 3;           // 致死的攻击ID
+}
+
+// 实体移除(S2C 广播)
+// DeadTimer 到期后服务端调 remove_entity + 广播本消息。
+// 客户端收到后 queue_free 对应 Role 节点。
+// 和 PlayerLeave 的区别:PlayerLeave 是断连(实体消失),EntityRemove 是死亡(播完动画后移除)。
+message EntityRemove {
+    string entity_id = 1;       // 被移除的实体ID
+}
+
 // 通用消息包装器
 message GameMessage {
   oneof message_type {
@@ -112,5 +164,10 @@ message GameMessage {
     AttackHit attack_hit = 9;         // 攻击命中(S2C 广播)
     AttackEnd attack_end = 10;        // 攻击结束(S2C 广播)
     HurtEnd hurt_end = 11;            // 受击结束(S2C 广播)
+    StatsInit stats_init = 12;
+    StatsChanged stats_changed = 13;
+    HpChanged hp_changed = 14;
+    EntityDead entity_dead = 15;      // 实体死亡(S2C 广播)
+    EntityRemove entity_remove = 16;  // 实体移除(S2C 广播)
   }
 }

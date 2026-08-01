@@ -86,9 +86,23 @@ async def main():
     server.room.add_entity("entity:stake_1", game_room.EntityInfo(
         entity_id="entity:stake_1",    # 会被 add_entity 强制覆盖,这里只是占位
         entity_type="stake",
-        x=572.0,
-        y=361.0,
-        radius=24.0,
+        x=350.0,
+        y=200.0,
+        state="idle",
+    ))
+
+    server.room.add_entity("entity:enemy_slime_1", game_room.EntityInfo(
+        entity_id="entity:enemy_slime_1",
+        entity_type="enemy_slime",
+        x=100.0,
+        y=150.0,
+        state="idle",
+    ))
+    server.room.add_entity("entity:enemy_skeleton_1", game_room.EntityInfo(
+        entity_id="entity:enemy_skeleton_1",
+        entity_type="enemy_skeleton",
+        x=150.0,
+        y=150.0,
         state="idle",
     ))
 

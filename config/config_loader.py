@@ -1,0 +1,350 @@
+# coding=utf-8
+"""
+文件: server/config/config_loader.py
+作用: 从 JSON 配置文件构造 Python 对象(单数据源在 shared_config/,由 sync_config.py 同步过来)
+
+============================================================================
+ 为什么需要 config_loader
+============================================================================
+之前配置(ATTACK_CONFIG / ENTITY_CAPABILITIES / HURT_DURATION_MS)硬编码在代码里,
+双端各写一份,易漏改。改成 JSON 单数据源后,需要 loader 读取 JSON 并构造对象。
+
+config_loader 是配置访问的唯一入口:
+    - 读取 server/config/*.json(sync_config.py 从 shared_config/ 复制过来)
+    - 构造 dataclass 对象返回(保持类型安全,IDE 可补全)
+    - JSON 里下划线开头的字段(_comment / _desc / _shape_type_values 等)是注释,
+      loader 读取时跳过
+
+============================================================================
+ 和 game_room / entity_config 的关系
+============================================================================
+config_loader 只负责"读 JSON + 构造对象",不包含业务逻辑。
+game_room 和 entity_config 通过调 config_loader 获取配置,然后做自己的事:
+    - game_room.get_attack_hits 用 config_loader 构造的 AttackShape 做碰撞判定
+    - entity_config.get_capability 用 config_loader 构造的 EntityCapability 做能力校验
+
+============================================================================
+ 热更影响
+============================================================================
+config_loader 在模块加载时一次性读取 JSON 缓存到模块级变量。
+热更 reload config_loader 模块时会重新读 JSON,但引用旧对象的代码还是用旧配置。
+如需运行时热更配置,要手动调 reload(),且 game_room/entity_config 也要一起 reload。
+"""
+
+'''
+hit_mask: 攻击判定掩码(按位与,决定哪些 entity_type 会被判定)
+
+1: player
+2: stack
+
+'''
+
+import json
+import math
+import os
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+
+# config 目录:server/config/(本文件就在这个目录下)
+_CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+# ===========================================================================
+# 形状类型枚举(共用,实体和攻击都用这个)
+# ===========================================================================
+# 原来叫 AttackShapeType,现在改名 ShapeType 表示"通用形状类型"
+# 实体碰撞形状和攻击形状共用这套枚举
+class ShapeType:
+    SECTOR = "sector"   # 扇形
+    RECT = "rect"       # 矩形
+    CIRCLE = "circle"   # 圆形
+    RING = "ring"       # 环形
+
+
+# ===========================================================================
+# 形状参数(攻击形状用,实体碰撞形状也用)
+# ===========================================================================
+@dataclass
+class ShapeParams:
+    """形状参数基类,实际参数由子类决定"""
+    pass
+
+
+@dataclass
+class SectorParams(ShapeParams):
+    radius: float = 35.0                     # 扇形半径,单位像素
+    angle: float = math.pi / 2 * (4 / 3)     # 扇形角度(弧度),±60°
+
+
+@dataclass
+class CircleParams(ShapeParams):
+    """圆形参数(实体碰撞用)"""
+    radius: float = 24.0
+
+
+@dataclass
+class RectParams(ShapeParams):
+    """矩形参数(未来扩展用,如矩形墙)"""
+    width: float = 0.0
+    height: float = 0.0
+
+
+# ===========================================================================
+# 战斗属性(类型级基础值,EntityInfo 初始化时拷贝一份作为实例运行时状态)
+# ===========================================================================
+@dataclass
+class CombatStats:
+    """
+    实体战斗属性(类型级基础值)。
+
+    语义:这里是「该类型的初始/基础战斗属性」,所有同类型实体共享同一份数值。
+    运行时强化(玩家成长/敌人每波强化)应该改 EntityInfo 里拷贝出来的实例副本,
+    不应该回写到这里(配置是只读的)。
+
+    伤害公式(在 game_room 算,不在这层):
+        final = attacker.attack_power * atk_shape.damage_percent * 防御系数
+    defense 参与防御系数计算,具体公式由 game_room 决定。
+    """
+    max_hp: int = 0           # 最大血量
+    attack_power: int = 0     # 攻击力基础值(乘以攻击配置的 damage_percent 得最终伤害)
+    defense: int = 0          # 防御力(参与伤害减免公式)
+
+
+# ===========================================================================
+# 攻击形状 / 攻击配置
+# ===========================================================================
+@dataclass
+class AttackShape:
+    """单个攻击形状(一次攻击可由多个形状组成,如双段斩)"""
+    shape: str = ShapeType.SECTOR            # 形状类型字符串(和 ShapeType.xxx 值对齐)
+    shape_params: Optional[ShapeParams] = None  # 具体参数,根据 shape 决定
+    duration: int = 583                      # 攻击持续时间(ms)
+    hit_time: int = 83                       # 判定帧时间(从发起算,ms)
+    hit_mask: int = 0xFFFFFFFF  # 判定掩码(按位与,决定哪些 entity_type 会被判定)
+    damage_multiplier: float = 1.0           # 伤害倍率(乘以攻击者 attack_power 得原始伤害)
+
+
+@dataclass
+class AttackConfig:
+    """攻击配置:一个 atk_id 对应一组形状列表"""
+    shape_list: List[AttackShape] = field(default_factory=list)
+
+# ===========================================================================
+# 实体能力配置
+# ===========================================================================
+@dataclass
+class EntityCapability:
+    """实体能力 + 碰撞形状描述 + 移动速度 + 死亡配置"""
+    # 能力字段(原 entity_config.py 的 EntityCapability)
+    can_move: bool = False
+    can_attack: bool = False
+    can_be_hurt: bool = False
+    can_disconnect: bool = False
+    can_die: bool = False                    # 能否进入死亡流程(hp<=0 时判定)。player=false 暂不实现,stake=false 木桩不会死,敌人=true
+    # 碰撞形状字段(本次新增,原 EntityInfo.radius 删除后挪到这里)
+    body_shape: str = ShapeType.CIRCLE       # 碰撞形状类型字符串
+    body_params: Optional[ShapeParams] = None  # 碰撞形状参数
+    # 碰撞掩码
+    hit_layer: int = 0x00000000  # 判定掩码(按位与,决定哪些 entity_type 会被判定)
+    # 移动速度(像素/秒,类型级基础值。can_move=False 时为 0。
+    # EnemyMgr 推进敌人位移用 enemy_speed * dt;客户端 LocalPlayerController 用
+    # player_speed * dt 算每帧步长。运行时若有减速/加速 buff 应改实例副本,不回写这里)
+    speed: float = 0.0
+    # 死亡动画时长(毫秒)。can_die=False 时为 0。
+    # DeadTimer 到期后 remove_entity + 广播 EntityRemove,让客户端有时间播死亡动画。
+    # 服务端"立即判定死亡"但"延迟移除实体",和 hurt 的"立即设 state + 定时器到期恢复"是同一模式。
+    dead_duration_ms: int = 0
+
+
+# ===========================================================================
+# 内部辅助:从 dict 构造对象
+# ===========================================================================
+
+def _is_comment_key(key: str) -> bool:
+    """判断 JSON key 是否是注释(下划线开头,如 _comment / _desc / _unit)"""
+    return key.startswith("_")
+
+
+def _build_shape_params(shape_type: str, params_dict: dict) -> Optional[ShapeParams]:
+    """
+    从 dict 构造 ShapeParams 子类对象。
+    JSON 里 angle 用角度存(人读直观),这里转成弧度(代码用弧度计算)。
+    """
+    if shape_type == ShapeType.SECTOR:
+        return SectorParams(
+            radius=float(params_dict.get("radius", 35.0)),
+            # 角度→弧度:rad = deg * π / 180
+            angle=math.radians(float(params_dict.get("angle", 120.0))),
+        )
+    elif shape_type == ShapeType.CIRCLE:
+        return CircleParams(
+            radius=float(params_dict.get("radius", 24.0)),
+        )
+    elif shape_type == ShapeType.RECT:
+        return RectParams(
+            width=float(params_dict.get("width", 0.0)),
+            height=float(params_dict.get("height", 0.0)),
+        )
+    else:
+        return None
+
+
+def _build_attack_shape(shape_dict: dict) -> AttackShape:
+    """从 dict 构造 AttackShape 对象"""
+    shape_type = shape_dict.get("shape", ShapeType.SECTOR)
+    return AttackShape(
+        shape=shape_type,
+        shape_params=_build_shape_params(shape_type, shape_dict.get("params", {})),
+        duration=int(shape_dict.get("duration", 583)),
+        hit_time=int(shape_dict.get("hit_time", 83)),
+        hit_mask=int(shape_dict.get("hit_mask", 0xFFFFFFFF)),
+        damage_multiplier=float(shape_dict.get("damage_multiplier", 1.0))
+    )
+
+
+def _build_attack_config(entry_dict: dict) -> AttackConfig:
+    """从 dict 构造 AttackConfig 对象"""
+    shape_list = []
+    for shape_dict in entry_dict.get("shape_list", []):
+        shape_list.append(_build_attack_shape(shape_dict))
+    return AttackConfig(shape_list=shape_list)
+
+
+def _build_combat_stats(stats_dict: dict) -> CombatStats:
+    """从 dict 构造 CombatStats 对象(未配 combat_stats 时返回零值默认)"""
+    if not stats_dict:
+        return CombatStats()
+    return CombatStats(
+        max_hp=int(stats_dict.get("max_hp", 0)),
+        attack_power=int(stats_dict.get("attack_power", 0)),
+        defense=int(stats_dict.get("defense", 0)),
+    )
+
+
+def _build_entity_capability(entry_dict: dict) -> EntityCapability:
+    """从 dict 构造 EntityCapability 对象"""
+    caps_dict = entry_dict.get("capabilities", {})
+    body_shape = entry_dict.get("body_shape", ShapeType.CIRCLE)
+    return EntityCapability(
+        can_move=bool(caps_dict.get("can_move", False)),
+        can_attack=bool(caps_dict.get("can_attack", False)),
+        can_be_hurt=bool(caps_dict.get("can_be_hurt", False)),
+        can_disconnect=bool(caps_dict.get("can_disconnect", False)),
+        can_die=bool(caps_dict.get("can_die", False)),
+        body_shape=body_shape,
+        body_params=_build_shape_params(body_shape, entry_dict.get("body_params", {})),
+        hit_layer=int(entry_dict.get("hit_layer", 0x00000000)),
+        speed=float(entry_dict.get("speed", 0.0)),
+        dead_duration_ms=int(entry_dict.get("dead_duration_ms", 0)),
+    )
+
+
+# ===========================================================================
+# 配置缓存(模块加载时一次性读取)
+# ===========================================================================
+
+def _load_json(filename: str) -> dict:
+    """读取 server/config/ 下的 JSON 文件"""
+    filepath = os.path.join(_CONFIG_DIR, filename)
+    with open(filepath, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _build_attack_config_map(raw: dict) -> Dict[int, AttackConfig]:
+    """从 attack_config.json 原始数据构造 {atk_id: AttackConfig} 表"""
+    result = {}
+    for key, value in raw.items():
+        if _is_comment_key(key):
+            continue  # 跳过 _comment / _shape_type_values 等注释字段
+        try:
+            atk_id = int(key)
+        except ValueError:
+            continue  # 跳过非数字 key(理论上不会有,防御性)
+        result[atk_id] = _build_attack_config(value)
+    return result
+
+
+def _build_entity_capability_map(raw: dict) -> Dict[str, EntityCapability]:
+    """从 entity_config.json 原始数据构造 {entity_type: EntityCapability} 表"""
+    result = {}
+    for key, value in raw.items():
+        if _is_comment_key(key):
+            continue
+        result[key] = _build_entity_capability(value)
+    return result
+
+
+def _build_constants(raw: dict) -> dict:
+    """从 constants.json 读取常量,跳过注释字段"""
+    return {k: v for k, v in raw.items() if not _is_comment_key(k)}
+
+
+# 模块加载时一次性读取并缓存
+_ATTACK_CONFIG_RAW = _load_json("attack_config.json")
+_ENTITY_CONFIG_RAW = _load_json("entity_config.json")
+_CONSTANTS_RAW = _load_json("constants.json")
+
+_ATTACK_CONFIG_MAP: Dict[int, AttackConfig] = _build_attack_config_map(_ATTACK_CONFIG_RAW)
+_ENTITY_CAPABILITY_MAP: Dict[str, EntityCapability] = _build_entity_capability_map(_ENTITY_CONFIG_RAW)
+_CONSTANTS: dict = _build_constants(_CONSTANTS_RAW)
+
+
+# ===========================================================================
+# 对外 API
+# ===========================================================================
+
+def get_attack_config(atk_id: int) -> Optional[AttackConfig]:
+    """获取某个 atk_id 的攻击配置(含 shape_list);未知返回 None"""
+    return _ATTACK_CONFIG_MAP.get(atk_id)
+
+
+def get_all_attack_configs() -> Dict[int, AttackConfig]:
+    """获取全部攻击配置(只读视图,不要修改返回的 dict)"""
+    return _ATTACK_CONFIG_MAP
+
+
+def get_capability(entity_type: str) -> EntityCapability:
+    """
+    取某个类型的能力配置。
+    未列在表里的类型返回"零能力"配置(安全的默认值)——
+    加新类型时如果忘记配能力,它会自动变成"啥都不能干",而不是崩溃。
+    """
+    return _ENTITY_CAPABILITY_MAP.get(entity_type, EntityCapability())
+
+
+def get_combat_stats(entity_type: str) -> CombatStats:
+    """
+    取某个类型的基础战斗属性(max_hp/attack_power/defense)。
+    未列在表里的类型返回零值 CombatStats(max_hp=0 → 直接死,bug 早暴露)。
+    返回的是配置里的对象,调用方不要修改;EntityInfo 初始化时应该自己拷贝一份。
+    """
+    combat_stats = _build_combat_stats(_ENTITY_CONFIG_RAW[entity_type].get("combat_stats", {}))
+    return combat_stats
+
+
+def get_speed(entity_type: str) -> float:
+    """
+    取某个类型的移动速度(像素/秒)。
+    未列在表里的类型返回 0(不会动,安全默认值)。
+    EnemyMgr 推进敌人位移、客户端 LocalPlayerController 算每帧步长都走这里。
+    """
+    return get_capability(entity_type).speed
+
+
+def get_dead_duration_ms(entity_type: str) -> int:
+    """
+    取某个类型的死亡动画时长(毫秒)。
+    can_die=False 的类型返回 0(不会死,无死亡动画)。
+    DeadTimer 用这个值计时,到期后 remove_entity + 广播 EntityRemove。
+    """
+    return get_capability(entity_type).dead_duration_ms
+
+
+def get_constant(name: str, default=None):
+    """取全局常量(如 HURT_DURATION_MS);未知返回 default"""
+    return _CONSTANTS.get(name, default)
+
+
+def get_hurt_duration_ms() -> int:
+    """取 hurt 硬直时长(毫秒),语法糖"""
+    return int(_CONSTANTS.get("HURT_DURATION_MS", 666))

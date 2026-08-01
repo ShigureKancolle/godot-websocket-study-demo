@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\ngame.proto\x12\x04game\"\x9e\x01\n\nEntityInfo\x12\x11\n\tentity_id\x18\x01 \x01(\t\x12\x13\n\x0b\x65ntity_type\x18\x02 \x01(\t\x12\t\n\x01x\x18\x03 \x01(\x02\x12\t\n\x01y\x18\x04 \x01(\x02\x12\x0e\n\x06\x66\x61\x63ing\x18\x05 \x01(\x02\x12\r\n\x05state\x18\x06 \x01(\t\x12\x0e\n\x06radius\x18\x07 \x01(\x02\x12\x13\n\x0bplayer_name\x18\x08 \x01(\t\x12\x0e\n\x06moving\x18\t \x01(\x08\"Y\n\x0b\x43hatMessage\x12\x11\n\tplayer_id\x18\x01 \x01(\t\x12\x13\n\x0bplayer_name\x18\x02 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x03 \x01(\t\x12\x11\n\ttimestamp\x18\x04 \x01(\x03\"T\n\nPlayerMove\x12\x11\n\tentity_id\x18\x01 \x01(\t\x12\t\n\x01x\x18\x02 \x01(\x02\x12\t\n\x01y\x18\x03 \x01(\x02\x12\r\n\x05speed\x18\x04 \x01(\x02\x12\x0e\n\x06moving\x18\x05 \x01(\x08\"1\n\x0cPlayerFacing\x12\x11\n\tentity_id\x18\x01 \x01(\t\x12\x0e\n\x06\x66\x61\x63ing\x18\x02 \x01(\x02\"3\n\nPlayerJoin\x12%\n\x0b\x65ntity_info\x18\x01 \x01(\x0b\x32\x10.game.EntityInfo\" \n\x0bPlayerLeave\x12\x11\n\tentity_id\x18\x01 \x01(\t\"0\n\x0b\x41ttackStart\x12\x11\n\tentity_id\x18\x01 \x01(\t\x12\x0e\n\x06\x61tk_id\x18\x02 \x01(\x05\"j\n\tAttackHit\x12\x13\n\x0b\x61ttacker_id\x18\x01 \x01(\t\x12\x10\n\x08hit_list\x18\x02 \x03(\t\x12\x0e\n\x06\x61tk_id\x18\x03 \x01(\x05\x12\x15\n\rhurt_duration\x18\x04 \x01(\x05\x12\x0f\n\x07hit_pos\x18\x05 \x03(\x02\"V\n\x07HurtEnd\x12\x13\n\x0b\x61ttacker_id\x18\x01 \x01(\t\x12\x0f\n\x07hurt_id\x18\x02 \x01(\t\x12\x0e\n\x06\x61tk_id\x18\x03 \x01(\x05\x12\x15\n\rhurt_duration\x18\x04 \x01(\x05\"\x1e\n\tAttackEnd\x12\x11\n\tentity_id\x18\x01 \x01(\t\"B\n\tGameState\x12\"\n\x08\x65ntities\x18\x01 \x03(\x0b\x32\x10.game.EntityInfo\x12\x11\n\ttimestamp\x18\x02 \x01(\x03\"\x1e\n\tHeartbeat\x12\x11\n\ttimestamp\x18\x01 \x01(\x03\"\xdb\x03\n\x0bGameMessage\x12\'\n\x0bplayer_join\x18\x01 \x01(\x0b\x32\x10.game.PlayerJoinH\x00\x12)\n\x0cplayer_leave\x18\x02 \x01(\x0b\x32\x11.game.PlayerLeaveH\x00\x12\'\n\x0bplayer_move\x18\x03 \x01(\x0b\x32\x10.game.PlayerMoveH\x00\x12)\n\x0c\x63hat_message\x18\x04 \x01(\x0b\x32\x11.game.ChatMessageH\x00\x12%\n\ngame_state\x18\x05 \x01(\x0b\x32\x0f.game.GameStateH\x00\x12$\n\theartbeat\x18\x06 \x01(\x0b\x32\x0f.game.HeartbeatH\x00\x12+\n\rplayer_facing\x18\x07 \x01(\x0b\x32\x12.game.PlayerFacingH\x00\x12)\n\x0c\x61ttack_start\x18\x08 \x01(\x0b\x32\x11.game.AttackStartH\x00\x12%\n\nattack_hit\x18\t \x01(\x0b\x32\x0f.game.AttackHitH\x00\x12%\n\nattack_end\x18\n \x01(\x0b\x32\x0f.game.AttackEndH\x00\x12!\n\x08hurt_end\x18\x0b \x01(\x0b\x32\r.game.HurtEndH\x00\x42\x0e\n\x0cmessage_typeb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\ngame.proto\x12\x04game\"\x8e\x01\n\nEntityInfo\x12\x11\n\tentity_id\x18\x01 \x01(\t\x12\x13\n\x0b\x65ntity_type\x18\x02 \x01(\t\x12\t\n\x01x\x18\x03 \x01(\x02\x12\t\n\x01y\x18\x04 \x01(\x02\x12\x0e\n\x06\x66\x61\x63ing\x18\x05 \x01(\x02\x12\r\n\x05state\x18\x06 \x01(\t\x12\x13\n\x0bplayer_name\x18\x08 \x01(\t\x12\x0e\n\x06moving\x18\t \x01(\x08\"Y\n\x0b\x43hatMessage\x12\x11\n\tplayer_id\x18\x01 \x01(\t\x12\x13\n\x0bplayer_name\x18\x02 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x03 \x01(\t\x12\x11\n\ttimestamp\x18\x04 \x01(\x03\"T\n\nPlayerMove\x12\x11\n\tentity_id\x18\x01 \x01(\t\x12\t\n\x01x\x18\x02 \x01(\x02\x12\t\n\x01y\x18\x03 \x01(\x02\x12\r\n\x05speed\x18\x04 \x01(\x02\x12\x0e\n\x06moving\x18\x05 \x01(\x08\"1\n\x0cPlayerFacing\x12\x11\n\tentity_id\x18\x01 \x01(\t\x12\x0e\n\x06\x66\x61\x63ing\x18\x02 \x01(\x02\"3\n\nPlayerJoin\x12%\n\x0b\x65ntity_info\x18\x01 \x01(\x0b\x32\x10.game.EntityInfo\" \n\x0bPlayerLeave\x12\x11\n\tentity_id\x18\x01 \x01(\t\"0\n\x0b\x41ttackStart\x12\x11\n\tentity_id\x18\x01 \x01(\t\x12\x0e\n\x06\x61tk_id\x18\x02 \x01(\x05\"p\n\tAttackHit\x12\x13\n\x0b\x61ttacker_id\x18\x01 \x01(\t\x12\x10\n\x08hit_list\x18\x02 \x03(\t\x12\x0e\n\x06\x61tk_id\x18\x03 \x01(\x05\x12\x15\n\rhurt_duration\x18\x04 \x01(\x05\x12\x15\n\ratk_shape_idx\x18\x05 \x01(\x05\"V\n\x07HurtEnd\x12\x13\n\x0b\x61ttacker_id\x18\x01 \x01(\t\x12\x0f\n\x07hurt_id\x18\x02 \x01(\t\x12\x0e\n\x06\x61tk_id\x18\x03 \x01(\x05\x12\x15\n\rhurt_duration\x18\x04 \x01(\x05\"\x1e\n\tAttackEnd\x12\x11\n\tentity_id\x18\x01 \x01(\t\"B\n\tGameState\x12\"\n\x08\x65ntities\x18\x01 \x03(\x0b\x32\x10.game.EntityInfo\x12\x11\n\ttimestamp\x18\x02 \x01(\x03\"\x1e\n\tHeartbeat\x12\x11\n\ttimestamp\x18\x01 \x01(\x03\"l\n\x10\x43ombatStatsEntry\x12\x11\n\tentity_id\x18\x01 \x01(\t\x12\x0e\n\x06max_hp\x18\x02 \x01(\x05\x12\x0e\n\x06\x63ur_hp\x18\x03 \x01(\x05\x12\x14\n\x0c\x61ttack_power\x18\x04 \x01(\x05\x12\x0f\n\x07\x64\x65\x66\x65nse\x18\x05 \x01(\x05\"4\n\tStatsInit\x12\'\n\x07\x65ntries\x18\x01 \x03(\x0b\x32\x16.game.CombatStatsEntry\"X\n\x0cStatsChanged\x12\x11\n\tentity_id\x18\x01 \x01(\t\x12\x0e\n\x06max_hp\x18\x02 \x01(\x05\x12\x14\n\x0c\x61ttack_power\x18\x03 \x01(\x05\x12\x0f\n\x07\x64\x65\x66\x65nse\x18\x04 \x01(\x05\"z\n\tHpChanged\x12\x11\n\tentity_id\x18\x01 \x01(\t\x12\x0e\n\x06\x63ur_hp\x18\x02 \x01(\x05\x12\x0e\n\x06\x64\x61mage\x18\x03 \x01(\x05\x12\x13\n\x0b\x61ttacker_id\x18\x04 \x01(\t\x12\x0e\n\x06\x61tk_id\x18\x05 \x01(\x05\x12\x15\n\ratk_shape_idx\x18\x06 \x01(\x05\"D\n\nEntityDead\x12\x11\n\tentity_id\x18\x01 \x01(\t\x12\x13\n\x0b\x61ttacker_id\x18\x02 \x01(\t\x12\x0e\n\x06\x61tk_id\x18\x03 \x01(\x05\"!\n\x0c\x45ntityRemove\x12\x11\n\tentity_id\x18\x01 \x01(\t\"\xac\x05\n\x0bGameMessage\x12\'\n\x0bplayer_join\x18\x01 \x01(\x0b\x32\x10.game.PlayerJoinH\x00\x12)\n\x0cplayer_leave\x18\x02 \x01(\x0b\x32\x11.game.PlayerLeaveH\x00\x12\'\n\x0bplayer_move\x18\x03 \x01(\x0b\x32\x10.game.PlayerMoveH\x00\x12)\n\x0c\x63hat_message\x18\x04 \x01(\x0b\x32\x11.game.ChatMessageH\x00\x12%\n\ngame_state\x18\x05 \x01(\x0b\x32\x0f.game.GameStateH\x00\x12$\n\theartbeat\x18\x06 \x01(\x0b\x32\x0f.game.HeartbeatH\x00\x12+\n\rplayer_facing\x18\x07 \x01(\x0b\x32\x12.game.PlayerFacingH\x00\x12)\n\x0c\x61ttack_start\x18\x08 \x01(\x0b\x32\x11.game.AttackStartH\x00\x12%\n\nattack_hit\x18\t \x01(\x0b\x32\x0f.game.AttackHitH\x00\x12%\n\nattack_end\x18\n \x01(\x0b\x32\x0f.game.AttackEndH\x00\x12!\n\x08hurt_end\x18\x0b \x01(\x0b\x32\r.game.HurtEndH\x00\x12%\n\nstats_init\x18\x0c \x01(\x0b\x32\x0f.game.StatsInitH\x00\x12+\n\rstats_changed\x18\r \x01(\x0b\x32\x12.game.StatsChangedH\x00\x12%\n\nhp_changed\x18\x0e \x01(\x0b\x32\x0f.game.HpChangedH\x00\x12\'\n\x0b\x65ntity_dead\x18\x0f \x01(\x0b\x32\x10.game.EntityDeadH\x00\x12+\n\rentity_remove\x18\x10 \x01(\x0b\x32\x12.game.EntityRemoveH\x00\x42\x0e\n\x0cmessage_typeb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,29 +32,41 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'game_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_ENTITYINFO']._serialized_start=21
-  _globals['_ENTITYINFO']._serialized_end=179
-  _globals['_CHATMESSAGE']._serialized_start=181
-  _globals['_CHATMESSAGE']._serialized_end=270
-  _globals['_PLAYERMOVE']._serialized_start=272
-  _globals['_PLAYERMOVE']._serialized_end=356
-  _globals['_PLAYERFACING']._serialized_start=358
-  _globals['_PLAYERFACING']._serialized_end=407
-  _globals['_PLAYERJOIN']._serialized_start=409
-  _globals['_PLAYERJOIN']._serialized_end=460
-  _globals['_PLAYERLEAVE']._serialized_start=462
-  _globals['_PLAYERLEAVE']._serialized_end=494
-  _globals['_ATTACKSTART']._serialized_start=496
-  _globals['_ATTACKSTART']._serialized_end=544
-  _globals['_ATTACKHIT']._serialized_start=546
-  _globals['_ATTACKHIT']._serialized_end=652
-  _globals['_HURTEND']._serialized_start=654
-  _globals['_HURTEND']._serialized_end=740
-  _globals['_ATTACKEND']._serialized_start=742
-  _globals['_ATTACKEND']._serialized_end=772
-  _globals['_GAMESTATE']._serialized_start=774
-  _globals['_GAMESTATE']._serialized_end=840
-  _globals['_HEARTBEAT']._serialized_start=842
-  _globals['_HEARTBEAT']._serialized_end=872
-  _globals['_GAMEMESSAGE']._serialized_start=875
-  _globals['_GAMEMESSAGE']._serialized_end=1350
+  _globals['_ENTITYINFO']._serialized_end=163
+  _globals['_CHATMESSAGE']._serialized_start=165
+  _globals['_CHATMESSAGE']._serialized_end=254
+  _globals['_PLAYERMOVE']._serialized_start=256
+  _globals['_PLAYERMOVE']._serialized_end=340
+  _globals['_PLAYERFACING']._serialized_start=342
+  _globals['_PLAYERFACING']._serialized_end=391
+  _globals['_PLAYERJOIN']._serialized_start=393
+  _globals['_PLAYERJOIN']._serialized_end=444
+  _globals['_PLAYERLEAVE']._serialized_start=446
+  _globals['_PLAYERLEAVE']._serialized_end=478
+  _globals['_ATTACKSTART']._serialized_start=480
+  _globals['_ATTACKSTART']._serialized_end=528
+  _globals['_ATTACKHIT']._serialized_start=530
+  _globals['_ATTACKHIT']._serialized_end=642
+  _globals['_HURTEND']._serialized_start=644
+  _globals['_HURTEND']._serialized_end=730
+  _globals['_ATTACKEND']._serialized_start=732
+  _globals['_ATTACKEND']._serialized_end=762
+  _globals['_GAMESTATE']._serialized_start=764
+  _globals['_GAMESTATE']._serialized_end=830
+  _globals['_HEARTBEAT']._serialized_start=832
+  _globals['_HEARTBEAT']._serialized_end=862
+  _globals['_COMBATSTATSENTRY']._serialized_start=864
+  _globals['_COMBATSTATSENTRY']._serialized_end=972
+  _globals['_STATSINIT']._serialized_start=974
+  _globals['_STATSINIT']._serialized_end=1026
+  _globals['_STATSCHANGED']._serialized_start=1028
+  _globals['_STATSCHANGED']._serialized_end=1116
+  _globals['_HPCHANGED']._serialized_start=1118
+  _globals['_HPCHANGED']._serialized_end=1240
+  _globals['_ENTITYDEAD']._serialized_start=1242
+  _globals['_ENTITYDEAD']._serialized_end=1310
+  _globals['_ENTITYREMOVE']._serialized_start=1312
+  _globals['_ENTITYREMOVE']._serialized_end=1345
+  _globals['_GAMEMESSAGE']._serialized_start=1348
+  _globals['_GAMEMESSAGE']._serialized_end=2032
 # @@protoc_insertion_point(module_scope)
