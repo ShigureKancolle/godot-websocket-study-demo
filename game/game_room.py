@@ -79,7 +79,7 @@ import math
 import enum
 import logging
 from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple, Union
 
 # 项目模块用 `import game.xxx as xxx` 形式(热更约束+包前缀规范)
 import game.collision as collision
@@ -301,9 +301,14 @@ class GameRoom:
     #   - 这样把"能不能做"和"怎么做"分离,加新类型只改 entity_config
     # ------------------------------------------------------------------
 
-    # 输入锁定状态集合:hurt(硬直)和 dead(死亡)期间拒绝所有玩家输入
+    # 输入锁定状态集合:hurt(硬直)/ dead(死亡)/ attacking(攻击中)期间拒绝所有玩家输入
     # 抽成常量方便统一修改,避免散落在各 apply_xxx 方法里漏改
-    _INPUT_LOCKED_STATES = frozenset({"hurt", "dead"})
+    #
+    # attacking 必须锁:客户端移动中点击攻击时,攻击开始前已发出的残留 PlayerMove
+    # 可能晚于 AttackStart 到达/被 tick 处理。若 attacking 状态仍执行 apply_move,
+    # 会把 state 从 "attacking" 覆盖回 "run" 并广播,导致客户端攻击动画被移动动画吞掉。
+    # 锁住后残留 PlayerMove 的 apply_move 返回 False,不会覆盖攻击状态、也不会广播。
+    _INPUT_LOCKED_STATES = frozenset({"hurt", "dead", "attacking"})
 
     def _is_input_locked(self, info: EntityInfo) -> bool:
         """
@@ -459,6 +464,14 @@ class GameRoom:
         # (锁定被打断的不只是移动,新攻击也要拒绝,否则会出现"边硬直/死亡边攻击"的诡异状态)
         if self._is_input_locked(info):
             logger.debug(f"实体 {entity_id} 处于 {info.state} 锁定,apply_attack_start 被拒绝")
+            return False
+
+        # 攻击中锁定:同一实体同时只允许一个攻击在进行。
+        # 若不加此检查,客户端在旧攻击未结束(duration 内)再发 AttackStart,
+        # 服务端会再启动一个 AttackTimer,两个判定帧各算一次伤害,
+        # 表现为"一次攻击造成两次伤害"(如 22 被打两次)。
+        if info.state == "attacking":
+            logger.debug(f"实体 {entity_id} 已在攻击中,重复 AttackStart 被拒绝")
             return False
 
         # 这里不做任何判定逻辑(如攻击范围/碰撞检测),只做状态变更
