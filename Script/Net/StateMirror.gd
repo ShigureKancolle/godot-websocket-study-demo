@@ -333,8 +333,14 @@ func _on_player_move(data: Dictionary) -> void:
 	# 客户端这里做同样的映射,保证镜像 state 和服务端 EntityInfo.state 一致。
 	# 这不算"状态逻辑重复"——只是字段映射,真正的状态权威在服务端
 	# (GameState 快照会带服务端的 state 字段,可对账)。
-	var moving: bool = data.get("moving", false)
-	entity.state = "run" if moving else "idle"
+	#
+	# 防御:攻击中(attacking)不采纳移动广播的 state 覆盖。
+	# 移动中点击攻击时,攻击开始前已发出的残留 PlayerMove 广播可能晚于 AttackStart
+	# 到达。若不防御,它会把 state 从 "attacking" 挤回 "run",攻击动画被移动动画吞掉。
+	# 攻击状态由 AttackEnd 广播解除(state="idle"),这里只更新坐标、不动 state。
+	if entity.state != "attacking":
+		var moving: bool = data.get("moving", false)
+		entity.state = "run" if moving else "idle"
 
 	# 通知渲染层:这个实体变了
 	entity_updated.emit(entity)
