@@ -8,7 +8,7 @@ class_name ClientStateMirror
 ============================================================================
  为什么有这个文件(核心动机——和服务端 GameRoom 对照看)
 ============================================================================
-服务端有 GameRoom(权威状态持有者),它有 add_entity / apply_move 等方法——
+服务端有 GameRoom(权威状态持有者),它有 add_entity / apply_move_dir 等方法——
     它是状态的「主人」,只有它能改状态。
 
 客户端不能也搞一个能改状态的类,否则就成了「双端各写一份状态逻辑」,
@@ -19,7 +19,7 @@ class_name ClientStateMirror
     【只接收、只镜像、只读暴露;绝不本地推演状态】
 
 对比服务端 GameRoom:
-    GameRoom.apply_move(eid, x, y)    ← 改状态(主人)
+    GameRoom.apply_move_dir(eid, dir_x, dir_y, moving, dt)    ← 改状态(主人)
     ClientStateMirror._on_move(d)     ← 接收服务端广播,更新镜像(奴仆)
     两边方法名不同、职责不同、代码不重复。
 
@@ -106,6 +106,19 @@ signal stats_changed(combat: ClientCombatStats)
 #       attacker_id(谁打的,飘字定位用), atk_id, atk_shape_idx(算命中点用)
 signal hp_changed(entity_id: String, cur_hp: int, damage: int, attacker_id: String, atk_id: int, atk_shape_idx: int)
 
+# 伤害字信号:某实体扣血了,渲染层收到后播放伤害飘字。
+# 参数:pos(Vector2),伤害字位置
+signal fire_damage_effect(pos: Vector2, atk_id: int, damage: int)
+
+# 地图信息信号:收到 MapInfo(服务端下发的地图种子)。
+# 渲染层(游戏场景)收到后调 InfiniteTileMap.setup(seed) 初始化地图。
+# 参数:seed(int),地图种子
+# 为什么单独发信号而不是直接调 InfiniteTileMap:
+#   StateMirror 是纯数据镜像,不应该知道场景里有什么节点(职责分离)。
+#   场景监听这个信号,自己决定怎么用 seed(当前是调 InfiniteTileMap.setup,
+#   未来可能还会做别的:如生成小地图、初始化寻路可视化等)。
+signal map_info_received(seed: int)
+
 
 # ===========================================================================
 # ClientCombatStats: 客户端镜像战斗属性(强类型,和服务端 CombatComponent 字段对齐)
@@ -153,7 +166,7 @@ static func instance() -> ClientStateMirror:
 # ---------------------------------------------------------------------------
 # 实体镜像表:entity_id -> ClientEntityInfo
 # 和服务端 GameRoom._entities 结构对齐——这保证了镜像形状 = 权威形状。
-# 不同点:服务端能改它(通过 apply_move 等,存的是 EntityInfo dataclass),
+# 不同点:服务端能改它(通过 apply_move_dir 等,存的是 EntityInfo dataclass),
 #         客户端只能整体替换/接收更新(存的是 ClientEntityInfo RefCounted)。
 # 强类型:不再存 Dictionary,所有字段访问走 ClientEntityInfo 的属性
 var _entities: Dictionary = {}
@@ -237,6 +250,7 @@ func register_handlers() -> void:
 	mb.onproto("game.HpChanged", _on_hp_changed)
 	mb.onproto("game.EntityRemove", _on_entity_remove)
 	mb.onproto("game.EntityDead", _on_entity_dead)
+	mb.onproto("game.MapInfo", _on_map_info)
 
 
 ## 收到 GameState 快照:整体替换本地镜像
@@ -329,16 +343,20 @@ func _on_player_move(data: Dictionary) -> void:
 	entity.y = data.get("y", 0.0)
 
 	# 动画状态:从 moving 字段推断 state
-	# 服务端 apply_move 也是用 moving 推 state(moving=true→"run", false→"idle"),
+	# 服务端 apply_move_dir 也是用 moving 推 state(moving=true→"run", false→"idle"),
 	# 客户端这里做同样的映射,保证镜像 state 和服务端 EntityInfo.state 一致。
 	# 这不算"状态逻辑重复"——只是字段映射,真正的状态权威在服务端
 	# (GameState 快照会带服务端的 state 字段,可对账)。
 	#
-	# 防御:攻击中(attacking)不采纳移动广播的 state 覆盖。
-	# 移动中点击攻击时,攻击开始前已发出的残留 PlayerMove 广播可能晚于 AttackStart
-	# 到达。若不防御,它会把 state 从 "attacking" 挤回 "run",攻击动画被移动动画吞掉。
-	# 攻击状态由 AttackEnd 广播解除(state="idle"),这里只更新坐标、不动 state。
-	if entity.state != "attacking":
+	# 防御:锁定状态(attacking/hurt/dead)不采纳移动广播的 state 覆盖。
+	# - attacking:移动中点击攻击时,残留 PlayerMove 广播可能晚于 AttackStart 到达,
+	#   若不防御会把 state 从 "attacking" 挤回 "run",攻击动画被移动动画吞掉。
+	# - hurt:击退期间服务端仍每 tick 广播被推走的位置(PlayerMove),若不防御,
+	#   state 会被挤回 run/idle,受击动画被掐断、本地玩家提前恢复预测(和服务端
+	#   _INPUT_LOCKED_STATES 对齐)。
+	# - dead:死亡状态同理,不该被移动广播覆盖。
+	# 这些状态由各自的结束广播(AttackEnd/HurtEnd)恢复,这里只更新坐标、不动 state。
+	if entity.state != "attacking" and entity.state != "hurt" and entity.state != "dead":
 		var moving: bool = data.get("moving", false)
 		entity.state = "run" if moving else "idle"
 
@@ -543,6 +561,20 @@ func _on_hp_changed(data: Dictionary) -> void:
 	# 通知渲染层:血量变了(血条更新 + 飘字)
 	# 渲染层通过 damage==0 判断要不要播飘字
 	hp_changed.emit(eid, cur_hp, damage, attacker_id, atk_id, atk_shape_idx)
+	var hurt_pos: Vector2
+	var attacker: ClientEntityInfo = _entities.get(attacker_id)
+	var entity: ClientEntityInfo = _entities.get(eid)
+	if entity == null:
+		return
+	if attacker != null:
+		hurt_pos = AttackCalc.calc_hit_position(
+			Vector2(attacker.x, attacker.y), attacker.facing,
+			atk_id, atk_shape_idx,
+			Vector2(entity.x, entity.y), null)
+	else:
+		hurt_pos = Vector2(entity.x, entity.y)
+	if damage != 0:
+		fire_damage_effect.emit(hurt_pos, atk_id, damage)  # 播伤害字(渲染层监听这个信号,在受击者位置播字)
 
 func _on_entity_remove(data: Dictionary) -> void:
 	## 收到 EntityRemove:某实体被移除了(或新玩家加入时服务端发来)
@@ -565,3 +597,24 @@ func _on_entity_dead(data: Dictionary) -> void:
 		return
 	entity.state = "dead"
 	entity_updated.emit(entity)
+
+
+func _on_map_info(data: Dictionary) -> void:
+	## 收到 MapInfo:服务端下发的地图种子(新玩家加入时单播)
+	## 不改 _entities / _combats(地图种子和实体状态无关),
+	## 只发 map_info_received 信号通知渲染层(游戏场景)调 InfiniteTileMap.setup(seed)
+	##
+	## 为什么放 StateMirror 而不是放 MessageBus:
+	##   StateMirror 是「客户端状态镜像」的统一入口,所有 S2C 状态消息都走这里,
+	##   地图 seed 虽然不是实体状态,但也是「服务端权威下发」的状态(地图是什么样),
+	##   放这里和 GameState/StatsInit 一致(都是服务端下发的初始状态)。
+	##
+	## 为什么不存到 StateMirror 的成员变量:
+	##   当前没有其他代码需要读 seed(只有 InfiniteTileMap.setup 用)。
+	##   如果未来需要(如小地图组件),再加 var _map_seed: int 存储。
+	##   YAGNI,先只发信号。
+	var seed: int = int(data.get("seed", 0))
+	if seed == 0:
+		push_warning("[StateMirror] MapInfo 收到 seed=0,可能是服务端没配 seed,跳过地图初始化")
+		return
+	map_info_received.emit(seed)

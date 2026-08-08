@@ -29,6 +29,8 @@ tile_set = ExtResource("6_tileset")
 
 [node name="EffectLayer" type="Node2D" parent="." unique_id=820982504]
 
+[node name="DamageLayer" type="Node2D" parent="." unique_id=349648776]
+
 [node name="UILayer" type="CanvasLayer" parent="." unique_id=843776507]
 
 [node name="E_Back" type="Button" parent="UILayer" unique_id=1011072487]

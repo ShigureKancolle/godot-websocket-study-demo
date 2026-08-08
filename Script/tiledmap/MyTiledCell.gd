@@ -35,8 +35,8 @@ block 内位置编号（以左上角为原点）:
  使用场景
 ============================================================================
 1. 非草地 block（SAND/DIRT/BRICK）: 用纯地块 MyTiledCell（4 个 tile 同贴图）
-2. 草地 block: 根据周围 8 邻居 block 类型，查草地形态表得到对应 MyTiledCell
-   草地形态表 _GRASS_FORMS: 旋转归一化后的 8 位掩码 → MyTiledCell
+2. 过渡地形 block（沙地等）: 根据周围 8 邻居 block 类型，查该地形形态表得到对应 MyTiledCell
+   地形形态表 _terrain_forms（地形类型 → 形态表）: 旋转归一化后的 8 位掩码 → MyTiledCell
 '''
 
 extends RefCounted

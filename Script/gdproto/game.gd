@@ -985,6 +985,16 @@ class PlayerMove:
 		service.field = __moving
 		data[__moving.tag] = service
 		
+		__dir_x = PBField.new("dir_x", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 6, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
+		service = PBServiceField.new()
+		service.field = __dir_x
+		data[__dir_x.tag] = service
+		
+		__dir_y = PBField.new("dir_y", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 7, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
+		service = PBServiceField.new()
+		service.field = __dir_y
+		data[__dir_y.tag] = service
+		
 	var data = {}
 	
 	var __entity_id: PBField
@@ -1051,6 +1061,32 @@ class PlayerMove:
 		__moving.value = DEFAULT_VALUES_3[PB_DATA_TYPE.BOOL]
 	func set_moving(value : bool) -> void:
 		__moving.value = value
+	
+	var __dir_x: PBField
+	func has_dir_x() -> bool:
+		if __dir_x.value != null:
+			return true
+		return false
+	func get_dir_x() -> float:
+		return __dir_x.value
+	func clear_dir_x() -> void:
+		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__dir_x.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
+	func set_dir_x(value : float) -> void:
+		__dir_x.value = value
+	
+	var __dir_y: PBField
+	func has_dir_y() -> bool:
+		if __dir_y.value != null:
+			return true
+		return false
+	func get_dir_y() -> float:
+		return __dir_y.value
+	func clear_dir_y() -> void:
+		data[7].state = PB_SERVICE_STATE.UNFILLED
+		__dir_y.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
+	func set_dir_y(value : float) -> void:
+		__dir_y.value = value
 	
 	func _to_string() -> String:
 		return PBPacker.message_to_string(data)
@@ -2194,6 +2230,144 @@ class EntityRemove:
 			return PB_ERR.PARSE_INCOMPLETE
 		return result
 	
+class Ping:
+	extends RefCounted
+	func _init():
+		var service
+		
+		__t = PBField.new("t", PB_DATA_TYPE.INT64, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT64])
+		service = PBServiceField.new()
+		service.field = __t
+		data[__t.tag] = service
+		
+	var data = {}
+	
+	var __t: PBField
+	func has_t() -> bool:
+		if __t.value != null:
+			return true
+		return false
+	func get_t() -> int:
+		return __t.value
+	func clear_t() -> void:
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__t.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT64]
+	func set_t(value : int) -> void:
+		__t.value = value
+	
+	func _to_string() -> String:
+		return PBPacker.message_to_string(data)
+		
+	func to_bytes() -> PackedByteArray:
+		return PBPacker.pack_message(data)
+		
+	func from_bytes(bytes : PackedByteArray, offset : int = 0, limit : int = -1) -> int:
+		var cur_limit = bytes.size()
+		if limit != -1:
+			cur_limit = limit
+		var result = PBPacker.unpack_message(data, bytes, offset, cur_limit)
+		if result == cur_limit:
+			if PBPacker.check_required(data):
+				if limit == -1:
+					return PB_ERR.NO_ERRORS
+			else:
+				return PB_ERR.REQUIRED_FIELDS
+		elif limit == -1 && result > 0:
+			return PB_ERR.PARSE_INCOMPLETE
+		return result
+	
+class Pong:
+	extends RefCounted
+	func _init():
+		var service
+		
+		__t = PBField.new("t", PB_DATA_TYPE.INT64, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT64])
+		service = PBServiceField.new()
+		service.field = __t
+		data[__t.tag] = service
+		
+	var data = {}
+	
+	var __t: PBField
+	func has_t() -> bool:
+		if __t.value != null:
+			return true
+		return false
+	func get_t() -> int:
+		return __t.value
+	func clear_t() -> void:
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__t.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT64]
+	func set_t(value : int) -> void:
+		__t.value = value
+	
+	func _to_string() -> String:
+		return PBPacker.message_to_string(data)
+		
+	func to_bytes() -> PackedByteArray:
+		return PBPacker.pack_message(data)
+		
+	func from_bytes(bytes : PackedByteArray, offset : int = 0, limit : int = -1) -> int:
+		var cur_limit = bytes.size()
+		if limit != -1:
+			cur_limit = limit
+		var result = PBPacker.unpack_message(data, bytes, offset, cur_limit)
+		if result == cur_limit:
+			if PBPacker.check_required(data):
+				if limit == -1:
+					return PB_ERR.NO_ERRORS
+			else:
+				return PB_ERR.REQUIRED_FIELDS
+		elif limit == -1 && result > 0:
+			return PB_ERR.PARSE_INCOMPLETE
+		return result
+	
+class MapInfo:
+	extends RefCounted
+	func _init():
+		var service
+		
+		__seed = PBField.new("seed", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
+		service = PBServiceField.new()
+		service.field = __seed
+		data[__seed.tag] = service
+		
+	var data = {}
+	
+	var __seed: PBField
+	func has_seed() -> bool:
+		if __seed.value != null:
+			return true
+		return false
+	func get_seed() -> int:
+		return __seed.value
+	func clear_seed() -> void:
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__seed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
+	func set_seed(value : int) -> void:
+		__seed.value = value
+	
+	func _to_string() -> String:
+		return PBPacker.message_to_string(data)
+		
+	func to_bytes() -> PackedByteArray:
+		return PBPacker.pack_message(data)
+		
+	func from_bytes(bytes : PackedByteArray, offset : int = 0, limit : int = -1) -> int:
+		var cur_limit = bytes.size()
+		if limit != -1:
+			cur_limit = limit
+		var result = PBPacker.unpack_message(data, bytes, offset, cur_limit)
+		if result == cur_limit:
+			if PBPacker.check_required(data):
+				if limit == -1:
+					return PB_ERR.NO_ERRORS
+			else:
+				return PB_ERR.REQUIRED_FIELDS
+		elif limit == -1 && result > 0:
+			return PB_ERR.PARSE_INCOMPLETE
+		return result
+	
 class GameMessage:
 	extends RefCounted
 	func _init():
@@ -2295,6 +2469,24 @@ class GameMessage:
 		service.func_ref = Callable(self, "new_entity_remove")
 		data[__entity_remove.tag] = service
 		
+		__ping = PBField.new("ping", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 17, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		service = PBServiceField.new()
+		service.field = __ping
+		service.func_ref = Callable(self, "new_ping")
+		data[__ping.tag] = service
+		
+		__pong = PBField.new("pong", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 18, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		service = PBServiceField.new()
+		service.field = __pong
+		service.func_ref = Callable(self, "new_pong")
+		data[__pong.tag] = service
+		
+		__map_info = PBField.new("map_info", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 19, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		service = PBServiceField.new()
+		service.field = __map_info
+		service.func_ref = Callable(self, "new_map_info")
+		data[__map_info.tag] = service
+		
 	var data = {}
 	
 	enum MessageTypeCase {
@@ -2315,6 +2507,9 @@ class GameMessage:
 		HP_CHANGED = 14,
 		ENTITY_DEAD = 15,
 		ENTITY_REMOVE = 16,
+		PING = 17,
+		PONG = 18,
+		MAP_INFO = 19,
 	}
 	var _message_type_case: int = 0
 
@@ -2359,6 +2554,12 @@ class GameMessage:
 		data[15].state = PB_SERVICE_STATE.UNFILLED
 		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__player_join.value = PlayerJoin.new()
 		return __player_join.value
 	
@@ -2403,6 +2604,12 @@ class GameMessage:
 		data[15].state = PB_SERVICE_STATE.UNFILLED
 		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__player_leave.value = PlayerLeave.new()
 		return __player_leave.value
 	
@@ -2447,6 +2654,12 @@ class GameMessage:
 		data[15].state = PB_SERVICE_STATE.UNFILLED
 		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = PlayerMove.new()
 		return __player_move.value
 	
@@ -2491,6 +2704,12 @@ class GameMessage:
 		data[15].state = PB_SERVICE_STATE.UNFILLED
 		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__chat_message.value = ChatMessage.new()
 		return __chat_message.value
 	
@@ -2535,6 +2754,12 @@ class GameMessage:
 		data[15].state = PB_SERVICE_STATE.UNFILLED
 		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__game_state.value = GameState.new()
 		return __game_state.value
 	
@@ -2579,6 +2804,12 @@ class GameMessage:
 		data[15].state = PB_SERVICE_STATE.UNFILLED
 		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__heartbeat.value = Heartbeat.new()
 		return __heartbeat.value
 	
@@ -2623,6 +2854,12 @@ class GameMessage:
 		data[15].state = PB_SERVICE_STATE.UNFILLED
 		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__player_facing.value = PlayerFacing.new()
 		return __player_facing.value
 	
@@ -2667,6 +2904,12 @@ class GameMessage:
 		data[15].state = PB_SERVICE_STATE.UNFILLED
 		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__attack_start.value = AttackStart.new()
 		return __attack_start.value
 	
@@ -2711,6 +2954,12 @@ class GameMessage:
 		data[15].state = PB_SERVICE_STATE.UNFILLED
 		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__attack_hit.value = AttackHit.new()
 		return __attack_hit.value
 	
@@ -2755,6 +3004,12 @@ class GameMessage:
 		data[15].state = PB_SERVICE_STATE.UNFILLED
 		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__attack_end.value = AttackEnd.new()
 		return __attack_end.value
 	
@@ -2799,6 +3054,12 @@ class GameMessage:
 		data[15].state = PB_SERVICE_STATE.UNFILLED
 		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__hurt_end.value = HurtEnd.new()
 		return __hurt_end.value
 	
@@ -2843,6 +3104,12 @@ class GameMessage:
 		data[15].state = PB_SERVICE_STATE.UNFILLED
 		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__stats_init.value = StatsInit.new()
 		return __stats_init.value
 	
@@ -2887,6 +3154,12 @@ class GameMessage:
 		data[15].state = PB_SERVICE_STATE.UNFILLED
 		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__stats_changed.value = StatsChanged.new()
 		return __stats_changed.value
 	
@@ -2931,6 +3204,12 @@ class GameMessage:
 		data[15].state = PB_SERVICE_STATE.UNFILLED
 		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__hp_changed.value = HpChanged.new()
 		return __hp_changed.value
 	
@@ -2975,6 +3254,12 @@ class GameMessage:
 		_message_type_case = 15
 		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__entity_dead.value = EntityDead.new()
 		return __entity_dead.value
 	
@@ -3019,8 +3304,164 @@ class GameMessage:
 		data[15].state = PB_SERVICE_STATE.UNFILLED
 		data[16].state = PB_SERVICE_STATE.FILLED
 		_message_type_case = 16
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__entity_remove.value = EntityRemove.new()
 		return __entity_remove.value
+	
+	var __ping: PBField
+	func has_ping() -> bool:
+		return data[17].state == PB_SERVICE_STATE.FILLED
+	func get_ping() -> Ping:
+		return __ping.value
+	func clear_ping() -> void:
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_ping() -> Ping:
+		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__chat_message.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__game_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[5].state = PB_SERVICE_STATE.UNFILLED
+		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
+		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[8].state = PB_SERVICE_STATE.UNFILLED
+		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[9].state = PB_SERVICE_STATE.UNFILLED
+		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
+		__stats_init.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[12].state = PB_SERVICE_STATE.UNFILLED
+		__stats_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[13].state = PB_SERVICE_STATE.UNFILLED
+		__hp_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[14].state = PB_SERVICE_STATE.UNFILLED
+		__entity_dead.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[15].state = PB_SERVICE_STATE.UNFILLED
+		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[16].state = PB_SERVICE_STATE.UNFILLED
+		data[17].state = PB_SERVICE_STATE.FILLED
+		_message_type_case = 17
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = Ping.new()
+		return __ping.value
+	
+	var __pong: PBField
+	func has_pong() -> bool:
+		return data[18].state == PB_SERVICE_STATE.FILLED
+	func get_pong() -> Pong:
+		return __pong.value
+	func clear_pong() -> void:
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_pong() -> Pong:
+		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__chat_message.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__game_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[5].state = PB_SERVICE_STATE.UNFILLED
+		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
+		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[8].state = PB_SERVICE_STATE.UNFILLED
+		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[9].state = PB_SERVICE_STATE.UNFILLED
+		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
+		__stats_init.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[12].state = PB_SERVICE_STATE.UNFILLED
+		__stats_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[13].state = PB_SERVICE_STATE.UNFILLED
+		__hp_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[14].state = PB_SERVICE_STATE.UNFILLED
+		__entity_dead.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[15].state = PB_SERVICE_STATE.UNFILLED
+		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		data[18].state = PB_SERVICE_STATE.FILLED
+		_message_type_case = 18
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = Pong.new()
+		return __pong.value
+	
+	var __map_info: PBField
+	func has_map_info() -> bool:
+		return data[19].state == PB_SERVICE_STATE.FILLED
+	func get_map_info() -> MapInfo:
+		return __map_info.value
+	func clear_map_info() -> void:
+		data[19].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_map_info() -> MapInfo:
+		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__chat_message.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__game_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[5].state = PB_SERVICE_STATE.UNFILLED
+		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
+		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[8].state = PB_SERVICE_STATE.UNFILLED
+		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[9].state = PB_SERVICE_STATE.UNFILLED
+		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
+		__stats_init.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[12].state = PB_SERVICE_STATE.UNFILLED
+		__stats_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[13].state = PB_SERVICE_STATE.UNFILLED
+		__hp_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[14].state = PB_SERVICE_STATE.UNFILLED
+		__entity_dead.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[15].state = PB_SERVICE_STATE.UNFILLED
+		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		data[19].state = PB_SERVICE_STATE.FILLED
+		_message_type_case = 19
+		__map_info.value = MapInfo.new()
+		return __map_info.value
 	
 	func get_message_type_case() -> int:
 		return _message_type_case

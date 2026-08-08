@@ -1,7 +1,7 @@
 extends Camera2D
 
 # 平滑跟随系数(0=不平滑,1=瞬移;推荐 0.1~0.2)
-@export var follow_smoothing: float = 1
+@export var follow_smoothing: float = 0.2
 
 # 目标节点Role ID
 var _target_id: String = ""

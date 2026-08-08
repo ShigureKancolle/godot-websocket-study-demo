@@ -111,12 +111,43 @@ class AttackShape:
 	var shape_params: Variant = null           # ShapeParams 子类对象,根据 shape 决定
 	var duration: int = 583                    # 攻击持续时间(ms)
 	var hit_time: int = 83                     # 判定帧时间(从发起算,ms)
-	var hit_mask: int = 0xFFFFFFFF             # 判定层级(和服务端 AttackConfig.hit_mask 对齐,默认 2=敌人)
 	var damage_multiplier: float = 1.0         # 伤害倍率(和服务端 AttackShape.damage_multiplier 对齐)
+	# 注:原 hit_mask 字段已移除。命中层级改由实体类型的 attack_mask 决定
+	# (玩家=2 打敌人层,敌人=1 打玩家层),玩家和敌人可复用同一 atk_id
 
 class AttackConfig:
 	var shape_list: Array = []                 # Array[AttackShape]
 	
+
+
+# ===========================================================================
+# 地形能力 inner class(地图 tile 类型 → 是否可通行等属性)
+# ===========================================================================
+# ChunkGenerator.get_tile_type_v3 返回 TerrainType 枚举值(int),
+# 本配置表把枚举值映射成能力字段,供客户端调试/可视化寻路用。
+# 服务端也有一份对称的实现(见 server/config/config_loader.py)
+# 地形类型 → 名称映射(和 ChunkGenerator.TerrainType 枚举顺序对齐):
+#   0=GRASS, 1=SAND, 2=DIRT, 3=BRICK
+const _TERRAIN_ID_TO_NAME: Dictionary = {
+	0: "GRASS",
+	1: "SAND",
+	2: "DIRT",
+	3: "BRICK",
+}
+
+
+class TerrainCapability:
+	"""
+	单个地形类型的能力配置(和服务端 config_loader.TerrainCapability 对称)。
+
+	字段:
+		walkable: 是否可通行(AI 寻路用)。true=可通行,false=障碍。
+		          ChunkGenerator 当前只生成 GRASS/SAND,都是 true;
+		          BRICK 是预留的障碍地形(城墙/墙壁类)。
+		move_cost: 通行代价(预留,当前未用)。A* 寻路默认每格代价 1。
+	"""
+	var walkable: bool = true
+	var move_cost: int = 1
 
 
 # ===========================================================================
@@ -132,7 +163,8 @@ class EntityCapability:
 	# 碰撞形状字段
 	var body_shape: String = ShapeType_CIRCLE
 	var body_params: Variant = null            # ShapeParams 子类对象
-	var hit_layer: int = 0x00000000            # 碰撞层级(和服务端 EntityConfig.hit_layer 对齐,默认 1=玩家)
+	var hit_layer: int = 0x00000000            # 被判定层掩码(和服务端 EntityConfig.hit_layer 对齐,默认 1=玩家)
+	var attack_mask: int = 0x00000000           # 攻击判定掩码(和服务端 EntityConfig.attack_mask 对齐。玩家=2 打敌人层,敌人=1 打玩家层,木桩=0)
 	# 移动速度(像素/秒,类型级基础值。can_move=false 时为 0。
 	# LocalPlayerController 用 player_speed * delta 算每帧步长;
 	# 运行时若有减速/加速 buff 应改实例副本,不回写配置)
@@ -186,7 +218,6 @@ static func _build_attack_shape(shape_dict: Dictionary) -> AttackShape:
 	s.shape_params = _build_shape_params(s.shape, shape_dict.get("params", {}))
 	s.duration = int(shape_dict.get("duration", 583))
 	s.hit_time = int(shape_dict.get("hit_time", 83))
-	s.hit_mask = int(shape_dict.get("hit_mask", 0xFFFFFFFF))
 	s.damage_multiplier = float(shape_dict.get("damage_multiplier", 1.0))
 	return s
 
@@ -218,12 +249,23 @@ static func _build_entity_capability(entry_dict: Dictionary) -> EntityCapability
 	cap.can_attack = bool(caps_dict.get("can_attack", false))
 	cap.can_be_hurt = bool(caps_dict.get("can_be_hurt", false))
 	cap.can_disconnect = bool(caps_dict.get("can_disconnect", false))
+	cap.can_die = bool(caps_dict.get("can_die", false))
 	cap.body_shape = entry_dict.get("body_shape", ShapeType_CIRCLE)
 	cap.body_params = _build_shape_params(cap.body_shape, entry_dict.get("body_params", {}))
 	cap.hit_layer = int(entry_dict.get("hit_layer", 0x00000000))
+	cap.attack_mask = int(entry_dict.get("attack_mask", 0x00000000))
 	cap.speed = float(entry_dict.get("speed", 0.0))
+	cap.dead_duration_ms = int(entry_dict.get("dead_duration_ms", 0))
 	cap.combat_stats = _build_combat_stats(entry_dict.get("combat_stats", {}))
 	cap.body_color = entry_dict.get("body_color", "#8f0d6e")
+	return cap
+
+
+## 从 dict 构造 TerrainCapability 对象(未配 walkable 时默认可通行,安全默认)
+static func _build_terrain_capability(entry_dict: Dictionary) -> TerrainCapability:
+	var cap = TerrainCapability.new()
+	cap.walkable = bool(entry_dict.get("walkable", true))
+	cap.move_cost = int(entry_dict.get("move_cost", 1))
 	return cap
 
 
@@ -247,6 +289,7 @@ static func _load_json(filename: String) -> Dictionary:
 # ===========================================================================
 static var _attack_config_cache: Dictionary = {}     # {atk_id: AttackConfig}
 static var _entity_capability_cache: Dictionary = {} # {entity_type: EntityCapability}
+static var _terrain_capability_cache: Dictionary = {} # {terrain_name: TerrainCapability}
 static var _constants_cache: Dictionary = {}
 static var _cache_loaded: bool = false
 
@@ -273,6 +316,15 @@ static func _ensure_cache() -> void:
 		if _is_comment_key(key):
 			continue
 		_entity_capability_cache[key] = _build_entity_capability(entity_raw[key])
+
+	# 地形配置
+	# terrain_config.json 顶层只有 "terrains" 一个数据字段(其余是 _comment 等注释)
+	var terrain_raw: Dictionary = _load_json("terrain_config.json")
+	var terrains_dict: Dictionary = terrain_raw.get("terrains", {})
+	for key in terrains_dict.keys():
+		if _is_comment_key(key):
+			continue
+		_terrain_capability_cache[key] = _build_terrain_capability(terrains_dict[key])
 
 	# 常量
 	var constants_raw: Dictionary = _load_json("constants.json")
@@ -335,3 +387,33 @@ static func get_constant(name: String, default: Variant = null) -> Variant:
 static func get_hurt_duration_ms() -> int:
 	_ensure_cache()
 	return int(_constants_cache.get("HURT_DURATION_MS", 666))
+
+
+# ===========================================================================
+# 地形能力 API(寻路用,和服务端 config_loader.py 对齐)
+# ===========================================================================
+
+## 取某个地形名称的能力配置。
+## 未列在表里的地形返回默认值(walkable=true,安全默认)。
+static func get_terrain_capability(terrain_name: String) -> TerrainCapability:
+	_ensure_cache()
+	var cap: Variant = _terrain_capability_cache.get(terrain_name)
+	if cap == null:
+		return TerrainCapability.new()
+	return cap
+
+
+## 判定某个 tile 类型是否可通行(客户端调试/可视化寻路用)。
+## terrain_id 是 ChunkGenerator.get_tile_type_v3 返回值(int)。
+## 未知 ID 默认 true(和服务端一致,安全默认)。
+## 注意:寻路权威在服务端,客户端这个 API 仅用于调试可视化或预测显示。
+static func is_walkable(terrain_id: int) -> bool:
+	_ensure_cache()
+	var terrain_name: String = _TERRAIN_ID_TO_NAME.get(terrain_id, "")
+	if terrain_name == "":
+		push_warning("is_walkable 收到未知 terrain_id=%d,默认返回 true" % terrain_id)
+		return true
+	var cap: TerrainCapability = _terrain_capability_cache.get(terrain_name)
+	if cap == null:
+		return true  # 未配置的地形默认可通行
+	return cap.walkable

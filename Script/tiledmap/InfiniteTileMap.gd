@@ -70,49 +70,53 @@ const _TERRAIN_ATLAS: Dictionary = {
 const _VARIANT_HASH_SEED: int = 98765
 
 # ===========================================================================
-# 2×2 block 渲染配置（草地过渡贴图系统）
+# 2×2 block 渲染配置（地形过渡贴图系统）
 # ===========================================================================
-# 以 2×2 tile 的 block 为最小单位。草地 block 根据周围 8 邻居 block 类型
-# 选择不同的 MyTiledCell（4 个 tile 的贴图组合），实现过渡效果。
+# 以 2×2 tile 的 block 为最小单位。**过渡地形**（如沙地）的 block 根据周围
+# 8 邻居 block 类型选择不同的 MyTiledCell（4 个 tile 的贴图组合），实现过渡。
 #
-# 草地形态查表 key = 8 位掩码（邻居是否非草地），旋转归一化后查 _GRASS_FORMS。
-# 配置时只需定义基础形态（如"右边有沙地"），其他朝向（上/下/左）通过旋转派生。
+# 地形分两类：
+#   - 静态地形（草地）：不配形态表 → 永远用 _TERRAIN_ATLAS 纯贴图，不随邻居变化
+#   - 过渡地形（沙地，未来水地）：配形态表 → 边缘根据邻居类型显示过渡贴图
+#
+# 形态查表 key = 8 位掩码（邻居是否与自身地形不同），旋转归一化后查形态表。
+# 配置时只需定义基础形态（如"上边邻居异类"），其他朝向（上/下/左）通过旋转派生。
 #
 # 8 位掩码 bit 顺序（顺时针，从上开始）：
 #   bit 0=上 1=右上 2=右 3=右下 4=下 5=左下 6=左 7=左上
-#   bit=1 表示该方向邻居是非草地（SAND）
+#   bit=1 表示该方向邻居不是本地形（异类）
 #
 # block 内位置编号（以左上角为原点）：
-#   (0,0)=index 0  (0,1)=index 1
-#   (1,0)=index 2  (1,1)=index 3
+#   (0,0)=index 0  (1,0)=index 1
+#   (0,1)=index 2  (1,1)=index 3
 #
-# ⚠️ 当前 _GRASS_FORMS 是占位配置（全用纯草地贴图）。
-# 用户需要根据 Tileset.png 实际贴图配置每种形态的 4 个 tile。
-# 缺失的形态会 fallback 到 form 0（全草地）。
+# ⚠️ 缺失的形态会自动 fallback 到 form 0（纯地块）。
 
 # block 边长（tile 数），和 ChunkGenerator.BLOCK_SIZE 一致
 const _BLOCK_SIZE: int = 2
 
-# 草地形态表。key = 旋转归一化后的 8 位掩码，value = MyTiledCell
-# 用户配置方式：
-#   1. 先配 form 0（全草地，无 SAND 邻居）
-#   2. 再配 form 1（上边 SAND）、form 3（上+右 SAND）等基础形态
-#   3. 其他朝向通过旋转自动派生，无需配置
-#   4. 缺失的 form 自动 fallback 到 form 0
+# 过渡地形形态表。key = 地形类型（TerrainType），value = 该地形的形态表
+# （key = 旋转归一化后的 8 位掩码，value = MyTiledCell）。
+# 只给"过渡地形"配表；草地等静态地形不在此表 → 永远纯贴图。
 #
-# ⚠️ 不能用 const（MyTiledCell.new 是运行时构造），在 _ready 中由 _init_grass_forms 初始化
-# 用户修改配置只需改 _init_grass_forms 函数内的 return 内容
-var _GRASS_FORMS: Dictionary = {}
+# ⚠️ 不能用 const（MyTiledCell.new 是运行时构造），在 _ready 中由 _init_terrain_forms 初始化
+# 用户配置方式：改各地形候选贴图函数（如 _init_sand_tiled）的 return 内容
+var _terrain_forms: Dictionary = {}
 
-# 草地候选
-# 其实有大量的重复配置 用8位掩码来表示
-enum GRASS_MASKS {
-	ALL_GRASS = 0b00000000,  # 全草地
-	TOP_SAND = 0b00000001,   # 上边 SAND
-	TOP_RIGHT_SAND = 0b00000101, # 上+右 SAND
-	TOP_RIGHT_CORNER_SAND = 0b00000010, # 右上角 CORNER
+# 静态地形纯贴图变体表。key = 地形类型（TerrainType），value = Array[TiledCell]
+# 静态地形（如草地）虽然不做过渡，但可以有多个纯贴图变体（如几种草地块），
+# 按权重随机分布，避免大片区域看起来单调。
+# 未配变体表的地形 → 用 _TERRAIN_ATLAS 默认贴图。
+var _terrain_variants: Dictionary = {}
+
+# 基础形态掩码。语义与具体地形无关，各过渡地形共用同一套基础形态定义，
+# 只是候选贴图不同。用户配置地形样式时按这些 key 填贴图。
+enum BASIC_MASKS {
+	PURE = 0b00000000,      # 纯地块（周围全是同类地形）
+	TOP = 0b00000001,       # 上边邻居是异类
+	TOP_RIGHT = 0b00000101, # 上+右邻居是异类
+	CORNER = 0b00000010,    # 右上角邻居是异类
 }
-var _grass_forms_tiled: Dictionary = {}
 
 # 加载半径（chunk 数）。load_radius=3 → 加载 7×7=49 个 chunk
 # 太小会看到边缘加载，太大会卡顿。3 是 2D 游戏常见值
@@ -180,15 +184,15 @@ const MAX_UNLOADS_PER_FRAME: int = 4
 # ===========================================================================
 
 func _ready() -> void:
-	# 当前阶段：纯客户端硬编码 seed。未来接服务器后改为：
-	#   func setup(seed: int):
-	#       _generator = ChunkGenerator.new(seed)
-	#       _update_chunks_around(_world_to_chunk(_get_center_pos()))
+	# 当前阶段：硬编码 seed=12345(调试模式,TiledMap.tscn 独立运行时用)
+	# 正式集成到游戏场景时,外部会调 setup(seed) 覆盖这个默认值
+	# (setup 来自服务端 MapInfo 消息下发的 seed,见 StateMirror._on_map_info)
 	_generator = ChunkGenerator.new(12345)
-	# 初始化草地形态表（含 MyTiledCell.new，不能放在 const）
-	# 顺序：先 _grass_forms_tiled（被 _init_grass_forms 引用），再 _GRASS_FORMS
-	_grass_forms_tiled = _init_grass_forms_tiled()
-	_GRASS_FORMS = _init_grass_forms(_grass_forms_tiled)
+	# 初始化地形形态表（含 MyTiledCell.new / TiledCell.new，不能放在 const）
+	# 草地不配形态表 → 永远静态纯草地；沙地配形态表 → 过渡渲染
+	_terrain_forms = _init_terrain_forms()
+	# 初始化静态地形纯贴图变体表（草地多种变体，避免单调）
+	_terrain_variants = _init_terrain_variants()
 
 	# 从 TileSet 读取 tile 像素大小（确保和 Tileset.png 的实际切分一致）
 	if _tile_map_layer.tile_set != null:
@@ -214,8 +218,42 @@ func _ready() -> void:
 		draw_btn.pressed.connect(_on_debug_draw_toggled)
 		_update_debug_button_text(draw_btn)
 
+	# 监听 StateMirror 的 map_info_received 信号
+	# 收到服务端下发的 MapInfo 时自动调 setup(seed) 初始化地图
+	# 为什么放这里而不是让场景脚本调 setup:
+	#   InfiniteTileMap 自包含——放哪个场景就在哪个场景生效,
+	#   场景脚本不需要知道 InfiniteTileMap 的存在(职责分离)。
+	# 调试模式(TiledMap.tscn 独立运行)不会收到 MapInfo(没连服务器),
+	# 用 _ready 里的硬编码 seed 兜底;正式游戏收到 MapInfo 后 setup 覆盖
+	ClientStateMirror.instance().map_info_received.connect(setup)
+
 	# 启动时立即加载原点周围的 chunk（否则第一帧前是空的）
 	_update_chunks_around(_world_to_chunk(_get_center_pos()))
+
+
+## 用服务端下发的 seed 初始化 ChunkGenerator(双端一致生成的入口)
+##
+## 由游戏场景在收到 MapInfo 消息后调用(见 StateMirror._on_map_info → 场景调本方法)。
+## 双端用同一份 seed + 同一份算法产出完全相同的地图(详见 map_generator.py)。
+##
+## 为什么 _ready 里已经有默认 seed 还要这个方法:
+##   _ready 的硬编码 12345 是调试模式(TiledMap.tscn 独立运行时用)。
+##   正式游戏时,seed 由服务端启动时生成并通过 MapInfo 下发,必须用本方法覆盖。
+##
+## 可重入:重复调用会清空已加载的 chunk 并用新 seed 重新生成。
+## (断线重连换房间时可能重调,虽然当前没这个场景)
+func setup(seed: int) -> void:
+	# 用新 seed 构造生成器
+	_generator = ChunkGenerator.new(seed)
+	# 清空已加载 chunk 集合 + chunk 数据缓存(旧 seed 生成的数据不能留)
+	_loaded_chunks.clear()
+	_chunk_data_cache.clear()
+	# 清空 TileMapLayer 上所有已设置的 cell(否则旧 tile 会残留)
+	_tile_map_layer.clear()
+	# 重新加载原点周围 chunk
+	_update_chunks_around(_world_to_chunk(_get_center_pos()))
+	if DEBUG_LOG:
+		print("[InfiniteTileMap] setup(seed=%d) 完成,已重新加载 chunk" % seed)
 
 
 func _process(_delta: float) -> void:
@@ -502,12 +540,12 @@ func _get_tile_type_at(world_tile_x: int, world_tile_y: int) -> int:
 
 
 # ===========================================================================
-# 2×2 block 渲染（草地过渡贴图系统）
+# 2×2 block 渲染（地形过渡贴图系统）
 # ===========================================================================
 # 渲染流程：
-#   1. 非草地 tile（SAND 等）→ 用 _TERRAIN_ATLAS 默认贴图
-#   2. 草地 tile → 查 block 的 8 邻居类型 → 算 form8 → 旋转归一化
-#      → 查 _GRASS_FORMS 得 MyTiledCell → 旋转 → 按 block 内位置抽 TiledCell
+#   1. 静态地形 tile（草地等，未配形态表）→ 用 _TERRAIN_ATLAS 默认贴图
+#   2. 过渡地形 tile（沙地等）→ 查 block 的 8 邻居类型 → 算 form8 → 旋转归一化
+#      → 查该地形的形态表得 MyTiledCell → 旋转 → 按 block 内位置抽 TiledCell
 #      → 获取 alternative_tile（含旋转） → 返回 {atlas, alt}
 #
 # 旋转系统（减少配置量）：
@@ -515,15 +553,101 @@ func _get_tile_type_at(world_tile_x: int, world_tile_y: int) -> int:
 #   - MyTiledCell 整体旋转：4 个 cell 位置重排 + 每个 TiledCell 的 dir +1
 #   - alternative_tile 动态创建：dir>0 时调 create_alternative_tile 设置 flip/transpose
 
-## 初始化纯草地候选 TiledCell 数组
-## 这是 form 0（全草地）的几十个变体，也是任何"非过渡位置"的默认候选。
-## 任何需要纯草地贴图的位置都引用此数组，避免重复配置。
-## 旋转时 _rotate_tiled_cells_cw 创建新数组，不修改原数组，共享引用安全。
+## 初始化沙地候选 TiledCell 数组（★ 用户配置沙地样式的地方）
+## 沙地是"过渡地形"，这里的贴图决定沙地怎么渲染：
+##   - PURE：纯沙地块（周围全是沙地），也是任何"非过渡位置"的默认候选
+##   - TOP / TOP_RIGHT / CORNER：沙地边缘的"沙→草"过渡贴图
 ##
-## 用户配置方式：在此函数的 return 内增删 TiledCell。
-static func _init_grass_forms_tiled() -> Dictionary:
+## ⚠️ 当前 TOP/TOP_RIGHT/CORNER 用纯沙 (6,10) 占位（保证能渲染、不报错），
+##    需要你根据 Tileset.png 找到"沙地→草地过渡"的贴图坐标后替换。
+##
+## 用户配置方式：在此函数的 return 内增删/修改 TiledCell。
+## TiledCell.new(atlas坐标, dir, 权重)
+##   - atlas坐标：Tileset.png 里 16×16 tile 在 18×27 网格中的 (列, 行)
+##   - dir：顺时针旋转次数 0/1/2/3 = 0°/90°/180°/270°
+##   - 权重：被抽到的相对概率（同一数组内比较）
+static func _init_sand_tiled() -> Dictionary:
 	var res = {
-		GRASS_MASKS.ALL_GRASS: [
+		# 纯沙地块（目前只有 (6,10) 一个确认坐标，可自行添加更多变体）
+		BASIC_MASKS.PURE: [
+			TiledCell.new(Vector2i(6, 10), 0, 100),
+			TiledCell.new(Vector2i(6, 10), 1, 100),
+			TiledCell.new(Vector2i(6, 10), 2, 100),
+			TiledCell.new(Vector2i(6, 10), 3, 100),
+			TiledCell.new(Vector2i(5, 10), 0, 1),
+			TiledCell.new(Vector2i(5, 10), 1, 1),
+			TiledCell.new(Vector2i(5, 10), 2, 1),
+			TiledCell.new(Vector2i(5, 10), 3, 1),
+		],
+		# 上边过渡（沙地边缘朝上的一排 → 草地，待用户配置）
+		# 示例：TiledCell.new(Vector2i(x, y), 0, 1)
+		BASIC_MASKS.TOP: [
+			TiledCell.new(Vector2i(5, 9), 0, 1),  # TODO(用户): 替换为沙→草过渡贴图
+			TiledCell.new(Vector2i(6, 9), 0, 100),
+			TiledCell.new(Vector2i(5, 11), 2, 1), 
+			TiledCell.new(Vector2i(6, 11), 2, 1),
+			TiledCell.new(Vector2i(4, 10), 1, 1), 
+			TiledCell.new(Vector2i(7, 10), 3, 1),
+
+		],
+		# 上+右过渡（待用户配置）
+		BASIC_MASKS.TOP_RIGHT: [
+			TiledCell.new(Vector2i(7, 9), 0, 1),  # TODO(用户): 替换为沙→草过渡贴图
+			TiledCell.new(Vector2i(4, 9), 1, 1),
+			TiledCell.new(Vector2i(4, 11), 2, 1),
+			TiledCell.new(Vector2i(7, 11), 3, 1),
+		],
+		# 右上角过渡（待用户配置）
+		BASIC_MASKS.CORNER: [
+			TiledCell.new(Vector2i(10, 7), 0, 1),  # TODO(用户): 替换为沙→草过渡贴图
+			TiledCell.new(Vector2i(11, 7), 1, 1),
+			TiledCell.new(Vector2i(11, 6), 2, 1),
+			TiledCell.new(Vector2i(10, 6), 3, 1),
+		],
+	}
+	return res
+
+static func _rotate_tiled_cell(p_tiled_cell: Array, step: int = 0) -> Array:
+	# ⚠️ 不能用 duplicate(true)：RefCounted 对象只复制引用，修改 dir 会污染原对象
+	# 必须创建新的 TiledCell 实例
+	var result: Array = []
+	for cell in p_tiled_cell:
+		result.append(TiledCell.new(cell.assets_pos, (cell.dir + step) % 4, cell.weight))
+	return result
+
+
+
+## 聚合所有过渡地形的形态表（★ 新增过渡地形的入口）
+## 草地是静态地形，不在此表 → 永远纯草地贴图。
+## 新增过渡地形（如水）时在此加一条，并写对应的 _init_xxx_tiled 函数。
+static func _init_terrain_forms() -> Dictionary:
+	return {
+		# 沙地：过渡地形（边缘显示沙→草过渡贴图，贴图见 _init_sand_tiled）
+		ChunkGenerator.TerrainType.SAND: _build_terrain_forms(
+			_init_sand_tiled(), ChunkGenerator.TerrainType.SAND
+		),
+		# 未来加水时在此加一条：
+		# ChunkGenerator.TerrainType.WATER: _build_terrain_forms(
+		# 	_init_water_tiled(), ChunkGenerator.TerrainType.WATER
+		# ),
+	}
+
+
+## 聚合所有静态地形的纯贴图变体表（★ 用户配置静态地形样式的地方）
+## 静态地形：不随邻居变化，但可以有多个纯贴图变体避免单调。
+static func _init_terrain_variants() -> Dictionary:
+	return {
+		# 草地：多种草地块随机分布（变体见 _init_grass_variants）
+		ChunkGenerator.TerrainType.GRASS: _init_grass_variants(),
+	}
+
+
+## 初始化草地纯贴图变体候选数组（★ 用户配置草地样式的地方）
+## 同一位置的草地永远选同一个变体（用 _variant_hash，移动/重载不跳变）。
+## 用户配置方式：在此函数的 return 内增删/修改 TiledCell。
+## TiledCell.new(atlas坐标, dir, 权重)：dir=0/1/2/3 = 0°/90°/180°/270°
+static func _init_grass_variants() -> Array:
+	return [
 		TiledCell.new(Vector2i(3, 20), 0, 300),
 		TiledCell.new(Vector2i(3, 20), 1, 300),
 		TiledCell.new(Vector2i(3, 20), 2, 300),
@@ -560,126 +684,103 @@ static func _init_grass_forms_tiled() -> Dictionary:
 		TiledCell.new(Vector2i(11, 8), 1, 1),
 		TiledCell.new(Vector2i(11, 8), 2, 1),
 		TiledCell.new(Vector2i(11, 8), 3, 1),
-		],
-		GRASS_MASKS.TOP_SAND: [
-			TiledCell.new(Vector2i(5, 11), 0, 1), 
-			TiledCell.new(Vector2i(6, 11), 0, 1), 
-			# TiledCell.new(Vector2i(5, 9), 2, 1), 
-			# TiledCell.new(Vector2i(6, 9), 2, 1),
-			# TiledCell.new(Vector2i(4, 10), 1, 1),
-			# TiledCell.new(Vector2i(7, 10), 3, 1),
-		],
-		GRASS_MASKS.TOP_RIGHT_SAND: [
-			TiledCell.new(Vector2i(11, 6), 0, 1),
-			# TiledCell.new(Vector2i(11, 7), 1, 1),
-			# TiledCell.new(Vector2i(10, 7), 2, 1),
-			# TiledCell.new(Vector2i(10, 6), 3, 1),
-		],
-		GRASS_MASKS.TOP_RIGHT_CORNER_SAND: [
-			TiledCell.new(Vector2i(4, 11), 0, 1), 
-			# TiledCell.new(Vector2i(7, 11), 1, 1), 
-			# TiledCell.new(Vector2i(7, 9), 2, 1), 
-			# TiledCell.new(Vector2i(4, 9), 3, 1),
-		]
-	}
-
-	return res
-
-static func _rotate_tiled_cell(p_tiled_cell: Array, step: int = 0) -> Array:
-	# ⚠️ 不能用 duplicate(true)：RefCounted 对象只复制引用，修改 dir 会污染原对象
-	# 必须创建新的 TiledCell 实例
-	var result: Array = []
-	for cell in p_tiled_cell:
-		result.append(TiledCell.new(cell.assets_pos, (cell.dir + step) % 4, cell.weight))
-	return result
+	]
 
 
-
-## 初始化草地形态表
-## 因为 MyTiledCell.new / TiledCell.new 是运行时构造，不能用在 const 赋值中，
-## 所以用普通 var + _ready 调用此函数初始化。
-##
-## 用户配置方式：修改此函数内的 return 内容。
-## - key = 旋转归一化后的 8 位掩码（邻居非草地 → bit=1）
-## - value = MyTiledCell
-## - 只需定义基础形态（如"上边 SAND"），其他朝向通过旋转自动派生
-## - 缺失的 form 自动 fallback 到 form 0
-## - 任何需要"纯草地"的位置直接引用 _grass_variants（form 0 的几十个变体）
-static func _init_grass_forms(grass_forms_tiled: Dictionary) -> Dictionary:
+## 通用：给定某过渡地形的候选贴图 dict + 地形类型，生成该地形的完整形态表
+## key = 旋转归一化后的 8 位掩码，value = MyTiledCell
+## - form 0 = 纯地块（省略形式，4 个位置都用 PURE 候选）
+## - 只需定义基础形态（上边/上+右/角），其他朝向通过旋转自动派生
+## - 缺失的 form 自动 fallback 到 form 0（见 _compute_tile_atlas_v3）
+static func _build_terrain_forms(tiled: Dictionary, main_type: int) -> Dictionary:
 	return {
-		# form 0: 全草地（8 邻居都是草地）
-		# 省略形式：4 个位置都用 _grass_variants（几十个变体）
-		0: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [grass_forms_tiled[GRASS_MASKS.ALL_GRASS]]),
-		# form 1: 上边 SAND（归一化形态，右边/下边/左边的 SAND 通过旋转派生）
-		# 上边 2 个 tile 需要草地→沙地过渡贴图，下边 2 个 tile 用纯草地
-		# ⚠️ 占位值，用户替换为实际过渡贴图坐标
-		1: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [
-			grass_forms_tiled[GRASS_MASKS.TOP_SAND],                          # (0,0) 上左：待配
-			grass_forms_tiled[GRASS_MASKS.TOP_SAND],
-			grass_forms_tiled[GRASS_MASKS.ALL_GRASS],                          # (1,0) 下左：复用纯草地变体
-			grass_forms_tiled[GRASS_MASKS.ALL_GRASS],                          # (1,1) 下右：复用纯草地变体
+		# form 0: 纯地块（8 邻居都是同类地形）
+		# 省略形式：4 个位置都用 PURE 候选
+		0: MyTiledCell.new(main_type, [tiled[BASIC_MASKS.PURE]]),
+		# form 1: 上边异类（归一化形态，右边/下边/左边的异类通过旋转派生）
+		# 上边 2 个 tile 用过渡贴图，下边 2 个用纯地块
+		1: MyTiledCell.new(main_type, [
+			tiled[BASIC_MASKS.TOP],    # index 0 = (0,0) 上左
+			tiled[BASIC_MASKS.TOP],    # index 1 = (1,0) 上右
+			tiled[BASIC_MASKS.PURE],   # index 2 = (0,1) 下左
+			tiled[BASIC_MASKS.PURE],   # index 3 = (1,1) 下右
 		]),
-		# form 2: 右上角 CORNER
-		2: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [
-			grass_forms_tiled[GRASS_MASKS.ALL_GRASS],  # (0,0) 上左：待配
-			grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND],  # (0,1) 上右：待配
-			grass_forms_tiled[GRASS_MASKS.ALL_GRASS],                          # (1,0) 下左：复用纯草地变体
-			grass_forms_tiled[GRASS_MASKS.ALL_GRASS],                          # (1,1) 下右：复用纯草地变体
+		# form 2: 右上角异类
+		2: MyTiledCell.new(main_type, [
+			tiled[BASIC_MASKS.PURE],   # index 0 = (0,0) 上左
+			tiled[BASIC_MASKS.CORNER], # index 1 = (1,0) 上右
+			tiled[BASIC_MASKS.PURE],   # index 2 = (0,1) 下左
+			tiled[BASIC_MASKS.PURE],   # index 3 = (1,1) 下右
 		]),
-
-		# 上+右
-		5: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [
-			grass_forms_tiled[GRASS_MASKS.TOP_SAND],  # (0,0) 上左：待配
-			grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_SAND],  # (0,1) 上右：待配
-			grass_forms_tiled[GRASS_MASKS.ALL_GRASS],                          # (1,0) 下左：复用纯草地变体
-			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_SAND], 1),  # (1,1) 下右：待配
+		# form 5: 上边 + 右边异类
+		5: MyTiledCell.new(main_type, [
+			tiled[BASIC_MASKS.TOP],       # index 0 = (0,0) 上左
+			tiled[BASIC_MASKS.TOP_RIGHT], # index 1 = (1,0) 上右
+			tiled[BASIC_MASKS.PURE],      # index 2 = (0,1) 下左
+			_rotate_tiled_cell(tiled[BASIC_MASKS.TOP], 1),  # index 3 = (1,1) 下右
 		]),
-
-		# 上边 右下角
-		9: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [
-			grass_forms_tiled[GRASS_MASKS.TOP_SAND],  # (0,0) 上左：待配
-			grass_forms_tiled[GRASS_MASKS.TOP_SAND],  # (0,1) 上右：待配			                         
-			grass_forms_tiled[GRASS_MASKS.ALL_GRASS], 
-			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 1), 
+		# form 9: 上边异类 + 右下角异类
+		9: MyTiledCell.new(main_type, [
+			tiled[BASIC_MASKS.TOP],   # index 0 = (0,0) 上左
+			tiled[BASIC_MASKS.TOP],   # index 1 = (1,0) 上右
+			tiled[BASIC_MASKS.PURE],  # index 2 = (0,1) 下左
+			_rotate_tiled_cell(tiled[BASIC_MASKS.CORNER], 1),  # index 3 = (1,1) 下右
 		]),
-
-		#  右上 右下 两角沙
-		10: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [
-			grass_forms_tiled[GRASS_MASKS.ALL_GRASS],
-			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 0),  # (0,0) 上左：待配
-			grass_forms_tiled[GRASS_MASKS.ALL_GRASS],
-			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 1),
+		# form 10: 右上角 + 右下角异类
+		10: MyTiledCell.new(main_type, [
+			tiled[BASIC_MASKS.PURE],   # index 0 = (0,0) 上左
+			tiled[BASIC_MASKS.CORNER], # index 1 = (1,0) 上右
+			tiled[BASIC_MASKS.PURE],   # index 2 = (0,1) 下左
+			_rotate_tiled_cell(tiled[BASIC_MASKS.CORNER], 1),  # index 3 = (1,1) 下右
 		]),
-		# form  : 上 右 下 3边都是沙
-		21: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [
-			grass_forms_tiled[GRASS_MASKS.TOP_SAND],
-			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_SAND], 0),
-			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_SAND], 2),
-			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_SAND], 1),
+		# form 11: 上边 + 右上角 + 右下角异类
+		11: MyTiledCell.new(main_type, [
+			tiled[BASIC_MASKS.TOP],   # index 0 = (0,0) 上左
+			tiled[BASIC_MASKS.TOP], # index 1 = (1,0) 上右
+			tiled[BASIC_MASKS.PURE],   # index 2 = (0,1) 下左
+			_rotate_tiled_cell(tiled[BASIC_MASKS.CORNER], 1),  # index 3 = (1,1) 下右
 		]),
-
-		# form  : 左下 右上 右下 3角都是沙
-		42: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [
-			grass_forms_tiled[GRASS_MASKS.ALL_GRASS],
-			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 0),  # (0,0) 上左：待配
-			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 2),  # (0,1) 上右：待配
-			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 1),  # (1,1) 下右：待配
+		# form 17: 上边 + 下边（相对两边）异类
+		17: MyTiledCell.new(main_type, [
+			tiled[BASIC_MASKS.TOP],                        # index 0 = (0,0) 上左：上边过渡
+			tiled[BASIC_MASKS.TOP],                        # index 1 = (1,0) 上右：上边过渡
+			_rotate_tiled_cell(tiled[BASIC_MASKS.TOP], 2), # index 2 = (0,1) 下左：下边过渡
+			_rotate_tiled_cell(tiled[BASIC_MASKS.TOP], 2), # index 3 = (1,1) 下右：下边过渡
 		]),
-
-		# form  : 4角都是沙
-		170: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [
-			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 3),  # (0,0) 上左：待配
-			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 0),  # (0,1) 上右：待配
-			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 2),  # (1,0) 下左：待配
-			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_CORNER_SAND], 1),  # (1,1) 下右：待配
+		# form 21: 上 + 右 + 下 三边异类
+		21: MyTiledCell.new(main_type, [
+			tiled[BASIC_MASKS.TOP],        # index 0 = (0,0) 上左
+			tiled[BASIC_MASKS.TOP_RIGHT],  # index 1 = (1,0) 上右
+			_rotate_tiled_cell(tiled[BASIC_MASKS.TOP], 2),  # index 2 = (0,1) 下左
+			_rotate_tiled_cell(tiled[BASIC_MASKS.TOP_RIGHT], 1),  # index 3 = (1,1) 下右
 		]),
-
-		# form  : 4边全是沙
-		85: MyTiledCell.new(ChunkGenerator.TerrainType.GRASS, [
-			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_SAND], 3),
-			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_SAND], 0),
-			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_SAND], 2),
-			_rotate_tiled_cell(grass_forms_tiled[GRASS_MASKS.TOP_RIGHT_SAND], 1),
+		# form 34: 右上角 + 左下角（对角角）异类
+		34: MyTiledCell.new(main_type, [
+			tiled[BASIC_MASKS.PURE],                          # index 0 = (0,0) 上左：纯地块
+			tiled[BASIC_MASKS.CORNER],                        # index 1 = (1,0) 上右：右上角过渡
+			_rotate_tiled_cell(tiled[BASIC_MASKS.CORNER], 2), # index 2 = (0,1) 下左：左下角过渡
+			tiled[BASIC_MASKS.PURE],                          # index 3 = (1,1) 下右：纯地块
+		]),
+		# form 42: 左下 + 右上 + 右下 三角异类
+		42: MyTiledCell.new(main_type, [
+			tiled[BASIC_MASKS.PURE],   # index 0 = (0,0) 上左
+			tiled[BASIC_MASKS.CORNER], # index 1 = (1,0) 上右
+			_rotate_tiled_cell(tiled[BASIC_MASKS.CORNER], 2),  # index 2 = (0,1) 下左
+			_rotate_tiled_cell(tiled[BASIC_MASKS.CORNER], 1),  # index 3 = (1,1) 下右
+		]),
+		# form 170: 四角异类
+		170: MyTiledCell.new(main_type, [
+			_rotate_tiled_cell(tiled[BASIC_MASKS.CORNER], 3),  # index 0 = (0,0) 上左
+			tiled[BASIC_MASKS.CORNER],       # index 1 = (1,0) 上右
+			_rotate_tiled_cell(tiled[BASIC_MASKS.CORNER], 2),  # index 2 = (0,1) 下左
+			_rotate_tiled_cell(tiled[BASIC_MASKS.CORNER], 1),  # index 3 = (1,1) 下右
+		]),
+		# form 85: 四边异类
+		85: MyTiledCell.new(main_type, [
+			_rotate_tiled_cell(tiled[BASIC_MASKS.TOP_RIGHT], 3),  # index 0 = (0,0) 上左
+			tiled[BASIC_MASKS.TOP_RIGHT],        # index 1 = (1,0) 上右
+			_rotate_tiled_cell(tiled[BASIC_MASKS.TOP_RIGHT], 2),  # index 2 = (0,1) 下左
+			_rotate_tiled_cell(tiled[BASIC_MASKS.TOP_RIGHT], 1),  # index 3 = (1,1) 下右
 		]),
 	}
 
@@ -687,41 +788,49 @@ static func _init_grass_forms(grass_forms_tiled: Dictionary) -> Dictionary:
 ## 计算单个 tile 的 atlas coord + alternative_tile
 ## 返回 Dictionary {atlas: Vector2i, alt: int}
 ##
-## 非草地 tile：用 _TERRAIN_ATLAS 默认贴图，alt=0
-## 草地 tile：根据 block 8 邻居类型选 MyTiledCell，按权重抽 TiledCell
+## 静态地形 tile（草地等）：用 _TERRAIN_ATLAS 默认贴图，alt=0
+## 过渡地形 tile（沙地等）：根据 block 8 邻居类型选 MyTiledCell，按权重抽 TiledCell
 func _compute_tile_atlas_v3(world_tile_x: int, world_tile_y: int, data: PackedInt32Array, local_y: int, local_x: int) -> Dictionary:
 	var CS: int = ChunkGenerator.CHUNK_SIZE
 	var terrain: int = data[local_y * CS + local_x]
 
-	# 非草地：用默认贴图（无过渡，无旋转）
-	if terrain != ChunkGenerator.TerrainType.GRASS:
-		var default_atlas: Vector2i = _TERRAIN_ATLAS.get(terrain, Vector2i.ZERO)
-		return {atlas = default_atlas, alt = 0}
+	# 静态地形（未配形态表，如草地）：用纯贴图变体（无过渡）
+	# 有配变体表 → 按权重抽一个；没配 → 用 _TERRAIN_ATLAS 默认贴图
+	var forms: Dictionary = _terrain_forms.get(terrain, {})
+	if forms.is_empty():
+		var variants: Array = _terrain_variants.get(terrain, [])
+		if variants.is_empty():
+			var default_atlas: Vector2i = _TERRAIN_ATLAS.get(terrain, Vector2i.ZERO)
+			return {atlas = default_atlas, alt = 0}
+		var variant_tc: TiledCell = _pick_tiled_cell(variants, world_tile_x, world_tile_y)
+		var variant_alt: int = _get_or_create_alt_tile(variant_tc.assets_pos, variant_tc.dir)
+		return {atlas = variant_tc.assets_pos, alt = variant_alt}
 
-	# 草地：根据 block 8 邻居类型算形态
+	# 过渡地形（沙地等）：根据 block 8 邻居类型算形态
 	var bx: int = int(floor(float(world_tile_x) / _BLOCK_SIZE))
 	var by: int = int(floor(float(world_tile_y) / _BLOCK_SIZE))
 
-	# 算 block 的 8 邻居掩码（邻居非草地 → bit=1）
-	var form8: int = _compute_form8_for_block(bx, by)
+	# 算 block 的 8 邻居掩码（邻居不是本地形 → bit=1）
+	var form8: int = _compute_form8_for_block(bx, by, terrain)
 
 	# 旋转归一化：取 4 次旋转中的最小值作为查表 key
 	var norm: Dictionary = _normalize_form8(form8)
 	var base_form: int = norm.form
 	var rotations: int = norm.rotations
 
-	# 查草地形态表（先查 8 邻居表，没找到退化到 4 正方向）
-	var mtc: MyTiledCell = _GRASS_FORMS.get(base_form, null)
+	# 查该地形的形态表（先查 8 邻居表，没找到按"覆盖角"规则退化）
+	var mtc: MyTiledCell = forms.get(base_form, null)
 	if mtc == null:
-		# 退化：丢弃 4 个对角方向（bit 1/3/5/7），只保留 4 正方向（bit 0/2/4/6）
-		# 例如 form 7（上+右上+右）退化成 form 5（上+右），用 2 边贴图近似 3 邻居情况
-		var form4: int = form8 & 0b01010101
-		var norm4: Dictionary = _normalize_form8(form4)
-		mtc = _GRASS_FORMS.get(norm4.form, null)
-		rotations = norm4.rotations
+		# 退化：去掉被相邻边覆盖的角（角至少一条相邻边异类 → 边过渡已覆盖它），
+		# 只保留孤立角（两条相邻边都同类），再归一化查表。
+		# 例：46（右+右上+右下+左下）→ 去掉被右覆盖的右上/右下角，剩 右+左下 → 归一到 form 9
+		var reduced: int = _reduce_covered_corners(form8)
+		var norm_r: Dictionary = _normalize_form8(reduced)
+		mtc = forms.get(norm_r.form, null)
+		rotations = norm_r.rotations
 	if mtc == null:
-		# fallback 到全草地
-		mtc = _GRASS_FORMS.get(0, null)
+		# fallback 到纯地块（form 0）
+		mtc = forms.get(0, null)
 		rotations = 0
 	if mtc == null:
 		return {atlas = _TERRAIN_ATLAS.get(terrain, Vector2i.ZERO), alt = 0}
@@ -747,8 +856,8 @@ func _compute_tile_atlas_v3(world_tile_x: int, world_tile_y: int, data: PackedIn
 
 ## 计算 block 的 8 邻居掩码
 ## bit 0=上 1=右上 2=右 3=右下 4=下 5=左下 6=左 7=左上
-## bit=1 表示该方向邻居是非草地（非 GRASS）
-func _compute_form8_for_block(block_x: int, block_y: int) -> int:
+## bit=1 表示该方向邻居不是 main_type（异类）
+func _compute_form8_for_block(block_x: int, block_y: int, main_type: int) -> int:
 	# 8 邻居偏移（顺时针：上、右上、右、右下、下、左下、左、左上）
 	const offsets: Array = [
 		Vector2i(0, -1), Vector2i(1, -1), Vector2i(1, 0), Vector2i(1, 1),
@@ -759,7 +868,7 @@ func _compute_form8_for_block(block_x: int, block_y: int) -> int:
 		var nx: int = block_x + offsets[i].x
 		var ny: int = block_y + offsets[i].y
 		var nt: int = _get_block_type_at(nx, ny)
-		if nt != ChunkGenerator.TerrainType.GRASS:
+		if nt != main_type:
 			form |= (1 << i)
 	return form
 
@@ -802,6 +911,30 @@ static func _normalize_form8(form: int) -> Dictionary:
 			min_form = current
 			rotations = i
 	return {form = min_form, rotations = rotations}
+
+
+## 退化辅助：去掉"被相邻边覆盖的角"，只保留"孤立角"（两条相邻边都同类）
+##
+## 规则：一个角若至少有一条相邻边是异类，则该角可由边过渡贴图覆盖，
+## 不需要单独的角过渡；只有两条相邻边都同类（角是孤立突出）时才保留角。
+## 例：form 46（右+右上+右下+左下）→ 右上/右下角被右边覆盖去掉，
+##     剩 右+左下 → 归一化后 = form 9（与 46 视觉一致，无需单独配 46）
+static func _reduce_covered_corners(form: int) -> int:
+	# 先只留 4 条边（正方向位 bit0/2/4/6），再按规则把孤立角加回来
+	var result: int = form & 0b01010101
+	# 右上角(bit1)：相邻边上(bit0)、右(bit2)
+	if form & (1 << 1) and (form & (1 << 0)) == 0 and (form & (1 << 2)) == 0:
+		result |= (1 << 1)
+	# 右下角(bit3)：相邻边右(bit2)、下(bit4)
+	if form & (1 << 3) and (form & (1 << 2)) == 0 and (form & (1 << 4)) == 0:
+		result |= (1 << 3)
+	# 左下角(bit5)：相邻边下(bit4)、左(bit6)
+	if form & (1 << 5) and (form & (1 << 4)) == 0 and (form & (1 << 6)) == 0:
+		result |= (1 << 5)
+	# 左上角(bit7)：相邻边左(bit6)、上(bit0)
+	if form & (1 << 7) and (form & (1 << 6)) == 0 and (form & (1 << 0)) == 0:
+		result |= (1 << 7)
+	return result
 
 
 ## 旋转 MyTiledCell（整体旋转，Godot 式）

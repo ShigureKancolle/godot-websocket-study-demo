@@ -15,8 +15,8 @@ var _hover_label: Label
 # ===========================================================================
 # 经典样式展示
 # ===========================================================================
-# 在 TileMapLayer 上画出几种经典的草地-沙地过渡形态，验证贴图配置
-# 每个样式 = 1 个中心草地 block + 周围按 form8 放沙地 block
+# 在 TileMapLayer 上画出几种经典的沙地-草地过渡形态，验证贴图配置
+# 每个样式 = 1 个中心沙地 block（走沙地形态表）+ 周围按 form8 放草地 block
 var _v3_grass_forms: Dictionary = {}
 var _v3_alt_cache: Dictionary = {}
 const _BLOCK_SIZE: int = 2
@@ -40,8 +40,9 @@ func _show_v3_samples() -> void:
 	_tile_info_map.clear()
 
 	# 初始化配置（复用 InfiniteTileMap 的 static 函数）
-	var tiled: Dictionary = InfiniteTileMap._init_grass_forms_tiled()
-	_v3_grass_forms = InfiniteTileMap._init_grass_forms(tiled)
+	# 草地已是静态地形（无形态表），沙地是当前唯一的过渡地形 → 展示沙地形态表
+	var terrain_forms: Dictionary = InfiniteTileMap._init_terrain_forms()
+	_v3_grass_forms = terrain_forms.get(ChunkGenerator.TerrainType.SAND, {})
 
 	# 经典 form8 列表（旋转归一化后的值）
 	# 0=全草地, 1=单边, 2=单角, 5=两边L, 10=两角对, 21=三边, 42=三角, 85=四边, 170=四角
@@ -64,7 +65,8 @@ func _show_v3_samples() -> void:
 ## 布局和 samples 一样，方便对比
 func _show_rotation_test() -> void:
 	var forms: Array = [0, 1, 2, 5, 10, 21, 42, 85, 170]
-	var sand_atlas: Vector2i = InfiniteTileMap._TERRAIN_ATLAS[ChunkGenerator.TerrainType.SAND]
+	# 沙地是过渡地形，周围邻居是草地（静态纯贴图）
+	var neighbor_atlas: Vector2i = InfiniteTileMap._TERRAIN_ATLAS[ChunkGenerator.TerrainType.GRASS]
 
 	# 起始 y（在 samples 下方留空 1 行）
 	var start_y: int = 10
@@ -88,11 +90,11 @@ func _show_rotation_test() -> void:
 			if rotations > 0:
 				mtc = InfiniteTileMap._rotate_my_tiled_cell(mtc_base, rotations)
 
-			# 中心草地 block 的左上角 tile 坐标（和 samples 一样的水平间距）
+			# 中心沙地 block 的左上角 tile 坐标（和 samples 一样的水平间距）
 			var bx: int = col * 5  # 10 tile / 2 = 5 block 间距
 			var by: int = start_y + row * row_stride
 
-			# 1. 画周围沙地 block：根据旋转后的 form8
+			# 1. 画周围草地 block：根据旋转后的 form8（草地是异类邻居）
 			var form8: int = base_form
 			for _i in range(rotations):
 				form8 = InfiniteTileMap._rotate_form8_cw(form8)
@@ -104,10 +106,10 @@ func _show_rotation_test() -> void:
 					for dy in _BLOCK_SIZE:
 						for dx in _BLOCK_SIZE:
 							var cell_pos: Vector2i = Vector2i(sbx * _BLOCK_SIZE + dx, sby * _BLOCK_SIZE + dy)
-							_tile_map_layer.set_cell(cell_pos, 0, sand_atlas)
-							_tile_info_map[cell_pos] = TiledCell.new(sand_atlas, 0, 0)
+							_tile_map_layer.set_cell(cell_pos, 0, neighbor_atlas)
+							_tile_info_map[cell_pos] = TiledCell.new(neighbor_atlas, 0, 0)
 
-			# 2. 画中心草地 block 的 4 个 tile
+			# 2. 画中心沙地 block 的 4 个 tile（走沙地形态表）
 			for local_idx in range(4):
 				var local_bx: int = local_idx % 2
 				var local_by: int = local_idx / 2
@@ -124,19 +126,19 @@ func _show_rotation_test() -> void:
 
 
 ## 画一个经典样式
-## form8: 中心草地 block 的 8 邻居掩码
-## base_tile_x, base_tile_y: 中心草地 block 左上角 tile 的世界坐标
+## form8: 中心沙地 block 的 8 邻居掩码（bit=1 表示该方向邻居是草地）
+## base_tile_x, base_tile_y: 中心沙地 block 左上角 tile 的世界坐标
 func _draw_sample_form(form8: int, base_tile_x: int, base_tile_y: int) -> void:
 	var bx: int = base_tile_x / _BLOCK_SIZE
 	var by: int = base_tile_y / _BLOCK_SIZE
 
-	# 1. 放置周围的沙地 block（根据 form8 的 bit）
+	# 1. 放置周围的草地 block（根据 form8 的 bit，草地是静态异类邻居）
 	# 8 邻居偏移（顺时针：上、右上、右、右下、下、左下、左、左上）
 	var offsets: Array = [
 		Vector2i(0, -1), Vector2i(1, -1), Vector2i(1, 0), Vector2i(1, 1),
 		Vector2i(0, 1), Vector2i(-1, 1), Vector2i(-1, 0), Vector2i(-1, -1),
 	]
-	var sand_atlas: Vector2i = InfiniteTileMap._TERRAIN_ATLAS[ChunkGenerator.TerrainType.SAND]
+	var neighbor_atlas: Vector2i = InfiniteTileMap._TERRAIN_ATLAS[ChunkGenerator.TerrainType.GRASS]
 	for i in range(8):
 		if form8 & (1 << i):
 			var sbx: int = bx + offsets[i].x
@@ -144,21 +146,22 @@ func _draw_sample_form(form8: int, base_tile_x: int, base_tile_y: int) -> void:
 			for dy in _BLOCK_SIZE:
 				for dx in _BLOCK_SIZE:
 					var cell_pos: Vector2i = Vector2i(sbx * _BLOCK_SIZE + dx, sby * _BLOCK_SIZE + dy)
-					_tile_map_layer.set_cell(cell_pos, 0, sand_atlas)
-					# 沙地没有走 TiledCell 流程，记录一个简易信息便于 debug
-					_tile_info_map[cell_pos] = TiledCell.new(sand_atlas, 0, 0)
+					_tile_map_layer.set_cell(cell_pos, 0, neighbor_atlas)
+					# 草地没有走 TiledCell 流程，记录一个简易信息便于 debug
+					_tile_info_map[cell_pos] = TiledCell.new(neighbor_atlas, 0, 0)
 
-	# 2. 放置中心草地 block（用渲染逻辑算贴图）
+	# 2. 放置中心沙地 block（用渲染逻辑算贴图，查沙地形态表）
 	# 算归一化
 	var norm: Dictionary = InfiniteTileMap._normalize_form8(form8)
 	var base_form: int = norm.form
 	var rotations: int = norm.rotations
 
-	# 查表（先查 8 邻居，没找到退化到 4 正方向）
+	# 查表（先查 8 邻居，没找到按"覆盖角"规则退化）
 	var mtc: MyTiledCell = _v3_grass_forms.get(base_form, null)
 	if mtc == null:
-		var form4: int = form8 & 0b01010101
-		var norm4: Dictionary = InfiniteTileMap._normalize_form8(form4)
+		# 退化：去掉被相邻边覆盖的角，只保留孤立角（与 InfiniteTileMap 一致）
+		var reduced: int = InfiniteTileMap._reduce_covered_corners(form8)
+		var norm4: Dictionary = InfiniteTileMap._normalize_form8(reduced)
 		mtc = _v3_grass_forms.get(norm4.form, null)
 		rotations = norm4.rotations
 	if mtc == null:
@@ -338,10 +341,9 @@ func _on_debug_draw() -> void:
 		if tc == null:
 			continue  
 		var is_sand: bool = (tc.assets_pos in SAND_ATLAS)
-		var block_type: int = ChunkGenerator.TerrainType.SAND if is_sand else ChunkGenerator.TerrainType.GRASS
-		if is_sand:
-			continue  # 沙地不需要刷新
-		# 计算周围8个格子的掩码
+		if not is_sand:
+			continue  # 草地是静态地形，不需要刷新
+		# 计算周围8个格子的掩码（对沙地来说，邻居是草地 = 异类 → bit=1）
 		var from8_mask: int = 0
 		for i in from8:
 			if i == Vector2i.ZERO:
@@ -351,32 +353,33 @@ func _on_debug_draw() -> void:
 			if neighbor_tc == null:
 				continue
 			var neighbor_is_sand: bool = (neighbor_tc.assets_pos in SAND_ATLAS)
-			if neighbor_is_sand:
+			if not neighbor_is_sand:
 				from8_mask |= (1 << from8.find(i))  # 计算掩码，正上方为bit0，顺时针
 
 		# 对from8_mask归一化，获得最小值
 		var result = null
+		if pos.x==last_draw_tile_pos.x and pos.y==last_draw_tile_pos.y:
+			print("刷新 tile 坐标: ", pos, " from8_mask: ", from8_mask)
 		var norm: Dictionary = InfiniteTileMap._normalize_form8(from8_mask)
 		var base_form: int = norm.form
 		var rotations: int = norm.rotations
 		var mtc: MyTiledCell = _v3_grass_forms.get(base_form, null)
 		if mtc == null:
-			# 退化：丢弃 4 个对角方向（bit 1/3/5/7），只保留 4 正方向（bit 0/2/4/6）
-			# 例如 form 7（上+右上+右）退化成 form 5（上+右），用 2 边贴图近似 3 邻居情况
-			var form4: int = from8_mask & 0b01010101
-			var norm4: Dictionary = InfiniteTileMap._normalize_form8(form4)
+			# 退化：去掉被相邻边覆盖的角，只保留孤立角（与 InfiniteTileMap 一致）
+			var reduced: int = InfiniteTileMap._reduce_covered_corners(from8_mask)
+			var norm4: Dictionary = InfiniteTileMap._normalize_form8(reduced)
 			mtc = _v3_grass_forms.get(norm4.form, null)
 			rotations = norm4.rotations
 		if mtc == null:
-			# fallback 到全草地
+			# fallback 到纯沙地块（form 0）
 			mtc = _v3_grass_forms.get(0, null)
 			rotations = 0
 		if mtc == null:
 			result = [
-				{atlas = InfiniteTileMap._TERRAIN_ATLAS.get(ChunkGenerator.TerrainType.GRASS, Vector2i.ZERO), alt = 0},
-				{atlas = InfiniteTileMap._TERRAIN_ATLAS.get(ChunkGenerator.TerrainType.GRASS, Vector2i.ZERO), alt = 0},
-				{atlas = InfiniteTileMap._TERRAIN_ATLAS.get(ChunkGenerator.TerrainType.GRASS, Vector2i.ZERO), alt = 0},
-				{atlas = InfiniteTileMap._TERRAIN_ATLAS.get(ChunkGenerator.TerrainType.GRASS, Vector2i.ZERO), alt = 0}
+				{atlas = InfiniteTileMap._TERRAIN_ATLAS.get(ChunkGenerator.TerrainType.SAND, Vector2i.ZERO), alt = 0},
+				{atlas = InfiniteTileMap._TERRAIN_ATLAS.get(ChunkGenerator.TerrainType.SAND, Vector2i.ZERO), alt = 0},
+				{atlas = InfiniteTileMap._TERRAIN_ATLAS.get(ChunkGenerator.TerrainType.SAND, Vector2i.ZERO), alt = 0},
+				{atlas = InfiniteTileMap._TERRAIN_ATLAS.get(ChunkGenerator.TerrainType.SAND, Vector2i.ZERO), alt = 0}
 			]
 		
 		if result == null:

@@ -30,17 +30,24 @@ Role 本身只是一个「位置容器」: 有坐标、能挂子节点。
     - NPC → NpcVisual + NpcController(AI 驱动)
 
 ============================================================================
- 和服务器权威状态同步的关系
+ 和服务器权威状态同步的关系(半预测 + 软对账)
 ============================================================================
-Role 的「坐标」不归自己管:
-    - 本地玩家: LocalPlayerController 读输入 → 发 PlayerMove → 服务端 apply_move
-                → 服务端广播 → StateMirror 更新 → entity_updated 信号 → Role 更新坐标
-                (注意: 本地玩家也走 StateMirror 更新,不直接本地改坐标——保证权威一致)
-    - 远程玩家/木桩: StateMirror 收到 PlayerMove → entity_updated 信号 → Role 更新坐标
+所有实体采用「服务端权威」;本地/远程的位置表现策略不同:
+
+    - 本地玩家: LocalPlayerController 读输入 → 发 PlayerMove{dir_x, dir_y}
+                发完立即本地预测 position += dir * speed * delta(消除 RTT 滞后和顿挫)
+                → 服务端 apply_move_dir 记方向 → tick_movement 推进权威位置 → 广播
+                → StateMirror 更新 → entity_updated → Role 更新 target_pos
+                → Role 软对账:回溯 RTT 前的预测位置,与服务端坐标误差小则忽略,
+                  误差大(服务端因碰撞/锁定没推进)才 lerp 平滑回正
+    - 远程玩家/敌人: 同上,但 Role._process 用 lerp 平滑 30Hz 跳变(30Hz→60Hz)
     - 木桩: StateMirror 收到 GameState 快照 → state_replaced 信号 → Role 创建并定位
 
-所以 Role.position 永远是由 StateMirror 的信号驱动的,Role 自己不改自己的坐标。
-这是「服务器权威」在客户端的最终体现: 连本地玩家的坐标都不自己算。
+为什么本地是「预测 + 软对账」而不是「限速追赶」:
+    纯追赶(本地追服务端坐标)有个结构性缺陷:追到位 → 停等 → 等下一个广播。
+	30Hz 广播到达不均匀时(局域网 tick 也有 10-20ms 抖动),就变成"走走停停"的顿挫;
+    方向切换时还追着旧方向坐标滑一小段再折回。本地玩家明明知道自己的方向,
+    用方向自推进(预测)就没有停等;服务端坐标只做校验(软对账),误差超阈值才回正。
 
 ============================================================================
  强类型 ClientEntityInfo(本次重构)
@@ -64,12 +71,66 @@ var entity_type: ClientEntityInfo.EntityType = ClientEntityInfo.EntityType.UNKNO
 # 战斗数据
 var entity_combat: ClientStateMirror.ClientCombatStats = null
 
+# ---------------------------------------------------------------------------
+# 位置插值(服务端权威同步)
+# ---------------------------------------------------------------------------
+# 服务端权威位置(从 entity_updated 信号拿到,只读)
+# 位置完全由服务端广播驱动——发 PlayerMove 只是告诉服务端"我想往哪走"。
+var target_pos: Vector2 = Vector2.ZERO
+
+# 是否是本地玩家(setup 时判断)
+# 本地/远程的插值策略不同:
+#   - 本地: 限速线性追赶 target_pos(移动连续不抖、到位即停不滑,见 _process)
+#   - 远程: lerp 平滑(远端 30Hz 跳变需要插值平滑,滑一点反而是优点)
+var _is_local: bool = false
+
+# 位置是否已初始化(首次 _update_position 时直接 snap,不插值)
+# 避免新创建的 Role 从 (0,0) lerp 飞到目标位置
+var _position_initialized: bool = false
+
+# 最近一次从服务端同步到的动画状态(缓存,供 _process 判断本地玩家是否在硬直中)
+# 硬直(hurt)期间本地玩家不预测、不软对账,改为 lerp 跟随服务端位置(被击退时)
+var _state: String = ""
+
+# ---------------------------------------------------------------------------
+# 本地玩家:预测轨迹历史 + 软对账(消除"拉扯")
+# ---------------------------------------------------------------------------
+# 本地玩家位置由 LocalPlayerController 每帧预测推进,这里记录预测轨迹,
+# 收到服务端广播时回溯 RTT 前的预测位置与权威位置比较(软对账):
+#   - 误差小:预测正确,忽略(不回正 → 不拉扯)
+#   - 误差大:真脱节(服务端碰撞/锁定没推进),lerp 平滑回正
+# 对比"限速追赶":追赶会"追到位→停等→等广播",广播抖动就顿挫;
+# 预测自推进没有停等,是消除拉扯的核心。
+var _pred_history: Array = []
+
+# 预测轨迹记录窗口(毫秒):只留最近这段,RTT 回溯够用
+# 60fps 下 1000ms ≈ 60 条
+const PRED_HISTORY_WINDOW_MS: int = 1000
+
+# 预测轨迹上限条数(防极端低帧率下窗口内条数爆炸)
+const PRED_HISTORY_MAX_ENTRIES: int = 200
+
+# 软对账阈值(像素):回溯 RTT 前预测位置与服务端位置误差超过它才回正
+# 需盖住 RTT 偏差引起的回溯偏移(speed×偏差,300px/s×30ms≈9px),取 15px
+const RECONCILE_THRESHOLD: float = 15.0
+
+# 回正插值系数:脱节时 position.lerp(target_pos, 0.35) 平滑回正,不硬跳(避免瞬移)
+const RECONCILE_LERP: float = 0.35
+
+# 远程实体 lerp 因子系数:lerp(position, target_pos, delta * LERP_FACTOR)
+# 15.0 → 60fps 时 alpha≈0.25,约 4 帧(66ms)追上目标点,视觉平滑无卡顿
+const LERP_FACTOR: float = 15.0
+
 
 ## 初始化 Role: 根据 ClientEntityInfo 决定挂什么组件
 ## 由 dead_man_scene 在创建/更新 Role 时调用
 func setup(info: ClientEntityInfo) -> void:
 	entity_id = info.entity_id
 	entity_type = info.entity_type
+
+	# 判断是否本地玩家(决定插值策略:本地 snap / 远程 lerp)
+	var local_eid = ClientStateMirror.instance().local_entity_id()
+	_is_local = (entity_id == local_eid and entity_id != "")
 
 	# 先更新坐标(setup 也可能携带最新坐标)
 	_update_position(info)
@@ -196,6 +257,7 @@ func on_stats_updated(combat: ClientStateMirror.ClientCombatStats) -> void:
 
 ## 收到 StateMirror 的 entity_updated 信号时调用,更新坐标、朝向、动画状态
 func on_entity_updated(info: ClientEntityInfo) -> void:
+	_state = info.state  # 缓存动画状态(hurt 硬直判断用,见 _process / _update_position)
 	_update_position(info)
 	# 朝向更新:转发给 PlayerVisual(如果已挂载)
 	# facing 是独立状态维度,和坐标分开更新,但走同一个 entity_updated 信号
@@ -210,9 +272,99 @@ func on_entity_updated(info: ClientEntityInfo) -> void:
 		anim_machine.update_state(info.state)
 
 
-## 更新坐标到 Role.position
+## 每帧更新:
+## - 本地玩家: 记录预测轨迹供软对账(位置由 LocalPlayerController 预测推进)
+## - 远程/敌人: lerp 平滑 30Hz 跳变(远端滑一点是优点,视觉更顺)
+func _process(delta: float) -> void:
+	if not _position_initialized:
+		return  # 首次位置还没设(setup 之前),跳过
+
+	if _is_local:
+		if _state == "hurt":
+			# 硬直中:位置由服务端权威(击退等),本地不预测,lerp 跟随 target_pos
+			# 预测是"我按自己的方向走",硬直中我被推走,不能自己推自己;
+			# 软对账阈值(15px)也追不上单 tick 几像素的小步击退位移,直接 lerp 最稳
+			position = position.lerp(target_pos, min(delta * LERP_FACTOR, 1.0))
+		else:
+			# 本地:位置由 LocalPlayerController 每帧预测推进(LocalPlayerController._process
+			# 是子节点,本帧 Role 之后执行),这里只记录预测轨迹供收到广播时对账
+			# 不做"限速追赶"——那是顿挫根源(追到位→停等→再追,广播抖动就走走停停)
+			_record_prediction()
+	else:
+		# 远程:插值模式
+		# 服务端 30Hz 给出 target_pos,客户端 60Hz lerp 向它平滑过渡
+		# alpha = delta * LERP_FACTOR:60fps 时 ≈0.25,约 4 帧追上(66ms 延迟,视觉平滑)
+		# min 截断到 1.0:防止低帧率时 delta 过大导致 alpha>1(overshoot)
+		position = position.lerp(target_pos, min(delta * LERP_FACTOR, 1.0))
+
+
+## 更新坐标:从 entity_updated 信号拿到服务端权威位置,更新 target_pos
+## - 首次调用(初始化):直接 snap position = target_pos(避免从原点飞过去)
+## - 后续:只更新 target_pos,position 由 _process 对齐(本地 snap / 远程 lerp)
 func _update_position(info: ClientEntityInfo) -> void:
-	position = Vector2(info.x, info.y)
+	target_pos = Vector2(info.x, info.y)
+	if not _position_initialized:
+		# 首次定位:直接 snap(不插值,避免新 Role 从 (0,0) lerp 到目标点)
+		position = target_pos
+		_position_initialized = true
+	elif _is_local and _state != "hurt":
+		# 本地玩家且不在硬直中:软对账——回溯 RTT 前的预测位置与服务端权威位置比较,
+		# 误差小则忽略(正常移动信任本地预测,不回正→不拉扯),
+		# 误差大才平滑回正(服务端因碰撞/锁定没推进,预测跑偏了)
+		_reconcile_prediction()
+	# 硬直中(hurt):只设 target_pos,由 _process lerp 跟随服务端位置(不软对账)
+	# 远程:只设 target_pos,由 _process lerp 插值趋近
+
+
+## 记录当前预测位置到轨迹历史(本地玩家每帧调用)
+## 条目: [time_ms, x, y](扁平数组,避免每帧分配 Vector2 对象)
+## 只在本地玩家调用;远程实体不需要预测轨迹(lerp 就行)
+func _record_prediction() -> void:
+	var now: int = Time.get_ticks_msec()
+	_pred_history.append([now, position.x, position.y])
+	# 裁剪窗口外的旧条目(按时间,窗口内通常 <100 条,单次遍历够快)
+	while _pred_history.size() > 0 and now - int(_pred_history[0][0]) > PRED_HISTORY_WINDOW_MS:
+		_pred_history.pop_front()
+	if _pred_history.size() > PRED_HISTORY_MAX_ENTRIES:
+		_pred_history.pop_front()
+
+
+## 软对账:收到服务端广播时,回溯 RTT 前的预测位置,与服务端权威位置比较
+## 误差 <= 阈值:预测正确,忽略(不回正——回正就是"拉扯")
+## 误差 > 阈值:真脱节(服务端因碰撞/attacking 锁定没推进,预测跑偏),
+##   用 lerp 平滑回正(不是硬 snap,避免视觉瞬移),并清空轨迹
+##   (必须清空:回正后旧错误轨迹会继续误判脱节,见项目 memory 记录)
+func _reconcile_prediction() -> void:
+	if _pred_history.is_empty():
+		return  # 无轨迹可回溯(刚开始/刚回正清空),跳过——首次靠 snap,之后靠预测
+	var lookup_time: float = float(Time.get_ticks_msec()) - WebScoketMgr.get_rtt_ms()
+	var predicted: Vector2 = _lookup_prediction_at(lookup_time)
+	if predicted.distance_to(target_pos) > RECONCILE_THRESHOLD:
+		# 真脱节:平滑回正(不用硬 snap,避免视觉瞬移)
+		position = position.lerp(target_pos, RECONCILE_LERP)
+		_pred_history.clear()
+
+
+## 在预测轨迹历史中回溯某时刻的预测位置
+## 找到相邻两条记录线性插值;目标时刻在窗口外则返回边界记录位置(退化)
+func _lookup_prediction_at(t: float) -> Vector2:
+	if _pred_history.is_empty():
+		return position  # 退化:无历史,返回当前
+	var first: Array = _pred_history[0]
+	if t <= float(first[0]):
+		return Vector2(first[1], first[2])  # 早于最旧记录
+	var last: Array = _pred_history[_pred_history.size() - 1]
+	if t >= float(last[0]):
+		return Vector2(last[1], last[2])  # 晚于最新记录
+	# 线性扫描找区间并插值(窗口内 <100 条,线性足够)
+	for i in range(1, _pred_history.size()):
+		var prev: Array = _pred_history[i - 1]
+		var cur: Array = _pred_history[i]
+		if t <= float(cur[0]):
+			var span: float = float(cur[0]) - float(prev[0])
+			var f: float = (t - float(prev[0])) / span if span > 0.0 else 0.0
+			return Vector2(lerpf(prev[1], cur[1], f), lerpf(prev[2], cur[2], f))
+	return Vector2(last[1], last[2])
 
 
 ## 移除指定名称的组件(如果存在)

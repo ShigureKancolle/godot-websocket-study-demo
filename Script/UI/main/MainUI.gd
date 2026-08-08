@@ -95,7 +95,7 @@ func _on_click_map():
 	# 进入无限地图调试场景
 	# 当前是纯客户端独立场景：用 DebugCursor（箭头键控制）测试 chunk 动态加载/卸载
 	# 不依赖 WebSocket，所以无需等待连接
-	var target_scene = load("res://tiledmap/TiledMap.tscn")
+	var target_scene = load("res://tiledmap/TiledMap1.tscn")
 	var target_scene_instance = target_scene.instantiate()
 	add_child(target_scene_instance)
 	$Bg.hide()

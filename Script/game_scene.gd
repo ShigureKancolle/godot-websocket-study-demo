@@ -23,3 +23,4 @@ func _ready() -> void:
 	# Camera2D 由 CameraFollow 脚本驱动跟随本地玩家,所以地图间接跟随玩家
 	var infinite_map: InfiniteTileMap = $InfiniteTileMap
 	infinite_map.set_follow_target($Camera2D)
+	_damage_layer = $DamageLayer

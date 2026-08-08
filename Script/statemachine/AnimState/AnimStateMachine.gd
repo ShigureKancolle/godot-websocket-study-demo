@@ -60,6 +60,9 @@ func _register_states() -> void:
 	# AttackState._enter_state 内部调 play_anim("attack") 播动画(动画名无 ing)
 	add_state("attacking", AttackState.new())
 	add_state("hurt", HurtState.new())
+	# "dead" 对应服务端 apply_hurt 判定 hp<=0 且 can_die=True 时设的 state
+	# DeadState 播死亡动画,播完不切回(等 EntityRemove 消息来 queue_free)
+	add_state("dead", DeadState.new())
 
 
 ## 保留接口和 PlayerVisual.setup 对称(当前未使用)

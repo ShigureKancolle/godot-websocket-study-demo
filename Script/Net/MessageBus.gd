@@ -263,6 +263,12 @@ func send(protoname: String, protodata: Dictionary = {}, websocket = null) -> vo
 	if ws == null:
 		push_error("未设置 websocket 连接，请先调用 set_websocket 或传入 websocket 参数")
 		return
+	# 连接未就绪时跳过发送:WebSocketPeer.send 在 ready_state != OPEN 时会返回 FAILED 并刷 C++ 错误
+	# 场景:UI 点击/定时器在连接建立前发包(如 CONNECTING 阶段点"开始游戏"、启动瞬间的 Ping)
+	# 消息直接丢弃,连上后业务逻辑自然重发(用户再点一次 / 下一个周期)
+	if ws.get_ready_state() != WebSocketPeer.STATE_OPEN:
+		push_warning("WebSocket 未连接(ready_state=%s),跳过发送 %s" % [ws.get_ready_state(), full_name])
+		return
 	if "Attack" in full_name:
 		print("发送消息C->S %s" % [full_name])
 	await ws.send(data)

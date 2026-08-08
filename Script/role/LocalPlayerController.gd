@@ -19,42 +19,43 @@ class_name LocalPlayerController
  这是「服务器权威」在客户端最微妙的地方
 ============================================================================
 本地玩家想移动/转朝向,流程:
-    1. 这里读 intent,算出「想移动到哪个坐标」「想朝哪个方向」
-    2. 发 PlayerMove / PlayerFacing 消息给服务端(这是「请求」,不是「声明」)
-    3. 服务端 apply_move / apply_facing 更新权威状态,广播给所有人(含自己)
+    1. 这里读 intent,拿到方向向量
+    2. 发 PlayerMove(dir_x/dir_y) / PlayerFacing 给服务端(这是「请求」,不是「声明」)
+    3. 服务端 apply_move_dir 只记方向,tick_movement 每 tick 推进权威状态,广播给所有人
     4. 客户端 StateMirror 收到 → entity_updated 信号 → Role.on_entity_updated
-       → 更新坐标 + 转发 facing 给 PlayerVisual
+       → 更新 target_pos,本地玩家做「软对账」(回溯预测轨迹,误差大才平滑回正)
+    5. 本地玩家位置由本组件预测推进(第 2 步发完方向后),远程实体由 Role._process lerp 平滑
 
-注意第4步:本地玩家的坐标和朝向也是由 StateMirror 信号更新的,不是这里直接改的。
-    这保证了「本地玩家看到的自己」和「服务端认为的本地玩家」永远一致。
-    如果这里直接改 Role.position 或箭头 rotation,就会和服务端状态脱节。
+和旧模型的区别:
+    旧:客户端发目标坐标 → 服务端直接落地 → 广播 → 客户端 set position
+        问题:客户端 60Hz 发,服务端 30Hz 节流丢半,真实速度腰斩,每 tick 被拉回
+    新:客户端发方向 → 服务端按方向推进 → 广播 → 客户端「预测 + 软对账」
+        本地玩家用自己的方向自推进(预测),服务端坐标只做校验(软对账),
+        预测与服务端打架时由 Role 平滑回正,而不是硬拉回(详见 Role._reconcile_prediction)
 
 ============================================================================
  朝向和移动是两个独立状态维度
 ============================================================================
 玩家可以一边移动(WASD 决定方向)一边朝任意方向攻击(鼠标决定朝向)。
     所以 PlayerMove 和 PlayerFacing 是两条独立的消息流,各自发各自的。
-    服务端 apply_move 只改 x/y,apply_facing 只改 facing,互不干扰。
+    服务端 apply_move_dir 只记移动方向,apply_facing 只改 facing,互不干扰。
 
 ============================================================================
- 移动模型:方向移动 → target 坐标(帧率无关)
+ 移动模型:方向向量 + 本地预测(服务端权威 + 软对账)
 ============================================================================
-当前 proto 的 PlayerMove 是「目标坐标」(target x/y),不是「方向」。
-    键盘方向移动要转换:target = 当前位置 + move_dir * (speed * delta)。
-    每帧发一次(或间隔发),服务端收到后直接落地目标坐标(简化模型)。
+客户端只发方向向量(dir_x/dir_y),不发目标坐标:
+    - 客户端 60Hz 读 Input.get_vector 拿归一化方向 → 发 PlayerMove{dir_x, dir_y}
+    - 发完立即本地预测:position += dir * speed * delta(不等服务端回传)
+    - 服务端 30Hz tick 按 dir * speed * TICK_INTERVAL 推进权威位置并广播
+    - Role 收到广播做「软对账」:回溯 RTT 前的预测位置比较,误差小忽略 / 大则平滑回正
 
-步长 = speed * delta,其中 speed 来自 entity_config.json 的 player.speed
-    (像素/秒)。这样移动距离和帧率解耦:60fps 每帧走 speed/60,30fps 每帧走
-    speed/30,每秒总位移都是 speed 像素——不会因为帧率高低导致移速变化。
-
-未来做连续移动模型时,服务端按 tick 推进 new_pos = old_pos + velocity * dt,
-    那时 proto 可以加 direction 字段,但当前保持 target 模型不变。
+为什么本地预测是安全的:
+    两端用同一个 speed(entity_config.json),方向都是客户端发的,
+    位移速度一致,正常移动预测与服务端推进误差很小。只有服务端拒绝移动
+    (碰撞/attacking 锁定)时误差才超阈值,由 Role 软对账平滑回正。
+    相比「纯追赶」(追到位→停等→广播抖动顿挫)和「方向×RTT 外推」(外推过头),
+    轨迹历史回溯对账对 RTT 精度不敏感,是消除拉扯的正确做法。
 """
-
-# 玩家移动速度(像素/秒)——从 entity_config.json 读取,不再硬编码。
-# 不同实体类型有不同 speed(player>敌人=可摆脱),统一走 ConfigLoader.get_speed。
-# _process 里每帧读(ConfigLoader 内部有缓存,只是 dict 查询,开销可忽略)。
-# 用变量而非 const:const 不能调用函数,且未来若支持运行时改速度(减速 buff)更方便。
 
 # 上次发送朝向时的 facing 弧度,用于判断是否变化(避免无变化时高频发消息)
 var _last_facing: float = 0.0
@@ -69,11 +70,16 @@ const FACING_EPSILON: float = 0.01
 # 不加这个的话:玩家松开键盘后不再发 PlayerMove,服务端 state 永远停在 "run"
 var _was_moving: bool = false
 
+# 本地预测速度(像素/秒),setup 时从 ConfigLoader 读
+# 必须和服务端 speed 一致(同一 shared_config/entity_config.json 同步),
+# 否则预测位移对不上服务端推进 → 对账误判脱节 → 回正抖动
+var _speed: float = 0.0
 
-## 初始化: 接收玩家信息(当前未使用,但保留接口和 PlayerVisual.setup 对称)
-## 后续如需根据玩家信息调整控制参数(如不同角色移速不同),在这里实现
+
+## 初始化: 接收玩家信息
+## 取移动速度用于本地预测推进(speed 是类型属性,本地查表,不进网络消息)
 func setup(_info: ClientEntityInfo) -> void:
-	pass
+	_speed = ConfigLoader.get_speed("player")
 
 
 func _process(delta: float) -> void:
@@ -92,10 +98,11 @@ func _process(delta: float) -> void:
 	if player == null:
 		return  # 镜像还没拿到本地玩家信息(PlayerJoin 未到),跳过
 	var my_state: String = player.state
-	# state=="attacking" 时禁止移动/朝向/再次攻击(和服务端 apply_attack_start 设的 state 对齐)
-	# 之前用 "attack" 是误称,服务端实际设的是 "attacking"
-	if my_state == "attacking":
-		# print("当前正在attacking,不发移动和朝向消息")
+	# 输入锁定状态:attacking/hurt/dead 期间禁止移动/朝向/攻击
+	# 和服务端 _INPUT_LOCKED_STATES 对齐。hurt 期间不锁会导致:
+	#   客户端持续发 PlayerMove + 本地预测推进位置,但服务端 apply_move_dir 拒绝(hurt 锁),
+	#   服务端位置不动 → 广播旧位置 → 客户端软对账 lerp 拉回 → "被打一次拉回一点"
+	if my_state == "attacking" or my_state == "hurt" or my_state == "dead":
 		return
 
 	if intent.attack_pressed:
@@ -116,34 +123,34 @@ func _process(delta: float) -> void:
 		return
 
 
-	# 1. 移动(从 intent.move_dir 算 target)
+	# 1. 移动(发方向向量;不做本地预测)
+	# 服务端权威移动:
+	#   - 客户端只发方向向量 dir_x/dir_y,不发目标坐标
+	#   - 服务端按 dir * speed * TICK_INTERVAL 推进权威位置并广播
+	#   - 客户端位置完全由服务端广播驱动(Role._process lerp 插值)
+	#   - 不做本地预测:预测位置会与服务端回传坐标打架 → 「拉回」抖动
+	#
 	# moving 状态机:
-	#   - 正在移动(move_dir 非零):每帧发 moving=true,服务端设 state="run"
+	#   - 正在移动(move_dir 非零):每帧发 moving=true + 方向,服务端设 state="run"
 	#   - 刚停止(上一帧在动,这帧不动):发一次 moving=false,服务端设 state="idle"
 	#   - 持续静止:不发(避免无意义发包)
-	# 这样停止时只发一次停止信号,不会高频发包
-	#
-	# 步长 = speed * delta:帧率无关移动。speed 来自 entity_config.json(player=300),
-	# 60fps 时 step=5(和原来硬编码 MOVE_STEP=5 行为一致),30fps 时 step=10(自动补偿)。
-	var role_pos: Vector2 = get_parent().position  # Role 的位置
-	var move_speed: float = ConfigLoader.get_speed("player")  # 像素/秒
+	var role_pos: Vector2 = get_parent().position  # Role 的位置(用于朝向计算)
 	var moving: bool = intent.move_dir != Vector2.ZERO
 	if moving:
-		var step: float = move_speed * delta
-		var target: Vector2 = role_pos + intent.move_dir * step
+		# 发方向向量(Input.get_vector 已归一化)
 		MessageBus.instance().send("game.PlayerMove", {
-			"x": target.x,
-			"y": target.y,
-			"speed": move_speed,
+			"dir_x": intent.move_dir.x,
+			"dir_y": intent.move_dir.y,
 			"moving": true
 		})
+		# 本地预测:发完方向立即按 dir * speed * delta 推进自己,不等服务端回传
+		# 消除"追-停"顿挫和 RTT 输入滞后;服务端坐标只做软对账(Role._reconcile_prediction)
+		get_parent().position += intent.move_dir * _speed * delta
 	elif _was_moving:
 		# 刚从移动切到静止:发一次 moving=false,让服务端把 state 从 "run" 切回 "idle"
-		# target 就是当前位置(不动)
 		MessageBus.instance().send("game.PlayerMove", {
-			"x": role_pos.x,
-			"y": role_pos.y,
-			"speed": move_speed,
+			"dir_x": 0.0,
+			"dir_y": 0.0,
 			"moving": false
 		})
 	_was_moving = moving

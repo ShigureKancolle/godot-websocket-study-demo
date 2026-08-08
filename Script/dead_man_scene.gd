@@ -21,13 +21,18 @@ const RoleScript = preload("res://Script/role/Role.gd")
 var _entities: Dictionary[String, Role] = {}
 var _entity_layer: Node2D = null  # 所有 Role 的父节点,方便统一管理
 var _effect_layer: Node2D = null  # 所有 Effect 的父节点,方便统一管理
+var _damage_layer: Node2D = null  # 所有 DamageEffect 的父节点,方便统一管理
 
 
 func _ready() -> void:
+	# 进入游戏场景:PlayerJoin 已作为首消息发出,现在可以安全开启 RTT 测量
+	# (用于本地玩家移动对账外推,见 WebScoketMgr.start_rtt_measurement)
+	WebScoketMgr.start_rtt_measurement()
+
 	$UILayer/E_Back.connect("pressed", _on_back_pressed)
 	_entity_layer = $EntityLayer
 	_effect_layer = $EffectLayer
-
+	
 	# 连接 StateMirror 的三个信号
 	# 信号定义见 StateMirror.gd
 	var mirror = ClientStateMirror.instance()
@@ -38,6 +43,7 @@ func _ready() -> void:
 	mirror.stats_inited.connect(_on_stats_inited)
 	mirror.stats_changed.connect(_on_stats_changed)
 	mirror.hp_changed.connect(_on_hp_changed)
+	mirror.fire_damage_effect.connect(_on_fire_damage_effect)
 
 	# 如果 StateMirror 里已经有状态（比如进入场景前就收到了 GameState），
 	# 主动用现有状态刷一次——否则要等下一次 state_replaced 才显示
@@ -109,6 +115,22 @@ func _on_hp_changed(entity_id: String, cur_hp: int, damage: int, attacker_id: St
 		print("Damage:", damage)
 	if _entities.has(entity_id):
 		_entities[entity_id].on_hp_changed(cur_hp, damage, attacker_id, atk_id, atk_shape_idx)
+
+func _on_fire_damage_effect(pos: Vector2, _atk_id: int, damage: int) -> void:
+	# 播伤害飘字(在受击者位置播特效)
+	# TODO 后期再改造成effectmgr用对象池
+	if _damage_layer == null:
+		return
+	var effect = preload("res://prefab/effect/FireDamageEffect.tscn").instantiate()
+	effect.get_node("AnimationPlayer").play("fire")
+	var on_animation_finished = func(anim_name: String) -> void:
+		if anim_name == "fire":
+			effect.queue_free()
+	effect.get_node("AnimationPlayer").animation_finished.connect(on_animation_finished)  # 播完自动删除
+	var random_offset = Vector2(randf_range(-10, 10), randf_range(-10, 10))
+	effect.position = pos + random_offset
+	_damage_layer.add_child(effect)
+	effect.get_node("Label").text = "%d" % damage
 
 
 # 创建一个 Role 实例并加入场景

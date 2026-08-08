@@ -10,7 +10,6 @@ var selected_tile_img: TextureRect = null
 var tile_set: TileSet = null
 var atlas_source: TileSetAtlasSource = null
 var atlas_source_id: int = 0
-var grass_forms_tiled: Dictionary = {}
 var mytiles: Dictionary = {}
 var tile_coord_list: Array[Dictionary] = []
 var cur_select_tile_data: tile_data = null
@@ -23,17 +22,19 @@ func _ready():
 	$ScrollNode.refresh_scroll_panel(tile_coord_list)
 
 func init_tile_coord_list():
-	grass_forms_tiled = InfiniteTileMap._init_grass_forms_tiled()
-	mytiles = InfiniteTileMap._init_grass_forms(grass_forms_tiled)
+	# 草地已是静态地形（无形态表），沙地是当前唯一的过渡地形
+	# 取沙地形态表用于预览（_init_terrain_forms 返回 {地形类型: 形态表}）
+	var terrain_forms: Dictionary = InfiniteTileMap._init_terrain_forms()
+	mytiles = terrain_forms.get(ChunkGenerator.TerrainType.SAND, {})
 	
-	# 全沙
+	# 全草
 	var _data = tile_data.new()
 	_data.tile_id = -1
 	_data.tiles.append_array([
-		TiledCell.new(Vector2i(5, 10), 0, 1),
-		TiledCell.new(Vector2i(5, 10), 0, 1),
-		TiledCell.new(Vector2i(6, 10), 0, 1),
-		TiledCell.new(Vector2i(6, 10), 0, 1)
+		TiledCell.new(Vector2i(4, 14), 0, 1),
+		TiledCell.new(Vector2i(4, 14), 0, 1),
+		TiledCell.new(Vector2i(4, 14), 0, 1),
+		TiledCell.new(Vector2i(4, 14), 0, 1)
 	])
 	tile_coord_list.append({"data": _data})
 
