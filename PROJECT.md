@@ -3,6 +3,9 @@
 ## 项目目的
 学习各种游戏开发流程的项目。通过实际实现玩家同步、状态管理、消息契约等,学习游戏服务端架构(服务器权威模型、状态同步、组件化实体等)。
 
+## 修改决策
+在进行代码修改之后同步到相应的md文件中，并且不论是注释还是md文件，都只保留最新版本的描述，旧版描述需要清理。
+
 ## 技术栈
 - 客户端: Godot 4 (GDScript)
 - 服务端: Python + websockets + protobuf
@@ -86,7 +89,7 @@ d:\work2\godot_demo\
 ### 状态同步模型(当前)
 - **服务器权威**:客户端发的是「请求」不是「声明」,所有状态由服务端 GameRoom 决定
 - **混合模型**:PlayerJoin/PlayerMove 用事件增量广播,GameState 用全量快照(仅给新玩家)
-- **客户端无预测**:本地玩家坐标也靠服务端广播回传更新,不本地直接改
+- **客户端半预测 + 软对账**:本地玩家用自己发出的方向自推进(消除 RTT 滞后与"追-停"顿挫),服务端广播坐标只做校验,误差超过阈值才平滑回正;远程实体用 lerp 插值(详见 client-role.md「位置同步」)
 - **状态收口**:服务端 GameRoom 是唯一能改状态的地方;客户端 ClientStateMirror 只能镜像不能算
 
 ### 消息流向
@@ -96,7 +99,7 @@ d:\work2\godot_demo\
 
 ## 关键设计决策
 1. **GameRoom 收口状态**:避免双端各写一份状态逻辑,handler 只做"取参数→调方法→发结果"
-2. **ClientStateMirror 只读**:客户端无 apply_move 等变更方法,结构上杜绝状态逻辑重复
+2. **ClientStateMirror 只读**:客户端无 apply_move_dir 等变更方法,结构上杜绝状态逻辑重复
 3. **messages.json 契约共享**:proto 只描述形状,契约描述语义(方向/类别/是否影响状态)
 4. **Python 热更约束**:所有项目模块用 `import xxx` + `xxx.def`,禁止 `from xxx import def`
 5. **GDScript 单例选择**:纯数据容器(StateMirror/MessageContract)用 RefCounted+static;需 _process 的(WebScoketMgr)用 Node+autoload

@@ -82,10 +82,10 @@ godobuf 生成的 proto 代码用 `msg.data` 字典存储字段,结构是 `{tag:
 
 ### 核心原则
 **只接收、只镜像、只读暴露;绝不本地推演状态**。和服务端 GameRoom 对照:
-- GameRoom.apply_move(eid, x, y) — 改状态(主人)
-- ClientStateMirror._on_move(d) — 接收服务端广播,更新镜像(奴仆)
+- GameRoom.apply_move_dir(eid, dir_x, dir_y, moving, dt) — 改状态(主人,记住方向不推进;tick_movement 每 tick 持续推进位移)
+- ClientStateMirror._on_player_move(d) — 接收服务端广播,更新镜像(奴仆,读 S2C 的 x/y)
 
-客户端没有 apply_move 等变更方法,结构上杜绝状态逻辑重复。
+客户端没有 apply_move_dir 等变更方法,结构上杜绝状态逻辑重复。
 
 ### 统一 Entity 模型 + 强类型 ClientEntityInfo(本次重构)
 和服务端对齐:所有可交互物体(玩家/木桩)统一用 `_entities` 一张表存,不再区分 _players。
@@ -98,7 +98,7 @@ godobuf 生成的 proto 代码用 `msg.data` 字典存储字段,结构是 `{tag:
 ### 信号(通知渲染层)
 - `state_replaced(entities: Array)` — 全量替换,渲染层重建所有实体(玩家+木桩)。元素是 ClientEntityInfo
 - `entity_updated(entity_info: ClientEntityInfo)` — 单个实体变化(加入/移动/朝向/动画状态),渲染层更新一个实体
-- `entity_removed(entity_id: String)` — 实体离开(玩家断连),渲染层移除实体
+- `entity_removed(entity_id: String)` — 实体离开,渲染层移除实体。触发场景:玩家断连(PlayerLeave)/ 实体死亡播完动画(EntityRemove,服务端 DeadTimer 到期后广播)
 
 ### 内部状态
 - `_entities: Dictionary` — 实体镜像表(entity_id -> ClientEntityInfo),和服务端 GameRoom._entities 结构对齐(服务端存 EntityInfo dataclass,客户端存 ClientEntityInfo RefCounted)
@@ -115,15 +115,19 @@ handler 接收 `data: Dictionary`(godobuf 反序列化的原始 dict),内部调 
 
 - `_on_game_state(data)` — 整体替换镜像(读 `entities` 字段),逐个 `from_dict` 转 ClientEntityInfo 后存,emit state_replaced
 - `_on_player_join(data)` — 增量添加实体(读 `entity_info` 字段并 `from_dict`),emit entity_updated(兼容本地 entity_id 提取)
-- `_on_player_move(data)` — 取出 ClientEntityInfo,改 x/y;并从 moving 字段推断 state(moving=true→"run", false→"idle",和服务端 apply_move 一致)写入 `entity.state`,emit entity_updated
+- `_on_player_move(data)` — 取出 ClientEntityInfo,改 x/y;并从 moving 字段推断 state(moving=true→"run", false→"idle",和服务端 apply_move_dir 一致)写入 `entity.state`,emit entity_updated。**注:这里读的是 S2C 的 x/y 字段**(服务端 tick_movement 算出的坐标),不读 C2S 的 dir_x/dir_y(那是客户端发出去的)。**防御:锁定状态(attacking/hurt/dead)不覆盖 state**——击退期间服务端仍每 tick 广播被推走的位置,若不防御会把 hurt 掐成 run/idle,受击动画中断、本地玩家提前恢复预测(和服务端 `_INPUT_LOCKED_STATES` 对齐)
 - `_on_player_facing(data)` — 取出 ClientEntityInfo,改 facing,emit entity_updated。复用同一信号,Role.on_entity_updated 里判断 facing 字段转发给 PlayerVisual
 - `_on_player_leave(data)` — 移除实体,emit entity_removed
 - `_on_attack_start(data)` — 取出攻击者 ClientEntityInfo,设 `entity.state = "attacking"` + `entity.atk_id = atk_id`(和服务端 apply_attack_start 对齐),emit entity_updated
 - `_on_attack_end(data)` — 取出攻击者 ClientEntityInfo,设 `entity.state = "idle"`,emit entity_updated
 - `_on_attack_hit(data)` — 攻击命中广播:遍历 `hit_list` 逐个取出被命中者 ClientEntityInfo,设 `entity.state = "hurt"`,emit entity_updated。**只处理 hit_list,不处理 attacker_id**(攻击者 state 由 AttackStart 设为 attacking)。消息带 `hurt_duration` 字段但客户端当前不读(路径X:纯等服务端 HurtEnd 信号切 idle)
 - `_on_hurt_end(data)` — 受击硬直到期广播:读 `hurt_id` 取出 ClientEntityInfo,设 `entity.state = "idle"`,emit entity_updated。客户端不主动计时,完全等服务端信号(纯服务端权威恢复)。连击场景下服务端 hurt timer 被 cancel+restart,不会发 HurtEnd
+- `_on_entity_dead(data)` — 实体死亡广播:读 `entity_id` 取出 ClientEntityInfo,设 `entity.state = "dead"` + emit entity_updated。**只改 state,不移除实体**——实体还在场景里播死亡动画,等 EntityRemove 消息来才 erase + emit entity_removed。客户端不主动计时,死亡动画时长由服务端 DeadTimer 控制
+- `_on_entity_remove(data)` — 实体移除广播(DeadTimer 到期后服务端发):读 `entity_id`,从 `_entities` 和 `_combats` 表 erase,emit entity_removed。渲染层收到信号后 queue_free 对应 Role 节点。和 `_on_player_leave` 的区别:PlayerLeave 是断连,EntityRemove 是死亡播完动画后移除
 
-> 注:`_on_player_move` 里从 moving 推断 state 只是**字段映射**(服务端广播的 PlayerMove 只有 moving,没有 state,state 存在服务端 EntityInfo 里),不是状态逻辑重复。真正的状态权威在服务端——GameState 快照会带服务端的 state 字段,可对账。
+> 注:`_on_player_move` 里从 moving 推断 state 只是**字段映射**(服务端广播的 PlayerMove S2C 只有 x/y/moving,没有 state,state 存在服务端 EntityInfo 里),不是状态逻辑重复。真正的状态权威在服务端——GameState 快照会带服务端的 state 字段,可对账。
+>
+> 注:PlayerMove 是双向语义消息。C2S 时客户端发 dir_x/dir_y(方向);S2C 时服务端发 x/y(算出的坐标)。StateMirror 只处理 S2C,所以只读 x/y,不读 dir_x/dir_y。
 
 ### 容错策略
 - PlayerJoin 收到已存在实体:覆盖(服务端可能重发,以最新为准)

@@ -21,7 +21,7 @@
 ### 核心动机
 重构前玩家状态散落在 web_server.py 各处(on_player_join 里 `server.player_infos[pid] = ...`、on_player_move 里直接改坐标),带来三个问题:
 1. 状态变更规则无统一入口,加校验(如移动不能穿墙)要改多处
-2. 客户端容易复制 apply_move 到 GDScript,导致状态逻辑双端各写一遍
+2. 客户端容易复制 apply_move_dir 到 GDScript,导致状态逻辑双端各写一遍
 3. 状态形状被 handler 隐式约定,proto 一改两边漏改
 
 **解决**:把"状态长什么样、怎么变"全收口到 GameRoom。handler 只做三件事:取参数→调 GameRoom 方法→发结果。
@@ -34,7 +34,7 @@ MessageBus.dispatch (反序列化+路由)
     ↓
 handler (on_player_move 等,在 game/handlers/)
     ↓
-GameRoom.apply_move(...)   ← 唯一改状态的地方
+GameRoom.apply_move_dir(...)   ← 唯一改状态的地方
     ↓
 handler 取 room.snapshot() 或转发,调 bus.send 广播
 ```
@@ -68,46 +68,79 @@ ID 格式统一带类型前缀:`player:uuid-xxx` / `entity:stake_1`。
 
 ### 状态变更方法(唯一允许改状态的地方)
 所有 apply_xxx 方法先查 entity_config 的能力配置:能做才改状态,不能做返回 False。
+
+**HurtResult 枚举**(apply_hurt 返回值):区分受击后的状态分支,让调用方(web_server 的 hit_cb)据此决定启 HurtTimer 还是 DeadTimer。
+- `FAILED` — 实体不存在/不能被攻击/无战斗组件,调用方不应有后续动作
+- `HURT` — 扣血但没死,调用方启 HurtTimer(硬直)
+- `DEAD` — 扣血后 hp<=0 且 can_die=True,调用方启 DeadTimer(死亡延迟移除)
+
+**_is_input_locked(info) 方法**:统一判断实体是否处于输入锁定状态。锁定状态集合 `_INPUT_LOCKED_STATES = {"hurt", "dead", "attacking"}`,apply_move_dir/apply_facing/apply_attack_start 三个输入方法统一调本方法做拒绝判定。新增锁定状态时只改常量集合,不用改各 apply_xxx 方法(避免散落 if state=="hurt" 漏掉 dead 之类的新状态)。
+
 - `add_entity(entity_id, entity_info: EntityInfo)` — 强制覆盖 entity_id(不变式:状态里的 entity_id 永远=传入的 key)。重复加入抛 ValueError(bug 早暴露)
-- `remove_entity(entity_id)` — pop,不存在返回 None(幂等,断连清理可能重复调用)
-- `apply_move(entity_id, x, y, speed=1.0, moving=False)` — 能力校验:can_move=False 直接拒(木桩不能动)。**硬直校验:state=="hurt" 直接拒(硬直期间锁移动)**。直接落地目标坐标(简化模型)。根据 moving 设 state='run'/'idle'。
-- `apply_facing(entity_id, facing)` — 能力校验:can_move=False 直接拒(木桩不转向)。**硬直校验:state=="hurt" 直接拒(硬直期间锁朝向)**。只改 facing,弧度归一到 [0, 2*PI)。
-- `apply_attack_start(entity_id, atk_id)` — 能力校验:can_attack=False 直接拒。**硬直校验:state=="hurt" 直接拒(硬直期间不能发起攻击)**。设 state='attacking'。只做状态变更,判定在 get_attack_hits
+- `remove_entity(entity_id)` — pop,不存在返回 None(幂等,断连清理可能重复调用)。连带清理 `_combats`(战斗组件)+ `_knockbacks`(击退状态)+ EnemyMgr AI 状态,避免遗留幽灵状态
+- `apply_move_dir(entity_id, dir_x, dir_y, moving, dt)` — **只记住方向,不推进位移!** 能力校验:can_move=False 直接拒(木桩不能动)。**输入锁定校验:调 `_is_input_locked`,hurt(硬直)/dead(死亡)/attacking(攻击中)期间拒移动**。归一化方向存到 `EntityInfo.move_dir_x/y`,设 moving/state。位移推进由 `tick_movement` 每 tick 统一做。moving=false 时清零方向,设 state='idle'。
+- `tick_movement(dt) -> list` — 每 tick 推进位移,分两段:**① 击退推进** 遍历 `_knockbacks` 表,对被击退实体按 vx/vy 推进(不受输入锁定影响,硬直中被推走),耗时耗尽自动清理;**② 普通移动推进** 所有 moving=True 且未锁定实体的位移 `info.x += move_dir_x * speed * dt`(击退中的实体不叠加普通移动)。返回本 tick 移动了的 entity_id 列表(供 web_server 收集广播)。**这是服务端权威移动的核心**:服务端记住方向后每 tick 都推进,不依赖客户端输入是否到达,无累积误差。
+- `apply_facing(entity_id, facing)` — 能力校验:can_move=False 直接拒(木桩不转向)。**输入锁定校验:调 `_is_input_locked`,hurt/dead/attacking 期间锁朝向**。只改 facing,弧度归一到 [0, 2*PI)。
+- `trigger_attack(entity_id, atk_id) -> bool` — **攻击发动统一入口**(玩家和敌人都调本方法)。内部转调 GameServer 注册的 `attack_trigger` 钩子(由 web_server._trigger_attack 实现),完成 apply_attack_start + 广播 AttackStart + 注册 AttackTimer(hit_cb/end_cb)的完整流程。钩子未注册时退化为 apply_attack_start(供单测)。**AI 不要直接调 apply_attack_start**——那只改状态,不广播也不判定,敌人攻击会"空挥"
+- `set_attack_trigger(cb)` — 注册攻击发动回调(由 GameServer 在 __init__ 时调),cb 签名 `(attacker_id, atk_id) -> bool`
+- `apply_attack_start(entity_id, atk_id)` — 能力校验:can_attack=False 直接拒。**输入锁定校验:调 `_is_input_locked`,hurt/dead 期间不能发起攻击**;另外 state=="attacking" 也拒(防连点造成一次攻击多次伤害)。设 state='attacking'。只做状态变更,判定在 get_attack_hits。**由 trigger_attack 内部调用,外部一般不直接调**
 - `apply_attack_end(entity_id, atk_id)` — 攻击结束恢复 state='idle'
-- `apply_hurt(target_id, atk_id)` — 能力校验:can_be_hurt=False 直接拒(墙/水地不会进入 hurt)。**统一处理玩家和木桩,不区分类型**。设 state='hurt'
+- `apply_hurt(target_id, atk_id, atk_shape_idx, damage, attacker_id) -> HurtResult` — 能力校验:can_be_hurt=False 直接拒返回 FAILED(墙/水地不会进入 hurt)。**统一处理玩家和木桩,不区分类型**。扣血后判定:cur_hp<=0 且 can_die=True → 设 state='dead' 返回 DEAD(调用方启 DeadTimer);否则设 state='hurt' 返回 HURT(调用方启 HurtTimer)。玩家 can_die=False,hp 扣到 0 也走 HURT 分支(死亡流程暂不实现)。
+- `apply_dead(target_id, atk_id) -> bool` — 设 state='dead'。由 apply_hurt 内部死亡分支调用,也可由外部(如 Boss 机制)直接调用。能力校验:can_die=False 直接拒。**只设状态不做 remove_entity**——实体移除由 DeadTimer 到期后调 remove_entity 完成,让客户端有时间播死亡动画(服务端"立即判定死亡"但"延迟移除实体")。
 - `apply_hurt_end(entity_id)` — hurt 硬直定时器到期时调,恢复 state='idle'。等下一次 PlayerMove 决定后续状态(若玩家还在按方向键,下一 tick 自然切 run)
+- `apply_knockback(target_id, attacker_id, distance) -> bool` — **击退**:把目标从攻击者中心向外推 distance 像素。方向 = normalize(目标位置-攻击者位置),时长 = hurt 硬直时长,速度 = distance / 时长 → 整个硬直期间匀速推出,「硬直结束 = 击退结束」。**不按 can_move 过滤**(木桩也会被击退)。击退状态存 `_knockbacks`(服务端瞬态,不进 EntityInfo——避免 asdict 污染 proto 快照广播),由 tick_movement 每 tick 推进位移,新位置走现有 PlayerMove 广播。由 web_server.hit_cb 在「连段最后一段」命中时调用
 
 ### 攻击命中判定方法(读状态 + 调 collision 纯函数,不改状态)
 - `get_attack_hits(atk_shape, attacker_id) -> List[str]` — 计算一次攻击形状的命中列表
   - 取攻击者位置/朝向 + atk_shape.shape_params 构造 collision.Sector
   - direction 直接用 facing 弧度(0=右逆时针正,和 collision.Sector.direction 语义对齐),不量化到四方向
+  - **阵营掩码:从攻击者实体类型取 `attack_mask`,和目标 `hit_layer` 按位与,为 0 跳过**(玩家 attack_mask=2 打敌人/木桩层,敌人 attack_mask=1 打玩家层)。阵营是实体属性,挂在实体上后玩家和敌人可复用同一 atk_id 各打各阵营
   - **遍历 _entities 一张表,跳过自己,用 can_be_hurt 能力过滤**(墙/水地等自动跳过)
+  - **死亡过滤:state=="dead" 的实体跳过**(避免鞭尸)。和 can_be_hurt 正交:can_be_hurt 是能力层(能不能被打),state=="dead" 是状态层(当前还能不能被打)
   - 每个目标用 entity_config 的 body_shape/body_params 构造 collision.Circle(碰撞形状由类型决定,不再存 EntityInfo)
   - 命中者 entity_id 加入返回列表(带前缀,调用方不用分流)
-  - 调用方:web_server._process_tick 的 hit_cb 调本方法取 hit_list 广播 AttackHit
+  - 调用方:web_server._trigger_attack 的 hit_cb 调本方法取 hit_list 广播 AttackHit
+
+### 击退(Knockback)——攻击连段最后一段推开目标
+
+**动机**:攻击间隔(583ms)比 hurt 硬直(666ms)短,若不击退,攻击者可在目标硬直中无限连击到死。连段最后一段命中后把目标推开,硬直结束时已脱离下一击范围,被打的人有反击/逃跑的机会。
+
+**规则**:
+- 只对连段「最后一段」触发(`_shape_idx == len(shape_list) - 1`),非最后一段不击退(避免连段中途推开目标打断连击)。单段攻击(如 1001)唯一一段即最后一段。
+- 距离取该 shape 的 `knockback_distance`(像素),>0 才击退;死亡(DEAD)不击退。
+- 方向 = 被击者位置 - 攻击者位置(向外推),与攻击者 facing 无关;位置重合时跳过。
+
+**数据流**:`web_server.hit_cb`(HURT 分支,最后一段)→ `room.apply_knockback` 写 `_knockbacks` → `tick_movement` 每 tick 推进位移并进 moved_ids → 现有 `PlayerMove` 广播 → 客户端 lerp 跟随(本地玩家 hurt 期间跟随服务端位置,见 client-role.md)。
 
 ### 攻击配置 / 形状数据类已移到 config/config_loader.py
 原来在 game_room.py 的 AttackShapeType/ShapeParams/SectorParams/AttackShape/AttackConfig/ATTACK_CONFIG/HURT_DURATION_MS 已迁移到 [config_loader.py](file:///d:/work2/godot_demo/server/config/config_loader.py)(JSON 单数据源方案):
 - `ShapeType`(字符串常量,非 Enum)— 形状类型:sector/rect/circle/ring,实体和攻击共用
 - `ShapeParams / SectorParams / CircleParams / RectParams` — 形状参数 dataclass
-- `AttackShape / AttackConfig` — 攻击形状/配置 dataclass
+- `AttackShape / AttackConfig` — 攻击形状/配置 dataclass。`AttackShape.knockback_distance`(像素)= 击退距离,只在连段最后一段配置,0=不击退
 - `EntityCapability` — 实体能力 + 碰撞形状 + 基础战斗属性 dataclass(can_move/can_attack/can_be_hurt/can_disconnect + body_shape/body_params + combat_stats)
 - `CombatStats` — 类型级基础战斗属性 dataclass(max_hp/attack_power/defense),EntityInfo 初始化时拷贝一份作实例运行时状态
-- 访问 API:`config_loader.get_attack_config(atk_id)` / `config_loader.get_capability(entity_type)` / `config_loader.get_combat_stats(entity_type)` / `config_loader.get_hurt_duration_ms()`
+- 访问 API:`config_loader.get_attack_config(atk_id)` / `config_loader.get_capability(entity_type)` / `config_loader.get_combat_stats(entity_type)` / `config_loader.get_hurt_duration_ms()` / `config_loader.get_dead_duration_ms(entity_type)`(死亡动画时长,can_die=False 返回 0)
 
-### apply_move / apply_facing 的演进路径
-当前是"目标坐标/朝向直接落地"的简化版。moving 参数驱动 state(动画状态),未来可加:
-- 服务端按 tick 推进:`new_pos = old_pos + velocity * dt`
+### apply_move_dir / tick_movement 移动模型
+当前移动模型:"记住方向 + 每 tick 持续推进":
+- 客户端发方向向量(dir_x/dir_y),服务端 apply_move_dir 只记住方向到 EntityInfo.move_dir_x/y,不推进位移
+- tick_movement 每 tick 对所有 moving=True 的实体统一按 dir * speed * TICK_INTERVAL 推进位移
+- speed 从 config_loader.get_speed(entity_type) 查配置(防作弊,不从消息读)
+- moving=false 时清零方向,只更新 state
+- **核心优势**:服务端记住方向后每 tick 都推进,不依赖客户端输入是否到达——即使某个 tick 没收到输入,服务端也会按记住的方向继续推进,无累积误差,无 snap 拉回
+
+未来可加:
 - 移动合法性校验:地图边界、穿墙、单次位移过大(防作弊)
 - 朝向更新频率限制:鼠标高频触发,服务端应做节流
-- 未来加攻击/受击时用独立的 apply_attack/apply_hurt 方法设各自的 state,和 apply_move 互不干扰
+- 实例级 speed 变化(减速/加速 buff):在 EnemyAIState 或 EntityInfo 加实例 speed 字段
 
 收口的好处:加这些逻辑只改对应方法,handler 和客户端都不用动。
 
-### speed 参数当前未使用但保留
-- proto PlayerMove 有 speed 字段,客户端会发
-- 当前服务端忽略(直接落地目标坐标)
-- 保留参数位:handler 签名和 proto 字段一一对应;后续连续移动模型时立刻可用
+### speed 从配置读取(不再从消息读)
+- proto PlayerMove 的 speed 字段已废弃(保留兼容)
+- 服务端 apply_move_dir / tick_movement 调 `config_loader.get_speed(entity_type)` 查配置
+- 速度是「类型属性」(所有玩家同速、所有史莱姆同速),防作弊且配置统一
+- 运行时若需减速/加速 buff,应该改实例级 speed 字段(目前未实现,YAGNI)
 
 ### 状态 vs 事件的区分
 - **状态**(持续存在):位置(x/y)、朝向(facing)、动画状态(state) — 存在 EntityInfo 里
@@ -116,7 +149,7 @@ ID 格式统一带类型前缀:`player:uuid-xxx` / `entity:stake_1`。
   - moving 是 PlayerMove 的事件属性:客户端告诉服务端是否正在移动(瞬时输入),不直接声明 state
 - proto 里 EntityInfo 没有 speed、PlayerMove 有 speed,正好对应这个区分
 - facing 是状态(存在 EntityInfo),PlayerFacing 是事件(瞬时朝向变更),对应 apply_facing 只改状态里的 facing
-- 服务端 apply_move 用 moving 推 state:客户端发"我在动/没在动"(事件),服务端定"处于 run/idle"(状态),客户端不直接声明 state
+- 服务端 apply_move_dir 用 moving 推 state:客户端发"我在动/没在动"(事件),服务端定"处于 run/idle"(状态),客户端不直接声明 state
 - **碰撞形状是类型属性**(不是实例状态):由 entity_type 查 entity_config 决定,不存 EntityInfo。所有同类型实体形状相同(玩家一样大,木桩一样大)
 
 ### 刻意不做的事(防过度设计)
@@ -135,12 +168,16 @@ ID 格式统一带类型前缀:`player:uuid-xxx` / `entity:stake_1`。
 3. 能力是"白名单":没列在表里的类型默认零能力(安全的默认值)
 
 ### EntityCapability dataclass(定义在 config_loader,本文件复用)
-- `can_move: bool` — 能否移动(apply_move 校验)。玩家 True,木桩 False
+- `can_move: bool` — 能否移动(apply_move_dir 校验)。玩家 True,木桩 False
 - `can_attack: bool` — 能否发起攻击(apply_attack_start 校验)。玩家 True,木桩 False
 - `can_be_hurt: bool` — 能否被攻击命中(get_attack_hits 过滤 + apply_hurt 校验)。玩家/木桩 True,墙/水地 False
 - `can_disconnect: bool` — 是否会断连(cleanup_player 用,避免误删非玩家实体)。玩家 True,其他 False
+- `can_die: bool` — 能否进入死亡流程(apply_hurt 内 hp<=0 时判定)。player=False(暂不实现),stake=False(木桩不会死),敌人=True。can_die=False 时 hp 扣到 0 也走 hurt 分支
+- `dead_duration_ms: int` — 死亡动画时长(毫秒)。can_die=False 时为 0。DeadTimer 用此值计时,到期后 remove_entity + 广播 EntityRemove,让客户端有时间播死亡动画
 - `body_shape: str` — 碰撞形状类型(ShapeType.CIRCLE/RECT/...),由 entity_type 决定
 - `body_params: ShapeParams` — 碰撞形状参数(如 CircleParams.radius),由 entity_type 决定
+- `hit_layer: int` — 被判定层掩码(被哪些攻击命中)。player=1,enemy/stake=2
+- `attack_mask: int` — 攻击判定掩码(发起攻击时打哪些 hit_layer)。player=2(打敌人层),enemy=1(打玩家层),stake=0(不能攻击)。get_attack_hits 用 `attacker_cap.attack_mask & target_cap.hit_layer` 过滤,玩家和敌人可复用同一 atk_id 各打各阵营
 
 ### 配置数据来源
 本文件不硬编码配置,转调 `config_loader.get_capability(entity_type)`,实际数据从 `shared_config/entity_config.json` 加载(由 sync_config.py 同步到 server/config/)。
@@ -195,29 +232,38 @@ timer_mgr.py 只管"到时间调回调",不依赖 GameRoom——保持 GameRoom 
 - 用途:hurt 硬直计时,到期调 apply_hurt_end 设 state="idle" + 广播 HurtEnd
 - 连击场景:被命中者已在 hurt 时再被命中,start_hurt 会 cancel 旧 HurtTimer 启新的(实现"重置硬直"+ 客户端重启动画)
 
+### DeadTimer(单次死亡)
+- 生命周期:`start() → await duration → 调 end_cb`(单段 await,结构和 HurtTimer 一样)
+- `cancel()` 任意时刻可取消,end_cb 不触发
+- 用途:死亡动画计时,到期调 remove_entity + 广播 EntityRemove(由调用方在 end_cb 闭包里绑定)
+- 和 HurtTimer 保持独立类而非复用:语义不同(HurtTimer 恢复 idle / DeadTimer 移除实体),未来死亡流程可能加逻辑(如死亡时还能被推动),届时只改 DeadTimer 不影响 hurt 逻辑
+- 同时只会有一个 dead timer(死亡期间不会再死)
+
 ### TimerManager(按 player_id 管理)
 - `start_attack(pid, hit_time, duration, hit_cb, end_cb)` 启动一次攻击定时器
-- `cancel(player_id)` — **只取消该玩家的 attack timers,不取消 hurt timers**(命名提醒:方法名是 cancel 但范围限定 attack)。cleanup_player 时调用,防对已删除玩家操作状态
-- `start_hurt(pid, duration, end_cb)` 启动一次 hurt 定时器。内部先 cancel 该玩家的 attack timers(攻击被中断)+ cancel 旧 hurt timer(连击重置),再启新 hurt timer
+- `cancel(player_id)` — **取消该玩家的所有定时器:attack + hurt + dead**。cleanup_player 时调用,防对已删除玩家操作状态(断连清理需全覆盖,避免任意一种定时器到期对已删除实体操作状态)
+- `start_hurt(pid, duration, end_cb)` 启动一次 hurt 定时器。内部先 cancel 该玩家的 attack timers(攻击被中断)+ cancel 旧 hurt timer(连击重置),再启新 hurt timer。不 cancel dead(硬直期间不会被死亡打断——死亡实体不会走 hurt 分支)
+- `start_dead(pid, duration, end_cb)` 启动一次死亡定时器。**死亡打断一切**:内部先 cancel 该玩家的 attack + hurt timers(死亡是最高优先级终态,攻击判定帧/结束广播和 hurt 恢复都不该再触发),再启 DeadTimer。duration 从 `config_loader.get_dead_duration_ms(entity_type)` 取
 - `has_active(player_id)` 判断是否在攻击中
-- attack timers 用 List(为连击/多段攻击留接口),hurt timers 用单个(同时只会有一个 hurt)
+- attack timers 用 List(为连击/多段攻击留接口),hurt/dead timers 各用单个(同时只会有一个 hurt / 一个 dead)
 
 ### 协作关系
 ```
-GameServer._process_tick
-    ↓ pending 里有 attackstart
-    ↓ (TODO) 调 TimerManager.start_attack(pid, hit_time, duration, hit_cb, end_cb)
+room.trigger_attack(attacker_id, atk_id)   ← 玩家 pending / 敌人 AI 都调这个
+    ↓ 转调 attack_trigger 钩子 (GameServer._trigger_attack)
+    ↓ apply_attack_start 改状态 + 广播 AttackStart
+    ↓ 遍历 shape_list 调 TimerManager.start_attack(pid, hit_time, duration, hit_cb, end_cb)
     ↓ AttackTimer 启动 asyncio.Task
-await hit_time → hit_cb (apply_attack_hit + broadcast AttackHit)
-await duration-hit_time → end_cb (apply_set_state idle + broadcast AttackEnd)
+await hit_time → hit_cb (get_attack_hits + apply_hurt + 广播 AttackHit/HpChanged)
+await duration-hit_time → end_cb (apply_attack_end + 广播 AttackEnd)
 
-玩家断连 → cleanup_player → (TODO) TimerManager.cancel(pid)
+玩家断连 → cleanup_player → TimerManager.cancel(pid)
 ```
 
 ### 当前状态
-- AttackTimer + TimerManager 已实现,冒烟测试通过(正常流程/取消/取消后 hit 已触发三种情况)
-- GameServer 还未接入 TimerManager:_process_tick 里直接调 apply_attack,没启动定时器
-- cleanup_player 还未调 TimerManager.cancel——下一步接入时补
+- AttackTimer + TimerManager 已实现并接入 `_trigger_attack`(注册为 GameRoom 的 `attack_trigger` 钩子)
+- 玩家(经 pending_inputs→_process_tick)和敌人(AI 状态机直接调 `room.trigger_attack`)走同一条完整攻击流程
+- cleanup_player 已调 TimerManager.cancel(取消该实体所有 attack/hurt/dead 定时器)
 
 ## collision.py — 纯几何碰撞判定
 
@@ -279,11 +325,17 @@ hurt 定时器到期
 ### 当前状态
 - collision.py 已实现:Circle/Sector 形状 + 三个相交判定函数 + 内部辅助函数,冒烟测试通过
 - GameRoom.get_attack_hits 已实现并接入:统一遍历 _entities,用能力过滤,每个目标查 entity_config 取 body_params 构造 Circle
-- 冒烟测试通过:A 攻击命中 entity:stake_1(80,0);apply_hurt 设 stake state='hurt' 成功;木桩 apply_move 被能力配置拒绝
+- 冒烟测试通过:A 攻击命中 entity:stake_1(80,0);apply_hurt 设 stake state='hurt' 成功;木桩 apply_move_dir 被能力配置拒绝
 
-## 当前是"混合模型"不是纯快照
-理想服务器权威快照:发 PlayerMove → 服务端改状态 → 广播 GameState 快照 → 客户端整体替换。
-当前实现是"事件转发":服务端收到 PlayerMove 后既更新状态又原样转发 PlayerMove 给所有人。
+## 当前是"记住方向 + 持续推进"移动模型
+移动模型演进:坐标落地 → 收到输入才推进 → 记住方向 + 每 tick 持续推进:
+- 客户端发 PlayerMove{dir_x, dir_y, moving}(C2S 语义,只发"改方向"指令,低频)
+- 服务端 apply_move_dir 只记住方向到 EntityInfo.move_dir_x/y,不推进位移
+- 服务端 tick_movement 每 tick 对所有 moving=True 的实体统一推进 EntityInfo.x/y
+- 服务端广播 PlayerMove{x, y, moving}(S2C 语义,发算出的坐标)
+- 客户端本地预测 position += dir * speed * delta,收到服务端广播后软对账(回溯 RTT 前预测位置,误差大才 lerp 平滑回正)
+
+核心优势:服务端记住方向后每 tick 都推进,不依赖客户端输入是否到达——无累积误差,无 snap 拉回。
 后续可演进为纯快照:把 `broadcast("PlayerMove", ...)` 换成 `broadcast("GameState", room.snapshot())`,GameRoom 不用改。
 
 ## 依赖关系
@@ -299,14 +351,19 @@ hurt 定时器到期
 - **entity_config.py 已建立**:EntityCapability 能力配置表,apply_xxx 方法先查能力再改状态
 - **ID 统一加前缀**:player:uuid-xxx / entity:stake_1
 - GameRoom 功能完整:实体加入/离开/移动/朝向状态管理已实现,所有方法带能力校验
-- **hurt 硬直已实现**:apply_move/apply_facing/apply_attack_start 在 state=="hurt" 时拒绝输入;apply_hurt_end 恢复 idle;config_loader.get_hurt_duration_ms()=666ms
+- **服务端权威移动已实现**:apply_move_dir 只记住方向(不推进位移)+ tick_movement 每 tick 持续推进所有 moving=True 实体的位移;EntityInfo 加 move_dir_x/y 字段;PlayerMove 协议改为双向语义(C2S 发方向,S2C 发坐标);解决了"丢 tick → 误差累积 → snap 拉回"问题
+- **hurt 硬直已实现**:apply_move_dir/apply_facing/apply_attack_start 在 state=="hurt" 时拒绝输入;apply_hurt_end 恢复 idle;config_loader.get_hurt_duration_ms()=666ms
+- **击退已实现**:AttackShape 加 knockback_distance 配置(1001/1002 最后一段=80px);GameRoom 加 `_knockbacks` 击退表 + apply_knockback(方向=目标-攻击者,时长=hurt 时长,速度=距离/时长);tick_movement 先推进击退(不受输入锁定影响);web_server.hit_cb 只对连段最后一段且 knockback_distance>0 触发,死亡不击退;remove_entity 连带清理击退状态
+- **死亡流程已实现**:apply_hurt 返回 HurtResult(FAILED/HURT/DEAD),hp<=0 且 can_die=True 走死亡分支;apply_dead 设 state="dead";_is_input_locked 统一校验 hurt/dead/attacking 锁定状态;get_attack_hits 过滤 state=="dead" 实体;DeadTimer + TimerManager.start_dead 实现延迟移除;config_loader 加 can_die/dead_duration_ms 字段 + get_dead_duration_ms() API
 - 攻击状态三件套已实现:apply_attack_start/apply_attack_end/apply_hurt(原 apply_attack_hurt 改名,统一处理玩家和木桩)
+- **trigger_attack 攻击发动钩子已实现**:GameRoom 持有 `_attack_trigger` 回调(由 GameServer._trigger_attack 注册),玩家和敌人都调 `room.trigger_attack()` 走完整流程(状态变更+广播+判定帧定时器+命中扣血),修复敌人 AI 直接调 apply_attack_start 导致"只改状态不发动"的问题
 - 攻击命中判定已接入:get_attack_hits 遍历 _entities,用 can_be_hurt 过滤,每个目标查 entity_config 取 body_params 构造 Circle
+- **阵营掩码改用实体 attack_mask**:原 attack_config 的 hit_mask 字段移除(它挂在攻击上,导致敌人复用 1001 只能打敌人)。改用实体类型的 attack_mask(玩家=2 打敌人层,敌人=1 打玩家层),玩家和敌人可复用同一 atk_id 各打各阵营,get_attack_hits 用 `attacker_cap.attack_mask & target_cap.hit_layer` 过滤
 - **配置已迁移到 JSON 单数据源**:ATTACK_CONFIG / ENTITY_CAPABILITIES / HURT_DURATION_MS 改为读 shared_config/*.json(由 sync_config.py 同步)
 - **EntityInfo.radius 字段已删除**:碰撞形状改由 entity_type 查 entity_config.body_shape/body_params 决定(形状是类型属性)
 - **ShapeType 改名**:原 AttackShapeType → ShapeType,实体碰撞和攻击形状共用
 - handlers 已从 web_server.py 拆分,按功能分文件,PlayerJoin 用 EntityInfo dataclass
 - main.py 启动时硬编码注册 entity:stake_1 木桩(位置和客户端场景一致)
-- **timer_mgr.py 已实现 AttackTimer + HurtTimer + TimerManager**:attack 三段定时器 + hurt 单段定时器,start_hurt 内部 cancel 旧 attack(攻击被中断)+ 旧 hurt(连击重置)
+- **timer_mgr.py 已实现 AttackTimer + HurtTimer + DeadTimer + TimerManager**:attack 三段定时器 + hurt 单段定时器 + dead 单段定时器,start_hurt 内部 cancel 旧 attack(攻击被中断)+ 旧 hurt(连击重置);start_dead 内部 cancel 旧 attack + hurt(死亡打断一切);cancel(player_id) 取消该玩家所有 attack/hurt/dead 定时器
 - collision.py 已实现:Circle/Sector 形状 + 相交判定函数,冒烟测试通过
-- 冒烟测试通过:A 攻击命中 entity:stake_1;apply_hurt 设 stake state='hurt';木桩 apply_move 被能力配置拒绝
+- 冒烟测试通过:A 攻击命中 entity:stake_1;apply_hurt 设 stake state='hurt';木桩 apply_move_dir 被能力配置拒绝

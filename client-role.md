@@ -18,11 +18,12 @@
 | [role/input/InputIntentProvider.gd](file:///d:/work2/godot_demo/client/Script/role/input/InputIntentProvider.gd) | autoload 全局 Provider(Node),每帧采集+暴露 get_intent() |
 | [statemachine/StateBase.gd](file:///d:/work2/godot_demo/client/Script/statemachine/StateBase.gd) | 状态基类(extends RefCounted,纯逻辑),machine/state_name 引用 + _enter_state/_exit_state/_process 虚方法 |
 | [statemachine/StateMachineBase.gd](file:///d:/work2/godot_demo/client/Script/statemachine/StateMachineBase.gd) | 状态机基类(extends Node,可 add_child + 自动 _process),add_state/change_state/get_state/get_current_state_name |
-| [statemachine/AnimState/AnimStateMachine.gd](file:///d:/work2/godot_demo/client/Script/statemachine/AnimState/AnimStateMachine.gd) | 动画状态机(extends StateMachineBase),Role 平级组件,注册 Idle/Run/Attack/Hurt 状态,update_state 转发服务端 state |
+| [statemachine/AnimState/AnimStateMachine.gd](file:///d:/work2/godot_demo/client/Script/statemachine/AnimState/AnimStateMachine.gd) | 动画状态机(extends StateMachineBase),Role 平级组件,注册 Idle/Run/Attack/Hurt/Dead 状态,update_state 转发服务端 state |
 | [statemachine/AnimState/IdleState.gd](file:///d:/work2/godot_demo/client/Script/statemachine/AnimState/IdleState.gd) | 静止状态(extends StateBase),_enter_state 调 visual.play_anim("idle") |
 | [statemachine/AnimState/RunState.gd](file:///d:/work2/godot_demo/client/Script/statemachine/AnimState/RunState.gd) | 移动状态(extends StateBase),_enter_state 调 visual.play_anim("run") |
 | [statemachine/AnimState/AttackState.gd](file:///d:/work2/godot_demo/client/Script/statemachine/AnimState/AttackState.gd) | 攻击状态(extends StateBase),_enter_state 调 visual.play_anim("attack") |
 | [statemachine/AnimState/HurtState.gd](file:///d:/work2/godot_demo/client/Script/statemachine/AnimState/HurtState.gd) | 受击状态(extends StateBase),_enter_state 调 visual.play_anim("hurt"),_reenter_state 调 visual.replay_cur_anim() 处理连击重启 |
+| [statemachine/AnimState/DeadState.gd](file:///d:/work2/godot_demo/client/Script/statemachine/AnimState/DeadState.gd) | 死亡状态(extends StateBase),_enter_state 调 visual.play_anim("dead") 播死亡动画,播完不切回(等 EntityRemove 消息来 queue_free) |
 | [dead_man_scene.gd](file:///d:/work2/godot_demo/client/Script/dead_man_scene.gd) | 木桩场景(Node2D),接 StateMirror 信号管理所有实体(玩家+木桩)的 Role 创建/更新/删除 |
 | [prefab/role/Role.tscn](file:///d:/work2/godot_demo/client/prefab/role/Role.tscn) | Role 预制体(当前空 Node,实际用脚本 new()) |
 | [prefab/role/PlayerVisual.tscn](file:///d:/work2/godot_demo/client/prefab/role/PlayerVisual.tscn) | PlayerVisual 预制体(Body + FacingArrow + NameLabel,静态视觉配置) |
@@ -79,9 +80,57 @@ Role 本身只是"位置容器":有坐标、能挂子节点。它不知道自己
 
 ### on_entity_updated(info: ClientEntityInfo)
 收到 StateMirror 的 `entity_updated` 信号时调(Role 自己不改状态——永远由 StateMirror 信号驱动,这是服务器权威在客户端的最终体现):
-- 坐标:调 `_update_position(info)`(读 `info.x` / `info.y`)
+- 坐标:调 `_update_position(info)` — **只更新 target_pos,不直接改 position**(见下方"位置同步")
 - 朝向:转发 `info.facing` 给 `PlayerVisual.update_facing`
 - 动画状态:`info.state` 非空则转发给 `AnimStateMachine.update_state`(木桩没挂状态机时跳过)
+
+### 位置同步(服务端权威,本地预测+软对账 / 远程 lerp)
+本地玩家与远程实体共用 `target_pos`(服务端权威位置),但表现策略不同:
+
+- **本地玩家**:半预测 + 软对账
+  - LocalPlayerController 发方向后立即本地预测推进(`position += dir * speed * delta`)
+  - Role._process 每帧把预测位置记入 `_pred_history`(预测轨迹,窗口 1000ms)
+  - 收到服务端广播时,`_reconcile_prediction` 回溯 RTT 前(`now - RTT`)的预测位置,
+    与服务端权威 `target_pos` 比较:
+    - 误差 ≤ 15px:预测正确,忽略(不回正 → 不拉扯)
+    - 误差 > 15px:真脱节(服务端因碰撞/attacking 锁定没推进),`position.lerp(target_pos, 0.35)` 平滑回正 + 清空历史
+  - 效果:位置由本地方向自推进,无"追-停"顿挫、无 RTT 输入滞后;服务端坐标只做校验
+
+- **硬直(hurt)期间(含击退)**:本地玩家停止预测,改为 lerp 跟随服务端位置
+  - 硬直中 LocalPlayerController 已因 state=="hurt" 停预测,若仍靠软对账,
+    单 tick 击退位移(~3px)小于 15px 阈值不会触发回正 → 本地玩家视觉上不会被推走
+  - Role 缓存 `_state`(on_entity_updated 更新),`_process` 里 `_state=="hurt"` 时
+    `position = position.lerp(target_pos, delta*LERP_FACTOR)`(和远程一样跟随),
+    `_update_position` 跳过软对账、`_record_prediction` 停止
+  - 硬直结束(HurtEnd → state="idle")后恢复预测,此时 position 已跟上服务端,衔接平滑
+
+- **远程实体(敌人/其他玩家)**:插值模式
+  - 服务端 30Hz 给出 target_pos,客户端 60Hz lerp 向它平滑过渡
+  - `position = position.lerp(target_pos, min(delta * LERP_FACTOR, 1.0))`
+  - LERP_FACTOR=15.0 → 60fps 时 alpha≈0.25,约 4 帧(66ms)追上目标点,视觉平滑无卡顿
+  - min 截断到 1.0:防止低帧率时 delta 过大导致 alpha>1(overshoot)
+
+- **首次定位**:直接 snap position = target_pos(避免新 Role 从 (0,0) lerp 飞到目标位置)
+  - 用 `_position_initialized` 标记,只在首次 _update_position 时 snap
+
+> 方案演进(本地玩家位置同步,踩过的坑):
+> | 方案 | 问题 |
+> |------|------|
+> | 指数 lerp | 追赶匀速目标有稳定滞后 → "被往前拖";松键停止滑行 → "脚滑" |
+> | 纯 snap(position=target_pos) | 30Hz 广播每 33ms 跳 10px → 步进抖动 |
+> | 限速线性追赶(speed×1.2) | 追到位→停等→等广播;30Hz 广播到达不均匀(局域网 tick 也有 10-20ms 抖动)→ 本地玩家"走走停停"顿挫;方向切换追着旧方向坐标滑一段再折回 → 回跳 |
+> | 预测+软对账(当前) | ✅ 本地方向自推进无停等;服务端坐标只做校验,误差>15px 才 lerp 平滑回正 |
+
+新增字段/常量:
+- `target_pos: Vector2` — 服务端权威位置(从 entity_updated 信号拿到,只读)
+- `_is_local: bool` — 是否本地玩家(setup 时判断,决定预测对账还是 lerp)
+- `_state: String` — 最近一次从服务端同步到的动画状态(缓存,hurt 硬直判断用)
+- `_position_initialized: bool` — 位置是否已初始化(首次直接 snap)
+- `_pred_history: Array` — 本地预测轨迹历史(条目 [time_ms, x, y]),供软对账回溯
+- `PRED_HISTORY_WINDOW_MS = 1000` / `PRED_HISTORY_MAX_ENTRIES = 200` — 轨迹窗口/上限
+- `RECONCILE_THRESHOLD = 15.0` — 软对账阈值(需盖住 RTT 偏差引起的回溯偏移,speed×偏差≈9px)
+- `RECONCILE_LERP = 0.35` — 回正插值系数(平滑回正,不硬跳)
+- `LERP_FACTOR = 15.0` — 远程实体 lerp 因子系数
 
 ## PlayerVisual.gd — 视觉组件
 
@@ -151,9 +200,10 @@ PlayerVisual 的 AnimatedSprite2D 播放对应动画
 ```
 
 ### _ready
-- 调 `_register_states()` 注册所有状态:`add_state("idle", IdleState.new())` + `add_state("run", RunState.new())` + `add_state("attack", AttackState.new())` + `add_state("hurt", HurtState.new())`
+- 调 `_register_states()` 注册所有状态:`add_state("idle", IdleState.new())` + `add_state("run", RunState.new())` + `add_state("attack", AttackState.new())` + `add_state("hurt", HurtState.new())` + `add_state("dead", DeadState.new())`
 - 进入初始状态 "idle"(玩家默认静止)
 - 时机保证:Role.setup 先 add PlayerVisual 再 add AnimStateMachine,子节点 `_ready` 按添加顺序触发,PlayerVisual 先于 AnimStateMachine,所以状态机 `_ready` 进入 idle 调 `play_anim` 时 visual 已就绪
+- "dead" 状态对应服务端 apply_hurt 判定 hp<=0 且 can_die=True 时设的 state;DeadState 播死亡动画后不切回,等 EntityRemove 消息来才 queue_free(详见下方 DeadState.gd 说明)
 
 ### update_state(state_name)
 由 Role.on_entity_updated 调用,转发服务端 EntityInfo.state 字段。内部调 `change_state`(带校验:不存在状态告警,相同状态不重复进入)。
@@ -168,6 +218,15 @@ PlayerVisual 的 AnimatedSprite2D 播放对应动画
 - **StateMachineBase**(extends Node):状态机基类,可 add_child 到宿主、自动 `_process` 驱动当前状态。管状态表(`_states: Dictionary`)、当前状态、切换(`change_state` 带校验)、查询(`get_state`/`get_current_state_name`)。状态机只负责「怎么切」,不决策「什么时候切」(切换由 Role 转发服务端 state 触发)。
 - **change_state 的重入机制**:`change_state` 检测到"目标状态=当前状态"时调 `_reenter_state`(基类默认空实现,等价于之前的 return)。HurtState override `_reenter_state` 调 `visual.replay_cur_anim()` 重启动画——处理连击场景(服务端 hurt timer 被 cancel+restart 不重发 state="hurt",但客户端会再收到一次 AttackHit,触发 change_state("hurt") 进入重入分支)。其他状态(Idle/Run/Attack)不 override,相同状态调用时等价于之前的行为。
 - 旧版基类 extends Object,无法 add_child、无法自动 _process、用 state.name 当 key 会报错(Object 无 name 属性),已废弃。
+
+## DeadState.gd — 死亡状态
+
+`extends StateBase`, `class_name DeadState`。实体 hp 扣到 0 且 can_die=True 时进入(由服务端 apply_hurt 判定后广播 EntityDead,StateMirror 设 state="dead" 触发)。
+
+- `_enter_state` 调 `visual.play_anim("dead")` 播放死亡动画
+- **播完不切回 idle**:死亡是终态,等 EntityRemove 消息来才 queue_free 移除节点(服务端 DeadTimer 到期后广播 EntityRemove)
+- 不实现 `_reenter_state`:死亡不会"重复死亡"(服务端 get_attack_hits 已过滤 state=="dead" 的实体,不会再被命中)
+- 和 HurtState 的区别:HurtState 硬直结束(服务端 HurtTimer 到期)→ state="idle" → 切回 IdleState;DeadState 死亡动画播完不动 → 等 EntityRemove → queue_free
 
 ## input/ — 输入端模块
 
@@ -223,14 +282,16 @@ PlayerVisual 的 AnimatedSprite2D 播放对应动画
 
 `extends Node`, `class_name LocalPlayerController`。**接收端**——只读 InputIntentProvider.get_intent()。
 
-### 核心设计(服务器权威 + 输入端解耦)
+### 核心设计(服务器权威 + 输入端解耦 + 本地预测)
 本地玩家想移动/转朝向/攻击,流程:
 1. 读 intent(intent.move_dir + intent.look_target + intent.attack_pressed)
-2. 发 PlayerMove(从 move_dir 算 target)/ PlayerFacing(从 look_target 算 facing)/ AttackStart(攻击键按下时)
-3. 服务端 apply_move / apply_facing / apply_attack_start 更新权威状态,广播给所有人(含自己)
-4. StateMirror 收到 → `entity_updated` 信号 → Role.on_entity_updated → 更新坐标 + 转发 facing 给 PlayerVisual + 转发 state 给 AnimStateMachine
+2. 发 PlayerMove(发方向向量 dir_x/dir_y,不发目标坐标)/ PlayerFacing(从 look_target 算 facing)/ AttackStart(攻击键按下时)
+3. **本地预测**:发完方向后立即 `position += dir * speed * delta` 推进自己(不等服务端回传,消除延迟感)
+4. 服务端 apply_move_dir 只记住方向(不推进位移),tick_movement 每 tick 持续推进;apply_facing / apply_attack_start 更新权威状态,广播给所有人(含自己)
+5. StateMirror 收到 → `entity_updated` 信号 → Role.on_entity_updated → 更新 target_pos(不直接改 position)
+6. Role 软对账:收到广播回溯 RTT 前预测位置,与服务端位置误差小则忽略,大则 lerp 平滑回正(撞墙/hurt 锁定导致服务端没推进,预测跑偏了)
 
-**注意第4步**:本地玩家的坐标和朝向也是由 StateMirror 信号更新的,不是这里直接改的。保证"本地玩家看到的自己"和"服务端认为的本地玩家"永远一致。
+**为什么本地预测不违反服务器权威**:预测是临时手段,服务端回传后 Role 软对账。两端用同一个 speed(entity_config.json),服务端 tick_movement 每 tick 按 dir * speed * TICK_INTERVAL 推进,客户端每帧按 dir * speed * delta 预测,1 秒总位移一致,误差很小。只有服务端拒绝了移动(如 hurt/attacking/撞墙)时,误差超过阈值才平滑回正(lerp,不是硬 snap)。
 
 ### 攻击流程
 1. 检查 `mirror.get_entity(mirror.local_entity_id()).state`,若已是 `"attacking"` 则跳过(防连点)
@@ -243,16 +304,23 @@ PlayerVisual 的 AnimatedSprite2D 播放对应动画
 > 字段访问:从 dict 索引 `player["state"]` 改为强类型属性 `player.state`,IDE 可补全、拼错编译期报错。
 
 ### 朝向和移动是两个独立状态维度
-玩家可以一边移动(WASD 决定方向)一边朝任意方向攻击(鼠标决定朝向)。所以 PlayerMove 和 PlayerFacing 是两条独立的消息流,各自发各自的。攻击期间(state=="attacking")两者都禁发。
+玩家可以一边移动(WASD 决定方向)一边朝任意方向攻击(鼠标决定朝向)。所以 PlayerMove 和 PlayerFacing 是两条独立的消息流,各自发各自的。**输入锁定状态(attacking/hurt/dead)期间两者都禁发,也不做本地预测推进**(和服务端 `_INPUT_LOCKED_STATES` 对齐)。hurt 期间不锁会导致客户端预测跑偏而服务端不动,软对账每次 lerp 拉一点 → "被打一次拉回一点"。
 
-### 移动模型:方向移动 → target 坐标
-- 当前 proto 的 PlayerMove 是「目标坐标」(target x/y),不是「方向」
-- 键盘方向移动转换:target = 当前位置 + move_dir * MOVE_STEP(每帧 5 像素)
+### 移动模型:方向向量 + 本地预测(服务端权威移动)
+- 客户端只发方向向量(dir_x/dir_y),不发目标坐标
+- 键盘方向(Input.get_vector 已归一化)直接作为 dir_x/dir_y 发出
+- 发完后立即本地预测:`get_parent().position += move_dir * speed * delta`(speed 来自 ConfigLoader.get_speed("player"))
 - 只有 move_dir 非零时才发包(避免静止时无意义发包)
 - `moving` 字段状态机:
-  - 正在移动:每帧发 moving=true,服务端设 state="run"
+  - 正在移动:每帧发 moving=true + 方向,服务端设 state="run"
   - 刚停止(`_was_moving` true → false):发一次 moving=false,服务端设 state="idle"
   - 持续静止:不发(避免无意义发包)
+
+为什么改成方向 + 预测(旧模型的问题):
+- 旧:客户端发目标坐标 → 服务端直接落地 → 广播
+  问题:客户端 60Hz 发,服务端 30Hz tick 节流丢半,真实速度腰斩,每 tick 被拉回
+- 新:客户端发方向 + 本地预测 → 服务端按方向推进 → 广播 → 客户端对账
+  两端用同一个 speed,位移速度一致,无拉回
 
 ### 朝向模型:鼠标位置 → facing 弧度
 - look_target(世界坐标) - role_pos 得到方向向量
@@ -305,6 +373,7 @@ DeadManScene.tscn 里有个 E_Back 按钮用于返回 MainScene。Role 实例用
 
 ## 当前状态
 - 统一 Entity 模型 + 强类型 ClientEntityInfo 重构完成:Role 按 EntityType 枚举分发,玩家/木桩统一在 `_entities` 表管理,字段访问全用强类型属性
+- **服务端权威移动 + 本地预测软对账已实现**:LocalPlayerController 发方向(dir_x/dir_y)+ 本地预测(position += dir * speed * delta);Role 记预测轨迹 + 软对账(回溯 RTT 前预测位置,误差>15px 才 lerp 平滑回正)/ 远程 lerp 插值(30Hz→60Hz 平滑);服务端 apply_move_dir 只记方向 + tick_movement 每 tick 持续推进,解决"丢 tick → 误差累积 → 拉回"问题;本地玩家不再"限速追赶"(那会追到位→停等→广播抖动顿挫)
 - 玩家同步闭环已跑通:两个客户端能互相看到对方移动+朝向(本地蓝箭头/远程棕箭头)
 - 攻击流程已实现:LocalPlayerController 发 AttackStart,StateMirror 处理 AttackHit/AttackEnd,AnimStateMachine 支持 attack/hurt 状态
 - **hurt 硬直已实现**:StateMirror 处理 AttackHit(进 hurt)+ HurtEnd(恢复 idle),纯服务端权威恢复(路径X);AnimStateMachine 的 change_state 加 `_reenter_state` 重入机制,HurtState override 后调 replay_cur_anim() 实现连击重启动画;StateBase 加 `_reenter_state` 虚方法(基类默认空)

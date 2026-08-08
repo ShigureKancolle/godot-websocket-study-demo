@@ -60,9 +60,9 @@ shared_config/                  ← 单数据源(只在这里改)
 | `SectorParams` | 扇形参数(radius / angle 弧度) |
 | `CircleParams` | 圆形参数(radius) |
 | `RectParams` | 矩形参数(width / height,未来扩展) |
-| `AttackShape` | 单个攻击形状(shape / shape_params / duration / hit_time) |
+| `AttackShape` | 单个攻击形状(shape / shape_params / duration / hit_time / damage_multiplier)。原 hit_mask 字段已移除,命中层级改由实体 attack_mask 决定。JSON 里的 `knockback_distance`(击退距离)是服务端专用,客户端 ConfigLoader 不读忽略 |
 | `AttackConfig` | 攻击配置(shape_list 数组) |
-| `EntityCapability` | 实体能力 + 碰撞形状 + 基础战斗属性(can_move/can_attack/can_be_hurt/can_disconnect + body_shape/body_params + combat_stats) |
+| `EntityCapability` | 实体能力 + 碰撞形状 + 基础战斗属性(can_move/can_attack/can_be_hurt/can_disconnect + body_shape/body_params + hit_layer/attack_mask + combat_stats) |
 | `CombatStats` | 类型级基础战斗属性(max_hp/attack_power/defense);EntityInfo 初始化时拷贝一份作实例运行时状态 |
 ### const 常量
 | 常量 | 值 |

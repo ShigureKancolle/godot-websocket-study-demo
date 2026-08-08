@@ -46,7 +46,8 @@
 - `_sender_loop()` — 独立协程,从 _send_queue 取消息调 broadcast 发出。和 _tick_loop 并行
 - `add_pending_input(entity_id, action, data)` — 存入 pending,等 tick 处理(同一 tick 内同动作覆盖=节流)
 - `_tick_loop()` — asyncio task,启动 _sender_loop + 每 TICK_INTERVAL 秒调 _process_tick,退出时 cancel sender
-- `_process_tick()` — 取出 pending → apply_move/apply_facing/apply_attack_start → _queue_broadcast 塞队列(不 await,立即返回)
+- `_process_tick()` — 取出 pending → apply_move_dir(只记方向)/apply_facing/room.trigger_attack(attackstart) → 木桩回血 → 敌人 AI tick → **tick_movement 持续推进所有 moving=True 实体位移** → 收集广播 → _queue_broadcast 塞队列
+- `_trigger_attack(attacker_id, atk_id)` — 完整攻击发动流程(注册给 GameRoom 作为 `attack_trigger` 钩子,由 `room.trigger_attack` 转调)。apply_attack_start 改状态 → 广播 AttackStart → 遍历 shape_list 注册 AttackTimer(hit_cb/end_cb)。**玩家(经 pending)和敌人(AI 直接调)走同一条路**,避免敌人 AI 直接调 apply_attack_start 导致"只改状态不发动"
 - `cleanup_player(player_id)` — 断连清理:删连接表 + timer_mgr.cancel + room.remove_entity + _queue_broadcast(PlayerLeave)
 - `start()` — create_task(_tick_loop) + websockets.serve 启动
 - `stop()` — 取消 tick_task(tick 的 finally 会连带 cancel sender_task)
@@ -63,6 +64,8 @@
 理由:配置属 game 层(被 GameRoom.get_attack_hits 读取),不属于 net 层。web_server.py 通过 `game_room.ATTACK_CONFIG` 引用。
 
 ### hit_cb / end_cb / hurt_end_cb 攻击+受击定时器回调
+> hit_cb / end_cb 定义在 `_trigger_attack` 里(不再内联在 _process_tick),随 AttackTimer 注册;hurt_end_cb 由 `get_hurt_end_callback` 闭包工厂生成。玩家和敌人的攻击都经 _trigger_attack 注册这些回调。
+
 判定帧触发时(hit_cb):
 1. 调 `room.get_attack_hits(shape, attacker_id)` 取命中列表(统一 Entity 模型:可能含玩家和木桩)
 2. 遍历命中列表逐个调 `room.apply_hurt(hurt_id, atk_id)` 设被命中者 state="hurt"
@@ -84,10 +87,21 @@ hurt 硬直到期触发时(hurt_end_cb,由 `get_hurt_end_callback` 闭包工厂�
 > 三个回调都走 `_queue_broadcast` 而非 `await broadcast`:timer 回调虽然是独立协程,但若直接 await broadcast 仍会被 I/O 阻塞,导致回调链堆积。走队列后回调立即返回,timer 节奏也不受网络影响。
 
 ### apply_xxx 返回值检查(避免状态矛盾)
-`_process_tick` 里三个输入(move/facing/attackstart)调 apply_xxx 后**只有返回 True 才广播**:
-- apply_move / apply_facing / apply_attack_start 可能因 hurt 硬直 / 能力不足返回 False
+`_process_tick` 里 move/facing 输入调 apply_xxx 后**只有返回 True 才标记广播**;attackstart 输入调 `room.trigger_attack`(内部调 apply_attack_start,失败直接返回 False,不广播也不启定时器):
+- apply_move_dir / apply_facing / apply_attack_start 可能因 hurt 硬直 / 能力不足返回 False
 - 若不检查就广播,其他客户端会收到"X 在移动/攻击"广播,但 X 实际没动(state 还是 hurt)——状态矛盾
-- AttackStart 广播也加了检查:apply_attack_start 返回 False 时不广播,也不启 hit_cb/end_cb 定时器
+- trigger_attack 内部:apply_attack_start 返回 False 时不广播 AttackStart,也不启 hit_cb/end_cb 定时器
+
+### tick_movement 持续推进(服务端权威移动核心)
+当前移动模型:"记住方向 + 每 tick 持续推进",tick 处理流程:
+1. pending 里存的是客户端发的方向向量(dir_x/dir_y/moving),不是目标坐标
+2. apply_move_dir 只记住方向到 EntityInfo.move_dir_x/y,**不推进位移**
+3. 敌人 AI tick(EnemyMgr.update)内部也调 apply_move_dir 改方向
+4. **tick_movement 每 tick 对所有 moving=True 的实体统一推进位移**:`info.x += move_dir_x * speed * dt`
+5. 从 moved_entities 集合读服务端算出的 x/y,广播 PlayerMove{x, y, moving}
+
+核心:服务端记住方向后每 tick 都推进,不依赖客户端输入是否到达——无累积误差,无 snap 拉回。
+敌人移动也走同一套:EnemyMgr.update 调 apply_move_dir 改方向,tick_movement 统一推进。
 
 ### hit_cb 闭包陷阱修复
 `for shape in config.shape_list:` 循环里定义 `async def hit_cb()`,闭包捕获 `shape` 这个循环变量。多个 shape 时所有 hit_cb 实际都会用循环结束时的最后一个 shape 值(Python 闭包经典坑)。
@@ -264,6 +278,7 @@ start_console 之前写在 web_server.py 里,但它和 WebSocket 服务逻辑无
 - **hurt 硬直已实现**:hit_cb 启 hurt 定时器(start_hurt 内部 cancel 旧 attack+旧 hurt),到期 hurt_end_cb 调 apply_hurt_end 恢复 idle + 塞队列 HurtEnd
 - **apply_xxx 返回值检查已加**:三个输入(move/facing/attackstart)只有 True 才塞队列,避免 hurt 期间广播造成状态矛盾
 - **hit_cb 闭包陷阱已修复**:用默认参数 `_shape=shape` 绑定循环变量
+- **敌人攻击已接入**:`_trigger_attack` 抽成方法并注册给 GameRoom 作为 `attack_trigger` 钩子,玩家(经 pending)和敌人(AI 状态机直接调 `room.trigger_attack`)走同一条完整攻击流程(状态变更+广播+判定帧定时器+命中扣血),修复了敌人 AI 直接调 apply_attack_start 导致"只改状态不发动"的问题
 - **AttackHit 加 hurt_duration 字段**:客户端当前不读,留作未来预演/调试
 - ATTACK_CONFIG 等攻击配置已从 web_server.py 迁回 game_room.py(配置属 game 层)
 - handler 已拆到 game/handlers/,web_server.py 只管网络层

@@ -25,7 +25,7 @@
 | `EntityInfo` | entity_id, entity_type, x, y, facing, state, radius, player_name, moving | 实体状态(统一模型,player_name/moving 是 player 特有字段,其他类型不填) |
 | `PlayerJoin` | entity_info: EntityInfo | 加入请求/通知 |
 | `PlayerLeave` | entity_id | 离开通知 |
-| `PlayerMove` | entity_id, x, y, speed, moving | 移动事件(瞬时动作,带是否在移动) |
+| `PlayerMove` | entity_id, x, y, speed, moving, dir_x, dir_y | 移动消息(双向语义,见下方说明) |
 | `PlayerFacing` | entity_id, facing | 朝向事件(瞬时动作,和 PlayerMove 平行) |
 | `AttackStart` | entity_id, atk_id | 攻击开始(C2S 发起 / S2C 广播,判定帧模型下 S2C 不带 hit_list) |
 | `AttackHit` | attacker_id, hit_list, atk_id | 攻击命中(S2C 广播,判定帧到时通知命中列表。attacker_id 保持不变,语义就是攻击者) |
@@ -33,6 +33,8 @@
 | `ChatMessage` | player_id, player_name, content, timestamp | 聊天事件(player_id 不改,聊天发送者就是玩家) |
 | `GameState` | entities: repeated EntityInfo, timestamp | 全量状态快照(含玩家+木桩等所有实体) |
 | `Heartbeat` | timestamp | 心跳保活 |
+| `EntityDead` | entity_id, attacker_id, atk_id | 实体死亡(S2C 广播,tag=15)。服务端 apply_hurt 判定 hp<=0 且 can_die=True 时广播,客户端切 DeadState 播死亡动画 |
+| `EntityRemove` | entity_id | 实体移除(S2C 广播,tag=16)。DeadTimer 到期后服务端调 remove_entity + 广播,客户端 queue_free 对应 Role |
 | `GameMessage` | oneof message_type | 通用包装器 |
 
 ### 关键区分:EntityInfo(状态) vs PlayerMove/PlayerFacing(事件)
@@ -40,11 +42,38 @@
 - EntityInfo.state 是动画状态(idle/run/attacking/hurt),是持久状态
 - EntityInfo.radius 是碰撞半径(用于攻击命中判定),不同实体类型可有不同半径
 - EntityInfo.entity_type 决定行为能力(见 server-game.md 的 entity_config.py)
-- PlayerMove 有 speed、moving — 事件带瞬时属性
-- PlayerMove.moving 是是否在移动,瞬时事件属性,服务端 apply_move 据 moving 设 EntityInfo.state
+- PlayerMove 是**双向语义**消息(同一个 proto,C2S 和 S2C 字段含义不同,见下方"PlayerMove 双向语义"章节)
+- PlayerMove.moving 两端都用:驱动动画状态 state=idle/run
 - PlayerFacing 只有 facing — 独立朝向事件,和移动互不干扰
 - 朝向和移动是两个独立状态维度——玩家可一边移动一边朝任意方向攻击
 - 这个区分对应 GameRoom 的设计:状态 vs 事件不混(详见 server-game.md)
+
+### PlayerMove 双向语义(本次重构:服务端权威移动)
+同一个 PlayerMove 消息,C2S 和 S2C 字段含义不同:
+
+| 字段 | C2S(客户端→服务端) | S2C(服务端→客户端) |
+|------|--------------------|--------------------|
+| `entity_id` | 必填 | 必填 |
+| `dir_x` / `dir_y` | 必填(方向向量,-1~1) | 不填 |
+| `moving` | 必填 | 必填 |
+| `x` / `y` | 不填 | 必填(服务端算出的坐标) |
+| `speed` | 已废弃(保留字段) | 不填 |
+
+为什么改成双向语义:
+- 旧模型:客户端发目标坐标(x/y)→ 服务端直接落地 → 广播
+  问题:客户端 60Hz 算位置,服务端 30Hz tick 节流丢半,真实速度腰斩,每 tick 被拉回
+- 新模型:客户端发方向(dir_x/dir_y)→ 服务端 apply_move_dir 记住方向 → tick_movement 每 tick 持续推进 → 广播算出的坐标
+  服务端不依赖输入是否到达(记住方向后持续推进),无累积误差,无拉回
+- `speed` 字段保留但废弃:避免删字段导致 proto 编号错乱,服务端不再读,改由 config_loader.get_speed(entity_type) 查配置
+
+### EntityDead 和 EntityRemove 的关系(死亡流程)
+死亡流程拆成两条消息,实现"立即判定死亡 + 延迟移除实体":
+- **EntityDead(tag=15)**:服务端 apply_hurt 判定 hp<=0 且 can_die=True 时**立即广播**。客户端收到后设 state="dead" + 切 DeadState 播死亡动画,但**不移除节点**。
+- **EntityRemove(tag=16)**:服务端 DeadTimer 到期后(时长 = `entity_config.get_dead_duration_ms()`)调 remove_entity + **广播**。客户端收到后 queue_free 对应 Role 节点。
+
+为什么拆两条:让客户端有时间播死亡动画。服务端"立即判定死亡"但"延迟移除实体",和 hurt 的"立即设 state + 定时器到期恢复"是同一模式。
+
+和 PlayerLeave 的区别:PlayerLeave 是断连(实体消失,无死亡动画),EntityRemove 是死亡(播完动画后移除)。
 
 ### ID 格式约定
 所有 entity_id 统一带类型前缀:
@@ -72,7 +101,7 @@ proto 只描述消息"长什么样",契约描述消息"怎么用":
 |------|-----------|----------|-----------------|------|
 | PlayerJoin | C2S | meta | true | 客户端发起,服务端处理后广播 |
 | PlayerLeave | S2C | meta | true | 服务端广播,客户端不主动发 |
-| PlayerMove | C2S | input | true | 客户端发请求,服务端 apply_move 后转发 |
+| PlayerMove | C2S | input | true | 客户端发请求,服务端 apply_move_dir 记住方向 + tick_movement 推进后转发 |
 | PlayerFacing | C2S | input | true | 客户端发朝向请求,服务端 apply_facing 后转发。和 PlayerMove 平行 |
 | AttackStart | C2S | input | true | 客户端发攻击请求(带 atk_id),服务端 apply_attack_start 后广播 |
 | AttackHit | S2C | event | true | 服务端判定帧到时调 apply_hurt 设被命中者 state=hurt 后广播命中列表 |

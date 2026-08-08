@@ -163,7 +163,7 @@ chunk 数据不存内存(TileMapLayer 已存 tile cell),`_loaded_chunks` 只记�
 未来演进路径(已和用户对齐):
 1. **阶段1(当前)**:客户端独立生成,验证 chunk 加载/卸载逻辑
 2. **阶段2**:服务器持有 seed,通过新增 MapInfo 消息(S2C/meta)下发,客户端调 `setup(seed)` 接收
-3. **阶段3**:服务端实现相同生成算法(`server/game/map_generator.py`),用于移动合法性校验(apply_move 加碰撞检查)
+3. **阶段3**:服务端实现相同生成算法(`server/game/map_generator.py`),用于移动合法性校验(apply_move_dir 加碰撞检查)
 4. **阶段4**:加水的碰撞地形(当前只有无碰撞的草/泥/沙/砖)
 
 ### 双端一致生成的关键技术约束
