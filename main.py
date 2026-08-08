@@ -37,6 +37,8 @@ import game.game_room as game_room
 import tools.console as console
 
 # 配置日志系统
+# level=INFO 会打印 logger.exception 的完整 traceback(ERROR 级别及以上)
+# format 带时间+模块名,方便定位是哪个协程出的错
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -44,7 +46,46 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _setup_asyncio_exception_handler() -> None:
+    """
+    设置 asyncio 全局异常钩子
+
+    为什么需要:
+        asyncio.create_task 创建的协程,如果抛了未被 try/except 捕获的异常,
+       默认行为是"静默吞掉"——异常被存到 Task 对象里,直到 Task 被 GC 才打一句
+        "Task exception was never retrieved" 到 stderr,而且时间已经过去很久,
+        根本看不出是哪个协程、哪一行出的错。
+
+        设了这个钩子后,任何 Task 的未捕获异常会立刻打到控制台,带完整 traceback。
+
+    覆盖范围:
+        - _tick_loop / _sender_loop / handle_client 里漏网的异常
+        - timer 回调(hit_cb / end_cb / hurt_end / dead_end)里的异常
+        - 未来新增协程的异常
+    """
+    loop = asyncio.get_event_loop()
+    default_handler = loop.get_exception_handler()
+
+    def _exception_handler(loop, context):
+        # 先打完整信息到日志(带 traceback)
+        exception = context.get("exception")
+        message = context.get("message", "未命名异常")
+        if exception is not None:
+            logger.exception(f"asyncio 未捕获异常: {message}", exc_info=exception)
+        else:
+            logger.error(f"asyncio 异常上下文: {context}")
+        # 调用默认处理器(保持 asyncio 原生行为,如 Future 的异常传递)
+        if default_handler is not None:
+            default_handler(loop, context)
+
+    loop.set_exception_handler(_exception_handler)
+
+
 async def main():
+    # 设置 asyncio 全局异常钩子(必须在事件循环开始后、create_task 之前)
+    # 这样所有协程的未捕获异常都会被打到控制台,而不是被 asyncio 静默吞掉
+    _setup_asyncio_exception_handler()
+
     # 解析命令行参数
     parser = argparse.ArgumentParser(description="WebSocket 游戏服务器")
     parser.add_argument(
@@ -86,25 +127,13 @@ async def main():
     server.room.add_entity("entity:stake_1", game_room.EntityInfo(
         entity_id="entity:stake_1",    # 会被 add_entity 强制覆盖,这里只是占位
         entity_type="stake",
-        x=350.0,
-        y=200.0,
+        x=50.0,
+        y=50.0,
         state="idle",
     ))
 
-    server.room.add_entity("entity:enemy_slime_1", game_room.EntityInfo(
-        entity_id="entity:enemy_slime_1",
-        entity_type="enemy_slime",
-        x=100.0,
-        y=150.0,
-        state="idle",
-    ))
-    server.room.add_entity("entity:enemy_skeleton_1", game_room.EntityInfo(
-        entity_id="entity:enemy_skeleton_1",
-        entity_type="enemy_skeleton",
-        x=150.0,
-        y=150.0,
-        state="idle",
-    ))
+    server.room.create_enemy("enemy_slime", (100, 150))
+    # server.room.create_enemy("enemy_skeleton", (150, 150))
 
     # 6. （可选）启动交互式控制台
     if args.console:

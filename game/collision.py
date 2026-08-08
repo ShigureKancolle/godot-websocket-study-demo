@@ -24,6 +24,7 @@
 
 from dataclasses import dataclass
 import math
+from typing import List
 
 
 # ===========================================================================
@@ -63,6 +64,70 @@ class Sector(Shape):
     radius: float = 0.0
     angle: float = 0.0
     direction: float = 0.0
+
+# 搞个简单点的向量 如果不够用 再改成Numpy
+@dataclass
+class Vector2:
+    x: float = 0.0
+    y: float = 0.0
+
+    def normalized(self) -> "Vector2":
+        """归一化向量"""
+        return self / math.hypot(self.x, self.y)
+
+    def dot(self, other: "Vector2") -> float:
+        """向量点积"""
+        return self.x * other.x + self.y * other.y
+
+    def inner_product(self, other: "Vector2") -> float:
+        """向量内积"""
+        return self.x * other.x + self.y * other.y
+
+    def angle(self, zero: tuple[float, float] | "Vector2" | List[float] = (1.0, 0.0)) -> float:
+        """返回以zero为零的向量角度"""
+        if self == Vector2(0.0, 0.0):
+            raise ValueError("向量为零,无法计算角度") 
+        if isinstance(zero, (tuple, list)) and len(zero) == 2:
+            zero_vec = Vector2(*zero)
+        elif isinstance(zero, Vector2):
+            zero_vec = zero
+        else:
+            raise TypeError("zero must be tuple, list, or Vector2")
+        angle = math.atan2(self.y, self.x) - math.atan2(zero_vec.y, zero_vec.x)
+        angle = (angle + math.pi) % (2 * math.pi) - math.pi
+        return angle
+    
+    def __mul__(self, other: float) -> "Vector2":
+        """向量缩放"""
+        return Vector2(self.x * other, self.y * other)
+
+    def __add__(self, other: "Vector2") -> "Vector2":
+        """向量加法"""
+        return Vector2(self.x + other.x, self.y + other.y)
+
+    def __sub__(self, other: "Vector2") -> "Vector2":
+        """向量减法"""
+        return Vector2(self.x - other.x, self.y - other.y)
+
+    def __truediv__(self, other: float) -> "Vector2":
+        """向量除法"""
+        return Vector2(self.x / other, self.y / other)
+
+    def __len__(self) -> float:
+        """向量长度"""
+        return math.hypot(self.x, self.y)
+
+    def __str__(self) -> str:
+        return f"({self.x:.2f}, {self.y:.2f})"
+
+    def __eq__(self, other: "Vector2") -> bool:
+        """向量相等"""
+        return self.x == other.x and self.y == other.y
+
+    def __ne__(self, other: "Vector2") -> bool:
+        """向量不相等"""
+        return not self.__eq__(other)
+    
 
 
 # ===========================================================================

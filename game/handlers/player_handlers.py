@@ -26,7 +26,7 @@ handler 通过闭包捕获 server 实例访问 room/bus/broadcast/add_pending_in
 PlayerMove / PlayerFacing / AttackStart(高频输入):存 pending,等 tick 统一处理。
     - 同一 tick 内同动作多次输入只保留最后一次(覆盖=节流)
     - 客户端 60Hz 发 → 服务端 30Hz 处理
-    - handler 不调 apply_move/apply_facing/apply_attack_start,也不调 broadcast
+    - handler 不调 apply_move_dir/apply_facing/apply_attack_start,也不调 broadcast
 
 PlayerJoin / PlayerLeave(低频事件):立即处理,不走 tick。
     - 加入/离开是即时事件,不该等 tick 增加延迟
@@ -46,11 +46,15 @@ import dataclasses
 
 # 项目模块用 `import game.xxx as xxx` 形式(热更约束+包前缀规范)
 import game.game_room as game_room
+import typing
+if typing.TYPE_CHECKING:
+    from game.game_room import GameRoom
+    from net.web_server import GameServer
 
 logger = logging.getLogger(__name__)
 
 
-def register(server) -> None:
+def register(server: "GameServer") -> None:
     """
     注册玩家相关 handler 到 server.bus
 
@@ -93,6 +97,14 @@ def register(server) -> None:
             "entity_info": dataclasses.asdict(stored)
         })
 
+        # ★ 给「新玩家」单播 MapInfo(地图种子)
+        # 必须在 GameState 之前发:让客户端先调 InfiniteTileMap.setup(seed) 初始化地图,
+        # 再创建实体。实体坐标是世界坐标,地图没初始化时实体显示位置不对(虽然不影响逻辑)。
+        # 只单播给新玩家:已在线玩家早就收到过了,重发浪费带宽。
+        await bus.send("MapInfo", {
+            "seed": server.map_seed
+        }, websocket=ctx.websocket)
+
         # 给「新玩家」发当前完整状态快照(GameState),让它知道房间里都有谁
         # snapshot 返回 List[EntityInfo],要转成 dict 列表给 message_bus
         entities_list = [dataclasses.asdict(e) for e in server.room.snapshot()]
@@ -130,19 +142,25 @@ def register(server) -> None:
 
     @bus.onproto("PlayerMove")
     async def on_player_move(data: dict, ctx):
-        """处理玩家移动——高频输入,存入 pending,等 tick 统一处理"""
+        """处理玩家移动——高频输入,存入 pending,等 tick 统一处理
+
+        新协议(C2S 发方向,不发坐标):
+            客户端不再发目标 x/y,改发方向向量 dir_x/dir_y。
+            服务端按 dir * speed * TICK_INTERVAL 推进位移,
+            避免"客户端 60Hz 算位置,服务端 30Hz 节流丢半"的拉回问题。
+            speed 不再从消息读,改由 entity_config.json 按类型查(config_loader.get_speed)。
+        """
         # 实体不在房间就忽略:可能是未加入就发移动,或已离开(网络消息乱序)
         if not server.room.has_entity(ctx.player_id):
             return
 
-        # 存入 pending,不立即 apply_move 也不立即广播
+        # 存入 pending,不立即 apply_move_dir 也不立即广播
         # tick 机制:同一 tick 内多次 PlayerMove 只保留最后一次(覆盖)
         # 这把客户端 60Hz 的输入节流到服务端 30Hz 的处理
         server.add_pending_input(ctx.player_id, "move", {
-            "x": data.get("x", 0),
-            "y": data.get("y", 0),
-            "speed": data.get("speed", 1.0),
-            "moving": data.get("moving", False),
+            "dir_x": float(data.get("dir_x", 0.0)),
+            "dir_y": float(data.get("dir_y", 0.0)),
+            "moving": bool(data.get("moving", False)),
         })
 
     @bus.onproto("PlayerFacing")

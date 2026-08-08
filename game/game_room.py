@@ -15,7 +15,7 @@
 
 这带来三个问题：
     1. 状态变更规则无统一入口，想加校验（如「移动不能穿墙」）要在多处改
-    2. 客户端为了预测，很容易把同样的 apply_move 复制一份到 GDScript，
+            room._enemy_mgr.change_state("chase", self.target_entity_id)
        导致状态逻辑双端各写一遍——这正是我们最想避免的重复
     3. 状态形状（玩家字典里有哪些字段）被 handler 隐式约定，proto 一改两边漏改
 
@@ -24,7 +24,7 @@
     handler 不再直接读写 _entities。
 
 这样客户端的对应物（ClientStateMirror）就只能是「只读镜像」——
-    它没有 apply_move 可抄，因为 apply_move 根本不存在于客户端。
+    它没有 apply_move_dir 可抄，因为 apply_move_dir 根本不存在于客户端。
     状态逻辑的重复从「难以避免」变成「结构上不可能发生」。
 
 ============================================================================
@@ -65,7 +65,7 @@ ID 格式统一带类型前缀:
         ↓
     handler (on_player_move 等)
         ↓
-    GameRoom.apply_move(...)   ← 本文件：唯一改状态的地方
+    GameRoom.apply_move_dir(...)   ← 本文件：唯一改状态的地方
         ↓
     GameRoom 内部状态变更
         ↓
@@ -79,12 +79,15 @@ import math
 import enum
 import logging
 from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 # 项目模块用 `import game.xxx as xxx` 形式(热更约束+包前缀规范)
 import game.collision as collision
 import game.entity_config as entity_config
 import config.config_loader as config_loader
+import typing
+if typing.TYPE_CHECKING:
+    import game.enemy_mgr as enemy_mgr
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +126,12 @@ class EntityInfo:
     # (形状是类型属性:所有玩家一样大,所有木桩一样大,没必要每个实例存一份)
     # player 特有字段(其他类型不填,保持默认空值)
     player_name: str = ""                   # 玩家名称(只有 player 有)
-    moving: bool = False                    # 是否正在移动(只有 player 有)
+    moving: bool = False                    # 是否正在移动(玩家+敌人都用)
+    # 当前移动方向(归一化),服务端记住方向后每 tick 持续推进位移
+    # 旧模型:apply_move_dir 收到输入才推进一次,网络丢 tick 导致误差累积 → 拉回
+    # 新模型:apply_move_dir 只记方向,tick_movement 每 tick 持续推进 → 无误差累积
+    move_dir_x: float = 0.0                 # 移动方向 X(归一化,-1~1)
+    move_dir_y: float = 0.0                 # 移动方向 Y(归一化,-1~1)
 
 @dataclass
 class CombatComponent:
@@ -132,6 +140,25 @@ class CombatComponent:
     max_hp: int = 0
     attack_power: int = 0
     defense: int = 0
+
+
+@dataclass
+class KnockbackState:
+    """
+    单个实体的击退状态(挂在 GameRoom._knockbacks 上,不进 EntityInfo)
+
+    字段语义:
+        vx/vy:  击退速度(像素/秒),方向从攻击者中心指向被击者(向外推)
+        time:   剩余击退时间(秒)。>0 表示正在被击退,由 tick_movement 每 tick 推进位移
+
+    为什么单独一张表而不进 EntityInfo:
+        和 _combats 同理——击退是「服务端瞬态战斗状态」,客户端不需要知道。
+        塞进 EntityInfo 会污染 proto 快照广播:GameState 用 asdict() 转 dict,
+        多出的字段会让 ParseDict 因未知字段报错(见 web_server 的 GameState 广播)。
+    """
+    vx: float = 0.0
+    vy: float = 0.0
+    time: float = 0.0
 
 
 
@@ -158,10 +185,10 @@ class GameRoom:
          - 天然保证 entity_id 唯一（dict key 不可重复）
          - snapshot() 时再转成 list，匹配 proto 里 repeated EntityInfo 的形状
 
-    2. 状态变更只通过本类方法（add_entity / apply_move / apply_facing 等）：
+    2. 状态变更只通过本类方法（add_entity / apply_move_dir / apply_facing 等）：
          - 不允许外部直接 room._entities[eid].x = ...
          - 所有状态变更都在这里被看到，未来加校验/日志/回放只需改一处
-         - 方法内先查 entity_config 的能力,能拒绝就拒绝(如木桩不能 apply_move)
+         - 方法内先查 entity_config 的能力,能拒绝就拒绝(如木桩不能 apply_move_dir)
 
     3. snapshot() 返回 dataclass 列表的浅拷贝：
          - 返回新的 list,但内部 EntityInfo 对象是共享引用
@@ -186,11 +213,30 @@ class GameRoom:
         # (Python 没有真正的私有,下划线只是约定)
         self._entities: Dict[str, EntityInfo] = {}
         self._combats: Dict[str, CombatComponent] = {}
+        # 击退状态表:entity_id -> KnockbackState(服务端瞬态,客户端不需要)
+        # 和 _combats 一样独立成表,不进 EntityInfo(避免污染 proto 快照广播)
+        self._knockbacks: Dict[str, KnockbackState] = {}
         import game.enemy_mgr as enemy_mgr
-        self.enemy_mgr = enemy_mgr.EnemyMgr()
+        self._enemy_mgr = enemy_mgr.EnemyMgr()
 
-    # ------------------------------------------------------------------
-    # 只读访问
+        # 攻击发动钩子:由 GameServer 在初始化时通过 set_attack_trigger 注册。
+        # 为什么需要钩子(而不让 AI 直接调 GameServer):
+        #   apply_attack_start 只做状态变更(设 state="attacking"),真正的攻击发动
+        #   流程(广播 AttackStart + 注册判定帧定时器 + 命中扣血 + 广播 AttackEnd)
+        #   在网络层 GameServer 里。敌人 AI 只持有 room,够不着 GameServer。
+        #   所以 GameServer 把"完整攻击流程"作为回调注册进来,玩家和敌人统一调
+        #   room.trigger_attack(),调用方无需关心是玩家还是敌人。
+        self._attack_trigger: Optional[Callable[[str, int], bool]] = None
+
+        # A* 寻路器:由 GameServer 在初始化时通过 set_pathfinder 注入。
+        # 为什么不放 GameRoom 内部 new:GameRoom 不知道 map_seed(seed 在
+        # GameServer 上,通过 MapInfo 下发给客户端)。注入而非自建,保持
+        # GameRoom「纯状态层,不依赖外部配置来源」的边界。
+        # 敌人 AI(ChaseState)通过 room.get_pathfinder() 取用,避免每次寻路
+        # 都重新构造 ChunkGenerator(每次构造 = 重新算 seed 哈希,浪费)。
+        self._pathfinder = None
+        
+    # region 只读访问
     # ------------------------------------------------------------------
 
     def get_entity(self, entity_id: str) -> Optional[EntityInfo]:
@@ -201,7 +247,7 @@ class GameRoom:
             读场景频繁(如 handler 里取 player_name 拼 ChatMessage),
             每次都拷贝开销大且无必要——只要调用方不改它即可。
             dataclass 是可变的,但约定:拿到 get_entity 结果后只读不改,
-            要改状态请走 apply_move 等方法。
+            要改状态请走 apply_move_dir 等方法。
         """
         return self._entities.get(entity_id)
 
@@ -231,8 +277,25 @@ class GameRoom:
         """当前房间内实体总数(调试/监控用)"""
         return len(self._entities)
 
-    # ------------------------------------------------------------------
-    # 状态变更:实体加入/离开
+    def get_stakes(self) -> List[EntityInfo]:
+        """
+        获取所有木桩实体的 EntityInfo 列表
+        """
+        return [entity for entity in self._entities.values() if entity.entity_type == "stake"]
+
+    def get_enemy_manager(self) -> enemy_mgr.EnemyMgr:
+        return self._enemy_mgr
+
+    def get_combat(self, entity_id) -> Optional[CombatComponent]:
+        return self._combats.get(entity_id)
+
+    def snapshot_combats(self) -> List[CombatComponent]:
+        # StatsInit 用,返回 list(和 snapshot() 对称,调用方用 asdict 转 dict)
+        return list(self._combats.values())
+
+    # endregion
+
+    # region 状态变更:实体加入/离开
     # ------------------------------------------------------------------
 
     def add_entity(self, entity_id: str, entity_info: EntityInfo) -> EntityInfo:
@@ -288,16 +351,19 @@ class GameRoom:
         if removed is not None:
             # 连带清理战斗组件(和 _entities 同步,避免遗留幽灵 combat)
             self._combats.pop(entity_id, None)
+            # 连带清理击退状态(和 _entities 同步,避免遗留幽灵击退)
+            self._knockbacks.pop(entity_id, None)
             # 清理敌人 AI 状态(如果是敌人;非敌人 on_enemy_removed 是 no-op,安全)
-            self.enemy_mgr.on_enemy_removed(entity_id)
+            self._enemy_mgr.on_enemy_removed(entity_id)
             logger.info(f"实体离开房间: type={removed.entity_type} id={entity_id}")
         return removed
 
-    # ------------------------------------------------------------------
-    # 状态变更:玩家行为(apply_xxx)
+    # endregion
+
+    # region 状态变更:玩家行为(apply_xxx)
     # ------------------------------------------------------------------
     # 所有 apply_xxx 方法都先查 entity_config 的能力配置:
-    #   - 能做才改状态,不能做返回 False(如木桩 apply_move 直接拒)
+    #   - 能做才改状态,不能做返回 False(如木桩 apply_move_dir 直接拒)
     #   - 这样把"能不能做"和"怎么做"分离,加新类型只改 entity_config
     # ------------------------------------------------------------------
 
@@ -305,9 +371,9 @@ class GameRoom:
     # 抽成常量方便统一修改,避免散落在各 apply_xxx 方法里漏改
     #
     # attacking 必须锁:客户端移动中点击攻击时,攻击开始前已发出的残留 PlayerMove
-    # 可能晚于 AttackStart 到达/被 tick 处理。若 attacking 状态仍执行 apply_move,
+    # 可能晚于 AttackStart 到达/被 tick 处理。若 attacking 状态仍执行 apply_move_dir,
     # 会把 state 从 "attacking" 覆盖回 "run" 并广播,导致客户端攻击动画被移动动画吞掉。
-    # 锁住后残留 PlayerMove 的 apply_move 返回 False,不会覆盖攻击状态、也不会广播。
+    # 锁住后残留 PlayerMove 的 apply_move_dir 返回 False,不会覆盖攻击状态、也不会广播。
     _INPUT_LOCKED_STATES = frozenset({"hurt", "dead", "attacking"})
 
     def _is_input_locked(self, info: EntityInfo) -> bool:
@@ -320,95 +386,146 @@ class GameRoom:
         """
         return info.state in self._INPUT_LOCKED_STATES
 
-    def apply_move(self, entity_id: str, x: float, y: float,
-                   speed: float = 1.0, moving: bool = False) -> bool:
+    def apply_move_dir(self, entity_id: str, dir_x: float, dir_y: float,
+                       moving: bool, dt: float) -> bool:
         """
-        应用一次移动输入到状态
+        记住移动方向(不推进位移!)——持续推进由 tick_movement 统一做
 
         =========================================================================
-         能力校验
+         移动模型:记住方向 + 每 tick 持续推进
         =========================================================================
-        先查 entity_type 能不能移动(can_move):
-            - player: can_move=True,正常改状态
-            - stake:  can_move=False,直接返回 False(木桩不能动)
-        这让 apply_move 不用关心"谁能动谁不能动",逻辑统一。
+        客户端发"改方向"指令(低频),服务端 apply_move_dir 只记住方向到
+        EntityInfo.move_dir_x/y,不推进位移。tick_movement 每 tick 对所有
+        moving=True 的实体统一按 dir * speed * dt 推进位移。
+        这样服务端不依赖客户端输入是否到达——即使某个 tick 没收到输入,
+        服务端也会按记住的方向继续推进,无累积误差,无 snap 拉回。
 
         =========================================================================
-         当前是「目标坐标直接落地」的简化版
+         能力校验 / 锁定校验
         =========================================================================
-        客户端说移到 (x,y),状态就直接是 (x,y)。
-        真实游戏里移动是连续的,应该是:
-            - 服务端按 tick 推进: new_pos = old_pos + velocity * dt
-            - 或至少校验移动合法性: 目标点是否在地图内、是否穿墙、单次位移是否过大(防作弊)
-        把 apply_move 收口到这里的好处:后续加任何逻辑只改这一个方法,
-        handler 和客户端都不用动。
+        can_move=False 拒绝(木桩),hurt/attacking/dead 锁定拒绝。
 
         =========================================================================
-         speed 参数当前未使用,但保留
+         方向归一化
         =========================================================================
-        speed 已存在于 proto 的 PlayerMove 里,客户端会发(值取自 entity_config.json
-        的 player.speed)。当前 apply_move 忽略它(直接落地目标坐标),保留参数位是为了:
-            1. handler 签名和 proto 字段一一对应,读代码就能看出"消息里有什么"
-            2. 后续做连续移动模型时,speed 立刻可用,不用再改接口
-        注意:speed 作为「类型属性」已在 entity_config.json 定义并由 config_loader 解析,
-        EnemyMgr 推进敌人位移走 config_loader.get_speed(entity_type),不读这里的参数。
-        这里的 speed 参数是「移动事件属性」(客户端这一次移动的瞬时速度),两者语义不同。
-
-        =========================================================================
-         moving 参数:驱动动画状态 state
-        =========================================================================
-        moving=True → state="run";moving=False → state="idle"。
-        这把"动画状态"收口到服务端权威:客户端发"我在动/我没在动",服务端定 state。
+        客户端发的 dir_x/dir_y 理论上已归一化(Input.get_vector),这里防御性再归一化一次。
+        moving=False 时清零方向(停止移动)。
 
         Args:
             entity_id: 谁在移动
-            x, y: 目标坐标
-            speed: 移动速度(当前未使用,保留字段)
-            moving: 是否正在移动(驱动 state 字段)
+            dir_x, dir_y: 移动方向向量(理论归一化,内部会再归一化一次防作弊)
+            moving: 是否正在移动
+            dt: 已废弃(保留签名兼容,持续推进由 tick_movement 用 TICK_INTERVAL 做)
 
         Returns:
-            True 表示状态已更新;False 表示实体不存在或不能移动
+            True 表示方向/状态已更新;False 表示实体不存在/不能移动/锁定中
         """
         info = self._entities.get(entity_id)
         if info is None:
-            # 实体不在房间:可能是未加入就发移动,或已离开。
-            # 返回 False 让 handler 决定是否告警,而不是在这里抛异常——
-            # 网络消息乱序是常态,不该让状态层处理容错逻辑。
             return False
 
-        # 能力校验:不能移动的实体直接拒绝
         if not entity_config.get_capability(info.entity_type).can_move:
-            logger.warning(f"实体 {entity_id} (type={info.entity_type}) 不能移动,apply_move 被拒绝")
+            logger.warning(f"实体 {entity_id} (type={info.entity_type}) 不能移动,apply_move_dir 被拒绝")
             return False
 
-        # 输入锁定校验:hurt(硬直)/ dead(死亡)期间拒绝移动输入
-        # 服务端是唯一状态权威,锁定期间客户端发的 PlayerMove 不应改状态。
-        # 这里拒绝后,web_server._process_tick 检查 apply_xxx 返回值,不会广播——
-        # 避免出现"客户端收到 X 在移动广播,但 X 实际还在 hurt/dead"的状态矛盾。
         if self._is_input_locked(info):
-            logger.debug(f"实体 {entity_id} 处于 {info.state} 锁定,apply_move 被拒绝")
+            logger.debug(f"实体 {entity_id} 处于 {info.state} 锁定,apply_move_dir 被拒绝")
             return False
 
-        # 直接落地目标坐标(简化模型,见上方说明)
-        info.x = x
-        info.y = y
-        # 注意:speed 当前不存入状态,因为 EntityInfo 里没有 speed 字段。
-        # speed 是"移动事件"的属性,不是"实体状态"的属性——这个区分很重要:
-        #   - 状态 = 持续存在的属性(位置、朝向、动画状态)
-        #   - 事件 = 瞬时发生的动作(一次移动、一次攻击)
         info.moving = moving
         info.state = "run" if moving else "idle"
 
-        logger.debug(f"实体 {entity_id} 移动到 ({x}, {y}) state={info.state}")
+        if moving:
+            # 防御性归一化:存归一化方向供 tick_movement 持续推进用
+            length_sq = dir_x * dir_x + dir_y * dir_y
+            if length_sq > 0.0001:
+                length = length_sq ** 0.5
+                info.move_dir_x = dir_x / length
+                info.move_dir_y = dir_y / length
+            else:
+                # 方向为零向量但 moving=True:不合理,当作停止处理
+                info.moving = False
+                info.state = "idle"
+                info.move_dir_x = 0.0
+                info.move_dir_y = 0.0
+        else:
+            # 停止移动:清零方向
+            info.move_dir_x = 0.0
+            info.move_dir_y = 0.0
+
         return True
+
+    def tick_movement(self, dt: float) -> list:
+        """
+        每 tick 持续推进所有 moving=True 的实体位移(服务端权威移动核心)
+
+        =========================================================================
+         为什么需要这个方法
+        =========================================================================
+        旧模型(apply_move_dir 里推进)的问题:
+            - 服务端只在收到客户端输入的 tick 才推进位移
+            - 网络抖动/丢包导致某些 tick 没收到输入 → 不推进
+            - 客户端每帧都在预测推进 → 误差累积 → 超过阈值 snap 拉回
+        新模型(apply_move_dir 只记方向 + tick_movement 持续推进):
+            - 客户端发"改方向"(低频),服务端记住方向
+            - 服务端每 tick 都按记住的方向推进所有 moving=True 的实体
+            - 客户端每帧也按同方向预测推进
+            - 两端用同一个 speed 和接近的 dt,位移量一致,无累积误差
+
+        =========================================================================
+         和敌人 AI 的关系
+        =========================================================================
+        敌人 AI(EnemyMgr.update)每 tick 调 apply_move_dir 改方向,
+        tick_movement 统一推进所有实体(含玩家和敌人),逻辑收口在状态层。
+
+        Args:
+            dt: 时间步长(秒),由 GameServer 传 TICK_INTERVAL
+
+        Returns:
+            本 tick 实际移动了的 entity_id 列表(供 web_server 收集广播用)
+        """
+        moved_ids = []
+
+        # ① 击退推进:不受输入锁定(hurt/attacking/dead)影响——硬直期间也要被推走
+        # 击退是服务端权威位移(被攻击时由 apply_knockback 设定),和"自己按方向走"
+        # 是两回事,所以和下方普通移动互斥(被击退的实体不叠加普通移动)。
+        # 时长 = hurt 硬直时长,所以"硬直结束 = 击退结束",恢复时正好停在被推出位置。
+        for entity_id in list(self._knockbacks.keys()):
+            kb = self._knockbacks[entity_id]
+            if kb.time <= 0:
+                self._knockbacks.pop(entity_id, None)  # 击退时间耗尽,清理
+                continue
+            info = self._entities.get(entity_id)
+            if info is None:
+                self._knockbacks.pop(entity_id, None)  # 实体已移除(死亡/断连),清理
+                continue
+            info.x += kb.vx * dt
+            info.y += kb.vy * dt
+            kb.time -= dt
+            moved_ids.append(entity_id)
+
+        # ② 普通移动推进(记住方向 + 每 tick 持续推进)
+        for entity_id, info in self._entities.items():
+            if entity_id in self._knockbacks:
+                continue  # 正在被击退,位移由击退分支推进,不叠加普通移动
+            if not info.moving:
+                continue
+            # 锁定状态(hurt/attacking/dead)不推进位移
+            if self._is_input_locked(info):
+                continue
+            speed = config_loader.get_speed(info.entity_type)
+            info.x += info.move_dir_x * speed * dt
+            info.y += info.move_dir_y * speed * dt
+            moved_ids.append(entity_id)
+        return moved_ids
 
     def apply_facing(self, entity_id: str, facing: float) -> bool:
         """
         应用一次朝向输入到状态
 
-        和 apply_move 平行,但只改 facing 不改坐标。
+        和 apply_move_dir 平行,但只改 facing 不改坐标。
         朝向和移动是两个独立状态维度——玩家可以一边移动一边朝任意方向攻击,
-        所以 facing 不应混在 apply_move 里(那会让朝向变成"移动的附属属性",语义错了)。
+        所以 facing 不应混在 apply_move_dir 里(那会让朝向变成"移动的附属属性",语义错了)。
 
         Args:
             entity_id: 谁在转朝向
@@ -438,6 +555,55 @@ class GameRoom:
 
         logger.debug(f"实体 {entity_id} 朝向 {info.facing}")
         return True
+
+    def set_attack_trigger(self, cb: Callable[[str, int], bool]) -> None:
+        """
+        注册攻击发动回调(由 GameServer 在初始化时调用)
+
+        回调签名: cb(attacker_id, atk_id) -> bool
+            内部负责:apply_attack_start + 广播 AttackStart + 注册判定帧定时器 +
+            命中扣血 + 广播 AttackEnd(完整流程)。
+        返回 True 表示攻击已发起(状态已变更为 attacking)。
+        """
+        self._attack_trigger = cb
+
+    def set_pathfinder(self, pf) -> None:
+        """
+        注入 A* 寻路器(由 GameServer 在初始化时调用)
+
+        GameServer 持有 map_seed,负责构造 ChunkGenerator + Pathfinder 后注入,
+        GameRoom 不关心 seed 来源。敌人 AI(ChaseState)通过 get_pathfinder 取用。
+        """
+        self._pathfinder = pf
+
+    def get_pathfinder(self):
+        """取 A* 寻路器(敌人 AI 寻路用,可能为 None——未注入时降级为直线追击)"""
+        return self._pathfinder
+
+    def trigger_attack(self, entity_id: str, atk_id: int) -> bool:
+        """
+        发动一次完整攻击流程(对外统一入口)
+
+        玩家(经 pending_inputs)和敌人(AI 状态机)都调本方法,无需关心调用方是谁。
+        内部转调 GameServer 注册的 _attack_trigger 回调,完成:
+            apply_attack_start → 广播 AttackStart → 注册 AttackTimer →
+            hit_cb(命中扣血+广播 AttackHit) → end_cb(apply_attack_end+广播 AttackEnd)
+
+        为什么不直接调 apply_attack_start:
+            apply_attack_start 只改状态(设 state="attacking"),不做判定也不广播。
+            若敌人 AI 直接调它,会出现"状态切了 attacking 又切回,但全程无伤害无广播"
+            的现象——这正是本方法要解决的问题。
+
+        Returns:
+            True 表示攻击已发起;False 表示被拒绝(实体不存在/不能攻击/状态锁定/
+            已在攻击中)。调用方(AI)可据此决定是否重试。
+        """
+        if self._attack_trigger is None:
+            # 钩子未注册(理论上 GameServer 初始化时就注册,不该走到这里)
+            # 退化为只改状态,保证状态层不依赖网络层也能跑(如单测)
+            logger.warning("attack_trigger 未注册,trigger_attack 退化为 apply_attack_start")
+            return self.apply_attack_start(entity_id, atk_id)
+        return self._attack_trigger(entity_id, atk_id)
 
     def apply_attack_start(self, entity_id: str, atk_id: int) -> bool:
         """
@@ -647,6 +813,14 @@ class GameRoom:
             direction=attacker.facing,
         )
 
+        # 阵营掩码:从攻击者的实体类型取 attack_mask(玩家=2 打敌人层,敌人=1 打玩家层)
+        # 为什么用攻击者的 attack_mask 而非 atk_shape.hit_mask:
+        #   阵营是实体属性(谁打谁),不是攻击属性。挂在实体上后,玩家和敌人可复用
+        #   同一个 atk_id(如 1001),各自打各自阵营——避免攻击配置耦合阵营,
+        #   也避免"敌人 1001 只能打敌人"的尴尬(原 hit_mask=2 写死在 attack_config)
+        attacker_cap = entity_config.get_capability(attacker.entity_type)
+        attack_mask = attacker_cap.attack_mask
+
         # 遍历所有实体,跳过自己,用能力过滤,做圆 vs 扇形相交判定
         hits: List[str] = []
         for target_id, target in self._entities.items():
@@ -663,8 +837,9 @@ class GameRoom:
             # state=="dead" 是状态层(当前还能不能被打)
             if target.state == "dead":
                 continue
-            # 碰撞掩码过滤:攻击者的攻击掩码 & 目标的碰撞掩码 == 0 时跳过
-            if (atk_shape.hit_mask & target_cap.hit_layer) == 0:
+            # 阵营掩码过滤:攻击者的 attack_mask & 目标的 hit_layer == 0 时跳过
+            # (玩家 attack_mask=2 & 敌人 hit_layer=2 → 命中;敌人 attack_mask=1 & 玩家 hit_layer=1 → 命中)
+            if (attack_mask & target_cap.hit_layer) == 0:
                 continue
             # 几何判定:用实体类型的碰撞形状(从 entity_config 查,而非 EntityInfo.radius)
             # 目前实体碰撞只支持圆形,其他形状未来扩展
@@ -694,6 +869,59 @@ class GameRoom:
         info.state = "idle"
         logger.debug(f"实体 {entity_id} 伤害结束")
 
+    def apply_knockback(self, target_id: str, attacker_id: str, distance: float) -> bool:
+        """
+        应用一次击退:把目标从攻击者中心向外推 distance 像素(hurt 硬直期间匀速完成)
+
+        方向:从攻击者位置指向被击者位置(向外推开),和攻击者 facing 无关。
+        时长:取 hurt 硬直时长(HURT_DURATION_MS),速度 = distance / 时长——
+              整个硬直期间恰好推出 distance 像素,「硬直结束 = 击退结束」。
+        复用/覆盖:连击中再次被命中时,新击退覆盖旧击退(方向+速度+计时整体重置),
+              和 start_hurt 的"连击重置硬直"语义一致。
+        不按 can_move 过滤:木桩(can_move=False)也会被击退(用户确认过,方便测试位移)。
+
+        击退状态存 _knockbacks(服务端瞬态),由 tick_movement 每 tick 推进位移,
+        新位置走现有 PlayerMove 广播,客户端无需知道击退细节(服务端权威)。
+
+        Args:
+            target_id: 被击退者 entity_id
+            attacker_id: 攻击者 entity_id(决定推离方向)
+            distance: 击退总距离(像素)
+
+        Returns:
+            True 表示击退已生效;False 表示实体不存在/位置重合无法定向
+        """
+        target = self._entities.get(target_id)
+        attacker = self._entities.get(attacker_id)
+        if target is None or attacker is None:
+            return False
+
+        # 方向:被击者 - 攻击者(归一化)。位置重合(零向量)时无法定向,跳过击退
+        dx = target.x - attacker.x
+        dy = target.y - attacker.y
+        length = math.sqrt(dx * dx + dy * dy)
+        if length < 1e-6:
+            logger.debug(f"实体 {target_id} 与攻击者 {attacker_id} 位置重合,击退跳过")
+            return False
+
+        # 时长 = hurt 硬直时长(秒);速度 = 距离 / 时长 → 硬直期间匀速推出 distance 像素
+        duration = config_loader.get_hurt_duration_ms() / 1000.0
+        if duration <= 0:
+            return False
+        speed = distance / duration
+        self._knockbacks[target_id] = KnockbackState(
+            vx=dx / length * speed,
+            vy=dy / length * speed,
+            time=duration,
+        )
+        logger.debug(f"实体 {target_id} 被击退 {distance}px(攻击者 {attacker_id})")
+        return True
+
+    # endregion
+
+    # region 战斗组件管理
+    ############################################################################
+
     def add_combat(self, entity_id, entity_type):
         # — 从 config_loader.get_combat_stats 拷基础值初始化
         combat_stats = config_loader.get_combat_stats(entity_type)
@@ -711,17 +939,15 @@ class GameRoom:
         # 幂等:不存在时不报错(和 remove_entity 一致的容错策略)
         self._combats.pop(entity_id, None)
 
-    def get_combat(self, entity_id) -> Optional[CombatComponent]:
-        return self._combats.get(entity_id)
-
-    def snapshot_combats(self) -> List[CombatComponent]:
-        # StatsInit 用,返回 list(和 snapshot() 对称,调用方用 asdict 转 dict)
-        return list(self._combats.values())
-
     def apply_stat_boost(self, entity_id, max_hp_delta, atk_delta, def_delta):
         # 强化用(预留,阶段 1 可不实现)
         # 后续实现:改 combat 实例字段 + 广播 StatsChanged
         pass
+
+    # endregion
+
+    # region 战斗相关查询
+    ############################################################################
 
     def is_dead(self, entity_id) -> bool:
         # state=="dead" 的便捷查询(state 在 EntityInfo,不在 CombatComponent)
@@ -758,12 +984,10 @@ class GameRoom:
         reduction = def_combat.defense / (def_combat.defense + K)
         return max(1, int(raw * (1 - reduction)))
 
-    def get_stakes(self) -> List[EntityInfo]:
-        """
-        获取所有木桩实体的 EntityInfo 列表
-        """
-        return [entity for entity in self._entities.values() if entity.entity_type == "stake"]
+    # endregion
 
+    # region enemy_mgr
+    ############################################################################
     def create_enemy(self, entity_type: str, pos: Tuple[float, float]) -> EntityInfo:
         """
         创建敌人实体的便捷方法(语法糖)
@@ -798,5 +1022,9 @@ class GameRoom:
             state="idle",
         )
         self.add_entity(entity_id, enemy)               # 共有状态 + 战斗组件
-        self.enemy_mgr.on_enemy_created(entity_id, entity_type)  # AI 状态
+        self._enemy_mgr.on_enemy_created(entity_id, entity_type)  # AI 状态
         return enemy
+
+    # endregion
+    
+   

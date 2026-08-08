@@ -32,10 +32,17 @@ config_loader 在模块加载时一次性读取 JSON 缓存到模块级变量。
 """
 
 '''
-hit_mask: 攻击判定掩码(按位与,决定哪些 entity_type 会被判定)
+attack_mask / hit_layer: 阵营掩码(按位与,决定攻击能否命中目标)
 
-1: player
-2: stack
+攻击者用自身类型的 attack_mask,目标用自身类型的 hit_layer:
+    attacker_cap.attack_mask & target_cap.hit_layer != 0 → 可命中
+
+当前层级分配:
+    1: player  (玩家层,被敌人打)
+    2: enemy / stake (敌人/木桩层,被玩家打)
+
+attack_mask 挂在实体类型上(玩家=2 打敌人层,敌人=1 打玩家层),
+所以玩家和敌人可复用同一个 atk_id,各自打各自阵营——避免攻击配置耦合阵营。
 
 '''
 
@@ -120,14 +127,55 @@ class AttackShape:
     shape_params: Optional[ShapeParams] = None  # 具体参数,根据 shape 决定
     duration: int = 583                      # 攻击持续时间(ms)
     hit_time: int = 83                       # 判定帧时间(从发起算,ms)
-    hit_mask: int = 0xFFFFFFFF  # 判定掩码(按位与,决定哪些 entity_type 会被判定)
     damage_multiplier: float = 1.0           # 伤害倍率(乘以攻击者 attack_power 得原始伤害)
+    # 击退距离(像素)。只在连段的最后一段配置:命中后把目标从攻击者中心向外推
+    # 该距离,让被击者有反击/逃跑的机会(避免"硬直比攻击间隔短被连死")。
+    # 0 表示该段不击退。服务端 web_server 只对"最后一段"应用击退(见 hit_cb)。
+    knockback_distance: float = 0.0
+    # 注:原 hit_mask 字段已移除。命中层级改由实体类型的 attack_mask 决定
+    # (玩家=2 打敌人层,敌人=1 打玩家层),玩家和敌人可复用同一 atk_id
 
 
 @dataclass
 class AttackConfig:
     """攻击配置:一个 atk_id 对应一组形状列表"""
     shape_list: List[AttackShape] = field(default_factory=list)
+
+    def get_attack_time(self) -> int:
+        """返回攻击占用的时间(毫秒) = 所有形状的 duration 最大值""" 
+        return max(shape.duration for shape in self.shape_list)
+
+# ===========================================================================
+# 地形能力配置(地图 tile 类型 → 是否可通行等属性)
+# ===========================================================================
+# ChunkGenerator.get_tile_type_v3 返回 TerrainType 枚举值(int),
+# 本配置表把枚举值映射成能力字段,供寻路系统查询。
+# 地形类型 → 名称映射(和 map_generator.TerrainType / ChunkGenerator.gd 的 TerrainType 对齐):
+#   0=GRASS, 1=SAND, 2=DIRT, 3=BRICK
+_TERRAIN_ID_TO_NAME: Dict[int, str] = {
+    0: "GRASS",
+    1: "SAND",
+    2: "DIRT",
+    3: "BRICK",
+}
+
+
+@dataclass
+class TerrainCapability:
+    """
+    单个地形类型的能力配置。
+
+    字段:
+        walkable: 是否可通行(AI 寻路用)。true=可通行,false=障碍。
+                  ChunkGenerator 当前只生成 GRASS/SAND,都是 true;
+                  BRICK 是预留的障碍地形(城墙/墙壁类)。
+        move_cost: 通行代价(预留,当前未用)。A* 寻路默认每格代价 1,
+                   若想让沙地走得"慢",可设为 2 让 AI 优先走草地。
+                   当前寻路只看 walkable,不看 move_cost(YAGNI)。
+    """
+    walkable: bool = True
+    move_cost: int = 1
+
 
 # ===========================================================================
 # 实体能力配置
@@ -145,7 +193,8 @@ class EntityCapability:
     body_shape: str = ShapeType.CIRCLE       # 碰撞形状类型字符串
     body_params: Optional[ShapeParams] = None  # 碰撞形状参数
     # 碰撞掩码
-    hit_layer: int = 0x00000000  # 判定掩码(按位与,决定哪些 entity_type 会被判定)
+    hit_layer: int = 0x00000000  # 被判定层掩码(按位与,决定该实体被哪些攻击命中)
+    attack_mask: int = 0x00000000  # 攻击判定掩码(发起攻击时打哪些 hit_layer。玩家=2 打敌人层,敌人=1 打玩家层,木桩=0 不能攻击)
     # 移动速度(像素/秒,类型级基础值。can_move=False 时为 0。
     # EnemyMgr 推进敌人位移用 enemy_speed * dt;客户端 LocalPlayerController 用
     # player_speed * dt 算每帧步长。运行时若有减速/加速 buff 应改实例副本,不回写这里)
@@ -197,8 +246,9 @@ def _build_attack_shape(shape_dict: dict) -> AttackShape:
         shape_params=_build_shape_params(shape_type, shape_dict.get("params", {})),
         duration=int(shape_dict.get("duration", 583)),
         hit_time=int(shape_dict.get("hit_time", 83)),
-        hit_mask=int(shape_dict.get("hit_mask", 0xFFFFFFFF)),
-        damage_multiplier=float(shape_dict.get("damage_multiplier", 1.0))
+        damage_multiplier=float(shape_dict.get("damage_multiplier", 1.0)),
+        # 击退距离(像素),未配置默认 0(不击退)
+        knockback_distance=float(shape_dict.get("knockback_distance", 0.0)),
     )
 
 
@@ -234,8 +284,17 @@ def _build_entity_capability(entry_dict: dict) -> EntityCapability:
         body_shape=body_shape,
         body_params=_build_shape_params(body_shape, entry_dict.get("body_params", {})),
         hit_layer=int(entry_dict.get("hit_layer", 0x00000000)),
+        attack_mask=int(entry_dict.get("attack_mask", 0x00000000)),
         speed=float(entry_dict.get("speed", 0.0)),
         dead_duration_ms=int(entry_dict.get("dead_duration_ms", 0)),
+    )
+
+
+def _build_terrain_capability(entry_dict: dict) -> TerrainCapability:
+    """从 dict 构造 TerrainCapability 对象(未配 walkable 时默认可通行,安全默认)"""
+    return TerrainCapability(
+        walkable=bool(entry_dict.get("walkable", True)),
+        move_cost=int(entry_dict.get("move_cost", 1)),
     )
 
 
@@ -274,6 +333,30 @@ def _build_entity_capability_map(raw: dict) -> Dict[str, EntityCapability]:
     return result
 
 
+def _build_terrain_capability_map(raw: dict) -> Dict[str, TerrainCapability]:
+    """
+    从 terrain_config.json 原始数据构造 {terrain_name: TerrainCapability} 表。
+
+    JSON 结构:
+        {
+            "_comment": "...",
+            "terrains": {
+                "GRASS": {"walkable": true, ...},
+                "BRICK": {"walkable": false, ...}
+            }
+        }
+
+    顶层只有 _comment / _terrain_type_values 等注释字段和 "terrains" 一个数据字段。
+    """
+    result = {}
+    terrains_dict = raw.get("terrains", {})
+    for key, value in terrains_dict.items():
+        if _is_comment_key(key):
+            continue
+        result[key] = _build_terrain_capability(value)
+    return result
+
+
 def _build_constants(raw: dict) -> dict:
     """从 constants.json 读取常量,跳过注释字段"""
     return {k: v for k, v in raw.items() if not _is_comment_key(k)}
@@ -283,10 +366,12 @@ def _build_constants(raw: dict) -> dict:
 _ATTACK_CONFIG_RAW = _load_json("attack_config.json")
 _ENTITY_CONFIG_RAW = _load_json("entity_config.json")
 _CONSTANTS_RAW = _load_json("constants.json")
+_TERRAIN_CONFIG_RAW = _load_json("terrain_config.json")
 
 _ATTACK_CONFIG_MAP: Dict[int, AttackConfig] = _build_attack_config_map(_ATTACK_CONFIG_RAW)
 _ENTITY_CAPABILITY_MAP: Dict[str, EntityCapability] = _build_entity_capability_map(_ENTITY_CONFIG_RAW)
 _CONSTANTS: dict = _build_constants(_CONSTANTS_RAW)
+_TERRAIN_CAPABILITY_MAP: Dict[str, TerrainCapability] = _build_terrain_capability_map(_TERRAIN_CONFIG_RAW)
 
 
 # ===========================================================================
@@ -348,3 +433,53 @@ def get_constant(name: str, default=None):
 def get_hurt_duration_ms() -> int:
     """取 hurt 硬直时长(毫秒),语法糖"""
     return int(_CONSTANTS.get("HURT_DURATION_MS", 666))
+
+
+# ===========================================================================
+# 地形能力 API(寻路用)
+# ===========================================================================
+
+def get_terrain_capability(terrain_name: str) -> TerrainCapability:
+    """
+    取某个地形名称的能力配置。
+
+    Args:
+        terrain_name: 地形名称字符串,如 "GRASS" / "SAND" / "DIRT" / "BRICK"
+                      (和 terrain_config.json 的 key 对齐)
+
+    Returns:
+        TerrainCapability 对象。未列在表里的地形返回默认值(walkable=True,
+        安全默认——未配置的地形默认可通行,避免寻路把整张地图当障碍)。
+    """
+    return _TERRAIN_CAPABILITY_MAP.get(terrain_name, TerrainCapability())
+
+
+def is_walkable(terrain_id: int) -> bool:
+    """
+    判定某个 tile 类型是否可通行(AI 寻路核心 API)。
+
+    Args:
+        terrain_id: ChunkGenerator.get_tile_type_v3 返回的地形类型 ID(int)
+                    0=GRASS, 1=SAND, 2=DIRT, 3=BRICK
+                    (和 map_generator.TerrainType 枚举值对齐)
+
+    Returns:
+        True=可通行,False=障碍。未知 ID 默认 True(安全默认,避免新地形
+        忘配置时寻路把整张地图当障碍)。
+
+    用法:
+        gen = map_generator.ChunkGenerator(seed)
+        if config_loader.is_walkable(gen.get_tile_type_v3(wx, wy)):
+            # 这个 tile 可通行,A* 可以走过
+    """
+    terrain_name = _TERRAIN_ID_TO_NAME.get(terrain_id)
+    if terrain_name is None:
+        # 未知地形 ID(ChunkGenerator 扩展了新枚举但 terrain_config.json 没配)
+        # 默认可通行,避免寻路卡死。同时打 warning 提示开发者补配置
+        import logging
+        logging.getLogger(__name__).warning(
+            f"is_walkable 收到未知 terrain_id={terrain_id},默认返回 True。"
+            f"请在 shared_config/terrain_config.json 补配置"
+        )
+        return True
+    return _TERRAIN_CAPABILITY_MAP.get(terrain_name, TerrainCapability()).walkable

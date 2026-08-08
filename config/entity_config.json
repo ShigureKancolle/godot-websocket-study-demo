@@ -6,6 +6,8 @@
     "_speed_desc": "speed 是该类型的移动速度(像素/秒,类型级)。can_move=false 的实体填 0。玩家>敌人=可摆脱,同类型同速",
     "_can_die_desc": "can_die 表示该类型能否进入死亡流程(hp<=0 时判定)。player=false 表示玩家死亡流程暂不实现;stake=false 木桩不会死(每 tick 回血);敌人=true",
     "_dead_duration_ms_desc": "dead_duration_ms 是死亡动画时长(毫秒),DeadTimer 到期后移除实体。can_die=false 的类型填 0",
+    "_hit_layer_desc": "hit_layer 是该类型的碰撞层级位掩码(被判定层)。玩家=1(enemy 打 player),敌人/木桩=2(player 打 enemy/stake)",
+    "_attack_mask_desc": "attack_mask 是该类型发起攻击时的判定掩码(打谁层)。决定 get_attack_hits 里 attacker_cap.attack_mask & target_cap.hit_layer 是否非零。玩家=2(打敌人/木桩),敌人=1(打玩家),木桩=0(不能攻击)",
 
     "player": {
         "_desc": "玩家:可移动/可攻击/可被攻击/可断连,圆形碰撞半径 24,移速 300px/s。死亡流程暂不实现(can_die=false)",
@@ -20,6 +22,7 @@
         "body_params": {"radius": 24.0},
         "body_color": "#ffffff",
         "hit_layer": 1,
+        "attack_mask": 2,
         "speed": 300.0,
         "dead_duration_ms": 0,
         "combat_stats": {
@@ -42,6 +45,7 @@
         "body_params": {"radius": 30.0},
         "body_color": "#aaaaaa",
         "hit_layer": 2,
+        "attack_mask": 0,
         "speed": 0.0,
         "dead_duration_ms": 0,
         "combat_stats": {
@@ -64,8 +68,9 @@
         "body_color": "#ff8080",
         "body_params": {"radius": 20.0},
         "hit_layer": 2,
+        "attack_mask": 1,
         "speed": 150.0,
-        "dead_duration_ms": 8000,
+        "dead_duration_ms": 666,
         "combat_stats": {
             "max_hp": 50,
             "attack_power": 10,
@@ -86,8 +91,9 @@
         "body_color": "#801480",
         "body_params": {"radius": 20.0},
         "hit_layer": 2,
+        "attack_mask": 1,
         "speed": 200.0,
-        "dead_duration_ms": 12000,
+        "dead_duration_ms": 666,
         "combat_stats": {
             "max_hp": 50,
             "attack_power": 10,

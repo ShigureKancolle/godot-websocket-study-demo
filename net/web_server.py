@@ -53,6 +53,14 @@ class GameServer:
         self.host = host
         self.port = port
 
+        # 地图种子(双端一致生成的关键)
+        # 服务端启动时持有 seed,通过 MapInfo 消息下发给客户端,
+        # 客户端 InfiniteTileMap.setup(seed) 用相同 seed 构造 ChunkGenerator,
+        # 双端产出完全相同的地图(详见 game/map_generator.py)
+        # 当前硬编码 12345(和客户端调试用的 seed 一致,便于验证双端产出)
+        # 未来可改成 random.randint(0, 2**31-1) 或从配置读
+        self.map_seed: int = 12345
+
         # 消息总线：由外部传入（main.py 创建），避免本模块创建单例的副作用
         # 如果没传，用 MessageBus 单例（兼容旧用法）
         self.bus = bus if bus is not None else message_bus.MessageBus()
@@ -66,11 +74,27 @@ class GameServer:
 
         # 游戏状态持有者：所有玩家信息（坐标、等级、分数）都由它管理。
         # 重构前这里是 self.player_infos 字典，handler 直接读写它。
-        # 现在统一收口到 GameRoom，handler 只能通过 room.add_player / apply_move 等方法变更状态。
+        # 现在统一收口到 GameRoom，handler 只能通过 room.add_player / apply_move_dir 等方法变更状态。
         # 这样状态变更规则只有一处定义，避免双端重复（详见 game_room.py 文档）。
         # 用 game_room.GameRoom() 而非 GameRoom()，热更见文件头注释
         self.room = game_room.GameRoom()
         self.timer_mgr = timer_mgr.TimerManager()
+
+        # 把"完整攻击发动流程"注册给 GameRoom 作为钩子。
+        # 这样玩家(经 pending_inputs)和敌人(AI 直接调用)都走 room.trigger_attack(),
+        # 统一入口,避免敌人 AI 绕过网络层导致"只改状态不发动"的问题(详见 game_room.trigger_attack)
+        self.room.set_attack_trigger(self._trigger_attack)
+
+        # 构造 A* 寻路器并注入 GameRoom。
+        # 敌人 AI(ChaseState)通过 room.get_pathfinder() 取用,基于双端一致的
+        # ChunkGenerator(seed 来自 self.map_seed)做网格寻路,绕开不可通行地形。
+        # 这里只构造一次:ChunkGenerator 是无状态的(同 seed 同输入永远同输出),
+        # Pathfinder 也是纯算法模块,全房间共享一个实例即可。
+        import game.map_generator as map_generator
+        import game.pathfinder as pathfinder
+        _gen = map_generator.ChunkGenerator(seed=self.map_seed)
+        self._pathfinder = pathfinder.Pathfinder(_gen)
+        self.room.set_pathfinder(self._pathfinder)
 
         self.is_running = False
 
@@ -148,11 +172,11 @@ class GameServer:
                         break
 
                     except Exception as e:
-                        logger.error(f"处理玩家 {player_id} 消息时出错: {e}")
+                        logger.exception(f"处理玩家 {player_id} 消息时出错: {e}")
                         break
 
             except Exception as e:
-                logger.error(f"处理客户端 {player_id} 时出错: {e}")
+                logger.exception(f"处理客户端 {player_id} 时出错: {e}")
 
             finally:
                 await self.cleanup_player(player_id)
@@ -219,7 +243,8 @@ class GameServer:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"sender_loop 发送消息出错: {e}")
+                # 用 logger.exception 而非 logger.error:打完整 traceback,方便定位
+                logger.exception(f"sender_loop 发送消息出错: {e}")
                 continue
         logger.info("sender 协程已停止")
 
@@ -266,7 +291,7 @@ class GameServer:
 
         为什么 tick 间隔严格 30Hz:
             tick 循环里不再有 await self.broadcast(...)(那会因网络 I/O 拉长间隔)。
-            tick 只做状态计算(apply_move 等,纯内存微秒级)+ 塞队列(put_nowait 不阻塞)。
+            tick 只做状态计算(apply_move_dir 等,纯内存微秒级)+ 塞队列(put_nowait 不阻塞)。
             真正的广播在 _sender_loop 独立协程里发,不影响 tick 节奏。
         """
         logger.info(f"tick 循环启动,频率 {self.TICK_HZ}Hz")
@@ -276,7 +301,15 @@ class GameServer:
         try:
             while self.is_running:
                 await asyncio.sleep(self.TICK_INTERVAL)
-                await self._process_tick()
+                # inner try:单个 tick 出错不能停整个循环
+                # asyncio 默认不会把 create_task 的异常打到控制台,
+                # 这里手动 catch + logger.exception 打完整 traceback
+                try:
+                    await self._process_tick()
+                except asyncio.CancelledError:
+                    raise   # CancelledError 要继续往外抛,不能吞
+                except Exception as e:
+                    logger.exception(f"_process_tick 异常,本 tick 跳过: {e}")
         finally:
             # tick 退出时必须连带取消 sender,否则 sender 会永远阻塞在 queue.get()
             if self._sender_task and not self._sender_task.done():
@@ -289,45 +322,41 @@ class GameServer:
 
     async def _process_tick(self) -> None:
         """
-        处理一个 tick 的 pending 输入
+        处理一个 tick 的 pending 输入 + 持续移动推进
 
         流程:
             1. 取出并清空 pending(下一 tick 重新收集)
-            2. 遍历 pending,调 GameRoom.apply_move / apply_facing 更新状态
-            3. 收集本 tick 要广播的消息
-            4. 统一广播
+            2. 遍历 pending,调 apply_move_dir(只记方向)/apply_facing/apply_attack_start
+            3. 木桩回血
+            4. 敌人 AI tick(EnemyMgr.update,内部调 apply_move_dir 改方向)
+            5. ★ 持续移动推进:tick_movement 对所有 moving=True 的实体统一推进位移
+            6. 收集广播(改方向的 + 被推进的 + 朝向变化的)
+            7. 统一广播
 
-        为什么不把 pending 直接传给 GameRoom:
-            GameRoom 是纯状态层,不该知道 tick/pending 的存在。
-            tick 协调逻辑留在 GameServer,GameRoom 只在被调 apply_xxx 时改状态。
-            这保持了状态层与传输层的解耦。
+        核心改动(第三版移动模型):
+            旧:apply_move_dir 收到输入才推进一次 → 丢 tick → 误差累积 → snap 拉回
+            新:apply_move_dir 只记方向 → tick_movement 每 tick 持续推进 → 无误差累积
         """
         # 取出并清空(下一 tick 重新收集新的输入)
         pending = self._pending_inputs
         self._pending_inputs = {}
 
-        if not pending:
-            return  # 本 tick 无输入,空转
-
         # 收集本 tick 要广播的消息:List[(protoname, protodata)]
         broadcasts = []
+        # 需要广播 PlayerMove 的实体集合(改方向 + 被持续推进)
+        moved_entities: set = set()
+
+        # ① 处理 pending 输入(只改方向/朝向/攻击,不推进位移)
         for entity_id, inputs in pending.items():
-            # 实体可能已离开(tick 间隔内断连),跳过
             if not self.room.has_entity(entity_id):
                 continue
 
-            # 处理移动输入
+            # 处理移动输入:apply_move_dir 只记住方向,不推进位移
             if "move" in inputs:
                 m = inputs["move"]
-                # 检查 apply_xxx 返回值:只有状态真的改了才广播
-                # (apply_move 可能因 hurt 硬直/能力不足返回 False,此时广播会让其他客户端
-                #  收到"X 在移动"但 X 实际没动,造成状态矛盾)
-                if self.room.apply_move(entity_id, m["x"], m["y"], m["speed"], m["moving"]):
-                    broadcasts.append(("PlayerMove", {
-                        "entity_id": entity_id,
-                        "x": m["x"], "y": m["y"], "speed": m["speed"],
-                        "moving": m["moving"]
-                    }))
+                if self.room.apply_move_dir(entity_id, m["dir_x"], m["dir_y"], m["moving"], self.TICK_INTERVAL):
+                    # 标记需要广播(方向/移动状态可能变了,即使停止也要广播让客户端切 idle)
+                    moved_entities.add(entity_id)
 
             # 处理朝向输入
             if "facing" in inputs:
@@ -341,83 +370,12 @@ class GameServer:
             # 处理攻击发起输入
             if "attackstart" in inputs:
                 a = inputs["attackstart"]
-                attacker_id = a["entity_id"]
-                if self.room.apply_attack_start(attacker_id, a["atk_id"]):
-                    # 塞队列不阻塞 tick:AttackStart 广播由 _sender_loop 异步发出
-                    self._queue_broadcast("AttackStart", {
-                        "entity_id": attacker_id,
-                        "atk_id": a["atk_id"]
-                    })
-                    config = config_loader.get_attack_config(a["atk_id"])
-                    if config:
-                        # 闭包陷阱修复:for 循环里定义 async def hit_cb 会捕获 shape 这个
-                        # 循环变量,所有 hit_cb 实际都会用循环结束时的最后一个 shape 值。
-                        # 用默认参数把当前 shape 绑定到 hit_cb 的局部作用域,绕开陷阱。
-                        # (当前 ATTACK_CONFIG[1002] 两个 shape 配置相同,触发不了;但配置不同会出 bug)
-                        for shape_idx, shape in enumerate(list(config.shape_list)):
-                            logger.info(f"实体 {attacker_id} 发起攻击 atk_id={a['atk_id']}，形状 {shape.shape}")
-                            # hit_cb: 判定帧触发,调 GameRoom 算命中列表并广播
-                            # 命中判定逻辑在 game_room.get_attack_hits(状态层),不在网络层
-                            # 统一 Entity 模型:hit_list 里可能同时含玩家和木桩,统一调 apply_hurt
-                            # 注:hit_cb/end_cb 里也用 _queue_broadcast 而非 await broadcast——
-                            # timer 回调虽然是独立协程,但仍不应被 I/O 阻塞(回调链可能很长)
-                            async def hit_cb(_shape=shape, _shape_idx=shape_idx):
-                                hurt_list = self.room.get_attack_hits(_shape, attacker_id)
-                                # 逐个调 apply_hurt 改状态(状态变更方法都是单玩家的,
-                                # 遍历列表由调用方负责,保持原子性;apply_hurt 内部会查能力配置)
-                                _hurt_duration = config_loader.get_hurt_duration_ms()
-                                for hurt_id in hurt_list:
-                                    damage = self.room.get_attack_damage(attacker_id, a["atk_id"], _shape_idx, hurt_id)
-                                    # apply_hurt 返回 HurtResult 枚举,区分 HURT/DEAD/FAILED
-                                    result = self.room.apply_hurt(hurt_id, a["atk_id"], _shape_idx, damage, attacker_id)
-                                    if result == game_room.HurtResult.HURT:
-                                        # 没死:启 hurt timer(硬直)
-                                        self.timer_mgr.start_hurt(hurt_id, _hurt_duration, self.get_hurt_end_callback(hurt_id, attacker_id, a["atk_id"], _hurt_duration))
-                                    elif result == game_room.HurtResult.DEAD:
-                                        # 死亡:启 dead timer(延迟移除实体,让客户端播死亡动画)
-                                        # 取死亡者类型的死亡动画时长(从 entity_config 查)
-                                        dead_entity = self.room.get_entity(hurt_id)
-                                        if dead_entity is not None:
-                                            _dead_duration = config_loader.get_dead_duration_ms(dead_entity.entity_type)
-                                            self.timer_mgr.start_dead(hurt_id, _dead_duration, self.get_dead_end_callback(hurt_id, attacker_id, a["atk_id"]))
-                                        # 广播 EntityDead(客户端切 DeadState 播死亡动画)
-                                        self._queue_broadcast("EntityDead", {
-                                            "entity_id": hurt_id,
-                                            "attacker_id": attacker_id,
-                                            "atk_id": a["atk_id"],
-                                        })
-                                    # FAILED:实体不存在/不能被攻击/无战斗组件,不做任何后续(防御性,get_attack_hits 已过滤)
-                                    # 广播 HpChanged(含 damage 给飘字,cur_hp 给血条)
-                                    # cur_hp 从 combat 取(apply_hurt 已扣过血)
-                                    hurt_combat = self.room.get_combat(hurt_id)
-                                    self._queue_broadcast("HpChanged", {
-                                        "entity_id": hurt_id,
-                                        "cur_hp": hurt_combat.cur_hp if hurt_combat else 0,
-                                        "damage": damage,
-                                        "attacker_id": attacker_id,
-                                        "atk_id": a["atk_id"],
-                                        "atk_shape_idx": _shape_idx,
-                                    })
+                # 走 room.trigger_attack 统一入口(和敌人 AI 同一条路)
+                # 完整流程(状态变更+广播 AttackStart+注册判定帧定时器+命中扣血+广播 AttackEnd)
+                # 在 _trigger_attack 里,由 GameRoom 通过 attack_trigger 钩子转调
+                self.room.trigger_attack(a["entity_id"], a["atk_id"])
 
-                                # 塞队列不阻塞 timer 回调
-                                self._queue_broadcast("AttackHit", {
-                                    "attacker_id": attacker_id,
-                                    "hit_list": hurt_list,
-                                    "atk_id": a["atk_id"],
-                                    "hurt_duration": _hurt_duration,
-                                    "atk_shape_idx": _shape_idx,
-                                })
-
-                            async def end_cb():
-                                self.room.apply_attack_end(attacker_id, a["atk_id"])
-                                # 塞队列不阻塞 timer 回调
-                                self._queue_broadcast("AttackEnd", {
-                                    "entity_id": attacker_id,
-                                })
-
-                            self.timer_mgr.start_attack(attacker_id, shape.hit_time, shape.duration, hit_cb, end_cb)
-
-        # 每个tick都给木桩回满血
+        # ② 木桩回血
         stakes = self.room.get_stakes()
         for stake in stakes:
             stake_combat = self.room.get_combat(stake.entity_id)
@@ -431,14 +389,152 @@ class GameServer:
                     "atk_id": 0,
                     "atk_shape_idx": 0,
                 })
-        
 
-        # 统一塞队列:一个 tick 内所有变更的消息按顺序发出
-        # 注意:这里不 exclude 任何人——状态变更广播必须包含发起者
-        # (项目硬约束:所有状态变更广播必须包含发起客户端)
-        # 注:改成 _queue_broadcast 后不再 await,tick 立即完成,广播在 _sender_loop 里发
+        # ③ 敌人 AI tick(内部调 apply_move_dir 改方向,apply_facing 改朝向)
+        self.room.get_enemy_manager().update(self.TICK_INTERVAL, self.room)
+        # 脏敌人 = 朝向变化了的敌人(用于 PlayerFacing 广播)
+        # 注:位置变化不在 dirty 里(apply_move_dir 不再推进位移),
+        # 位置变化由下面的 tick_movement 统一推进,通过 moved_entities 收集广播
+        dirty_enemies = self.room.get_enemy_manager().pop_dirty_entities()
+
+        # ④ ★ 持续移动推进:所有 moving=True 的实体每 tick 推进位移
+        # 这是第三版移动模型的核心:服务端记住方向后每 tick 都推进,不依赖客户端输入是否到达
+        # 解决了"丢 tick → 误差累积 → snap 拉回"的问题
+        moved_ids = self.room.tick_movement(self.TICK_INTERVAL)
+        moved_entities.update(moved_ids)
+
+        # ⑤ 收集广播
+        # PlayerMove: 所有位置/方向变化的实体(改方向 + 被持续推进)
+        for entity_id in moved_entities:
+            info = self.room.get_entity(entity_id)
+            if info is not None:
+                broadcasts.append(("PlayerMove", {
+                    "entity_id": entity_id,
+                    "x": info.x, "y": info.y,
+                    "moving": info.moving
+                }))
+        # PlayerFacing: 朝向变化了的敌人
+        for entity_id in dirty_enemies:
+            info = self.room.get_entity(entity_id)
+            if info is not None:
+                broadcasts.append(("PlayerFacing", {
+                    "entity_id": entity_id,
+                    "facing": info.facing
+                }))
+
+        # ⑥ 统一广播
         for proto_name, proto_data in broadcasts:
             self._queue_broadcast(proto_name, proto_data)
+
+        
+
+    def _trigger_attack(self, attacker_id: str, atk_id: int) -> bool:
+        """
+        完整攻击发动流程(注册给 GameRoom 作为 attack_trigger 钩子)
+
+        由 GameRoom.trigger_attack 转调,玩家(经 pending_inputs→_process_tick)和
+        敌人(AI 状态机直接调 room.trigger_attack)走同一条路,避免敌人 AI 直接调
+        apply_attack_start 导致"只改状态不发动"的问题。
+
+        流程:
+            1. apply_attack_start 改状态(设 state="attacking"),失败直接返回 False
+            2. 广播 AttackStart
+            3. 遍历 atk_id 的 shape_list,为每个 shape 注册 AttackTimer:
+               - hit_time 到 → hit_cb:算命中 + apply_hurt + 广播 AttackHit/HpChanged
+               - duration 到 → end_cb:apply_attack_end + 广播 AttackEnd
+
+        Returns:
+            True 表示攻击已发起(state 已变更为 attacking);
+            False 表示被拒绝(实体不存在/不能攻击/状态锁定/已在攻击中)
+        """
+        if not self.room.apply_attack_start(attacker_id, atk_id):
+            return False
+
+        # 塞队列不阻塞 tick:AttackStart 广播由 _sender_loop 异步发出
+        self._queue_broadcast("AttackStart", {
+            "entity_id": attacker_id,
+            "atk_id": atk_id
+        })
+        config = config_loader.get_attack_config(atk_id)
+        if config:
+            # 闭包陷阱修复:for 循环里定义 async def hit_cb 会捕获 shape 这个
+            # 循环变量,所有 hit_cb 实际都会用循环结束时的最后一个 shape 值。
+            # 用默认参数把当前 shape 绑定到 hit_cb 的局部作用域,绕开陷阱。
+            # (当前 ATTACK_CONFIG[1002] 两个 shape 配置相同,触发不了;但配置不同会出 bug)
+            for shape_idx, shape in enumerate(list(config.shape_list)):
+                logger.info(f"实体 {attacker_id} 发起攻击 atk_id={atk_id}，形状 {shape.shape}")
+                # hit_cb: 判定帧触发,调 GameRoom 算命中列表并广播
+                # 命中判定逻辑在 game_room.get_attack_hits(状态层),不在网络层
+                # 统一 Entity 模型:hit_list 里可能同时含玩家和木桩,统一调 apply_hurt
+                # 注:hit_cb/end_cb 里也用 _queue_broadcast 而非 await broadcast——
+                # timer 回调虽然是独立协程,但仍不应被 I/O 阻塞(回调链可能很长)
+                async def hit_cb(_shape=shape, _shape_idx=shape_idx):
+                    hurt_list = self.room.get_attack_hits(_shape, attacker_id)
+                    # 击退:只在连段的「最后一段」触发,把目标推出攻击范围。
+                    # 动机:攻击间隔(583ms)比 hurt 硬直(666ms)短,不击退会被连击到死。
+                    # 最后一段命中后目标被匀速推出 knockback_distance 像素,硬直结束时
+                    # 已脱离下一击范围,被打的人有反击/逃跑的机会。
+                    # 非最后一段不击退(避免连段中途把目标推开,反而打断连击)。
+                    is_last_shape = (_shape_idx == len(config.shape_list) - 1)
+                    knockback_distance = getattr(_shape, "knockback_distance", 0.0) if is_last_shape else 0.0
+                    # 逐个调 apply_hurt 改状态(状态变更方法都是单玩家的,
+                    # 遍历列表由调用方负责,保持原子性;apply_hurt 内部会查能力配置)
+                    _hurt_duration = config_loader.get_hurt_duration_ms()
+                    for hurt_id in hurt_list:
+                        damage = self.room.get_attack_damage(attacker_id, atk_id, _shape_idx, hurt_id)
+                        # apply_hurt 返回 HurtResult 枚举,区分 HURT/DEAD/FAILED
+                        result = self.room.apply_hurt(hurt_id, atk_id, _shape_idx, damage, attacker_id)
+                        if result == game_room.HurtResult.HURT:
+                            # 没死:启 hurt timer(硬直)
+                            self.timer_mgr.start_hurt(hurt_id, _hurt_duration, self.get_hurt_end_callback(hurt_id, attacker_id, atk_id, _hurt_duration))
+                            # 连段最后一段命中:应用击退(硬直期间被匀速推出)
+                            # 死亡(DEAD)不击退——尸体不该滑走
+                            if knockback_distance > 0:
+                                self.room.apply_knockback(hurt_id, attacker_id, knockback_distance)
+                        elif result == game_room.HurtResult.DEAD:
+                            # 死亡:启 dead timer(延迟移除实体,让客户端播死亡动画)
+                            # 取死亡者类型的死亡动画时长(从 entity_config 查)
+                            dead_entity = self.room.get_entity(hurt_id)
+                            if dead_entity is not None:
+                                _dead_duration = config_loader.get_dead_duration_ms(dead_entity.entity_type)
+                                self.timer_mgr.start_dead(hurt_id, _dead_duration, self.get_dead_end_callback(hurt_id, attacker_id, atk_id))
+                            # 广播 EntityDead(客户端切 DeadState 播死亡动画)
+                            self._queue_broadcast("EntityDead", {
+                                "entity_id": hurt_id,
+                                "attacker_id": attacker_id,
+                                "atk_id": atk_id,
+                            })
+                        # FAILED:实体不存在/不能被攻击/无战斗组件,不做任何后续(防御性,get_attack_hits 已过滤)
+                        # 广播 HpChanged(含 damage 给飘字,cur_hp 给血条)
+                        # cur_hp 从 combat 取(apply_hurt 已扣过血)
+                        hurt_combat = self.room.get_combat(hurt_id)
+                        self._queue_broadcast("HpChanged", {
+                            "entity_id": hurt_id,
+                            "cur_hp": hurt_combat.cur_hp if hurt_combat else 0,
+                            "damage": damage,
+                            "attacker_id": attacker_id,
+                            "atk_id": atk_id,
+                            "atk_shape_idx": _shape_idx,
+                        })
+
+                    # 塞队列不阻塞 timer 回调
+                    self._queue_broadcast("AttackHit", {
+                        "attacker_id": attacker_id,
+                        "hit_list": hurt_list,
+                        "atk_id": atk_id,
+                        "hurt_duration": _hurt_duration,
+                        "atk_shape_idx": _shape_idx,
+                    })
+
+                async def end_cb():
+                    self.room.apply_attack_end(attacker_id, atk_id)
+                    # 塞队列不阻塞 timer 回调
+                    self._queue_broadcast("AttackEnd", {
+                        "entity_id": attacker_id,
+                    })
+
+                self.timer_mgr.start_attack(attacker_id, shape.hit_time, shape.duration, hit_cb, end_cb)
+        return True
 
     def get_hurt_end_callback(self, hurt_id: str, attacker_id: str, atk_id: int, hurt_duration: int):
         async def hurt_end():

@@ -32,13 +32,28 @@ message ChatMessage {
   int64 timestamp = 4;       // 时间戳
 }
 
-// 玩家移动消息(增量更新,只带 x/y/moving)
+// 玩家移动消息(C2S:发输入方向;S2C:广播服务端算出的位置)
+// ----------------------------------------------------------------------------
+// 两种语义区分(同一个消息,C2S 和 S2C 字段含义不同):
+//   - C2S(客户端→服务端):发方向向量(dir_x/dir_y)+ moving
+//     客户端不再发目标坐标,避免"客户端 60Hz 算位置,服务端 30Hz 节流丢半"的拉回问题
+//     服务端按 dir * speed * TICK_INTERVAL 推进位移,保证速度一致
+//   - S2C(服务端→客户端):广播落地后的绝对坐标(x/y)+ moving
+//     客户端收到后更新 target_pos,在 _process 里 lerp 插值(30Hz→60Hz 平滑)
+//
+// 字段使用规则:
+//   - C2S 时:填 dir_x/dir_y/moving,x/y/speed 不填(服务端忽略)
+//   - S2C 时:填 x/y/moving,dir_x/dir_y 不填(客户端忽略)
+//   - moving 两端都用:驱动动画状态 idle/run
+// ----------------------------------------------------------------------------
 message PlayerMove {
   string entity_id = 1;      // 实体ID
-  float x = 2;               // 目标X坐标
-  float y = 3;               // 目标Y坐标
-  float speed = 4;           // 移动速度
-  bool moving = 5;           // 是否正在移动(客户端发,服务端据此设 state=idle/run)
+  float x = 2;               // [S2C] 服务端算出的 X坐标
+  float y = 3;               // [S2C] 服务端算出的 Y坐标
+  float speed = 4;           // [已废弃,保留字段] 旧协议残留,服务端不再读;speed 改由 entity_config.json 配置
+  bool moving = 5;           // 是否正在移动(两端都用,驱动动画 state=idle/run)
+  float dir_x = 6;           // [C2S] 移动方向向量 x(-1~1,归一化)
+  float dir_y = 7;           // [C2S] 移动方向向量 y(-1~1,归一化)
 }
 
 // 玩家朝向消息(增量更新,只改 facing 不改坐标)
@@ -150,6 +165,32 @@ message EntityRemove {
     string entity_id = 1;       // 被移除的实体ID
 }
 
+// 网络延迟探测(C2S: 客户端发 Ping; S2C: 服务端原样回 Pong)
+message Ping {
+  int64 t = 1;    // 客户端发送时刻(ms, Time.get_ticks_msec())
+}
+message Pong {
+  int64 t = 1;    // 服务端原样回填客户端的时间戳,客户端用 now - t 算 RTT
+}
+
+// 地图信息(S2C: 新玩家加入时单播给该玩家)
+// ----------------------------------------------------------------------------
+// 项目采用「服务器持有种子,双端一致生成」的架构(见 docs/client-ui.md):
+//   - 服务端启动时持有 seed(当前硬编码 12345,未来可改成随机生成)
+//   - 客户端 InfiniteTileMap.setup(seed) 用 seed 构造 ChunkGenerator
+//   - 双端用同一份 seed + 同一份算法产出完全相同的地图(详见 map_generator.py)
+//
+// 发送时机:PlayerJoin handler 里,在 GameState 之前单播给新玩家。
+// 为什么在 GameState 之前:让客户端先初始化地图,再创建实体。
+//   实体坐标是世界坐标,地图没初始化时实体显示位置不对(虽然不影响逻辑)。
+//
+// 为什么只单播不广播:每个玩家只需要在加入时收到一次 MapInfo。
+//   已在线玩家早就收到过了,重发浪费带宽。
+// ----------------------------------------------------------------------------
+message MapInfo {
+  int32 seed = 1;            // 地图种子(服务端启动时生成,当前硬编码 12345)
+}
+
 // 通用消息包装器
 message GameMessage {
   oneof message_type {
@@ -169,5 +210,8 @@ message GameMessage {
     HpChanged hp_changed = 14;
     EntityDead entity_dead = 15;      // 实体死亡(S2C 广播)
     EntityRemove entity_remove = 16;  // 实体移除(S2C 广播)
+    Ping ping = 17;       // 延迟探测请求(C2S)
+    Pong pong = 18;       // 延迟探测响应(S2C)
+    MapInfo map_info = 19;            // 地图信息(S2C 单播,新玩家加入时发)
   }
 }

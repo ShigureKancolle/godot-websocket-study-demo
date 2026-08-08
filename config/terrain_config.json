@@ -1,0 +1,13 @@
+{
+    "_comment": "地形能力配置表(单数据源,双端共享。改完跑 tools/sync_config.py 同步)",
+    "_terrain_type_values": "GRASS=0, SAND=1, DIRT=2, BRICK=3(和 ChunkGenerator.TerrainType 枚举顺序一致,见 client/Script/tiledmap/ChunkGenerator.gd 和 server/game/map_generator.py)",
+    "_walkable_desc": "walkable 表示该地形是否可通行(AI 寻路用)。true=可通行,false=障碍。未来可扩展 move_cost(通行代价,影响 A* 权重)等字段",
+    "_usage": "服务端 config_loader.is_walkable(type_id) / 客户端 ConfigLoader.is_walkable(type_id)。type_id 是 ChunkGenerator.get_tile_type_v3 的返回值(int)",
+
+    "terrains": {
+        "GRASS": {"walkable": true, "_desc": "草地(可通行)"},
+        "SAND": {"walkable": false, "_desc": "沙地(可通行)"},
+        "DIRT": {"walkable": true, "_desc": "泥地(可通行,预留地形,ChunkGenerator 当前不生成)"},
+        "BRICK": {"walkable": false, "_desc": "砖地(障碍,预留地形,ChunkGenerator 当前不生成)"}
+    }
+}

@@ -24,7 +24,7 @@ config_loader 返回的 EntityCapability 已经包含:
 
 能力字段含义
 -----------------------------------------------------------------------------
-- can_move:     能否移动(apply_move 校验)。玩家 True,木桩 False
+- can_move:     能否移动(apply_move_dir 校验)。玩家 True,木桩 False
 - can_attack:   能否发起攻击(apply_attack_start 校验)。玩家 True,木桩 False
 - can_be_hurt:  能否被攻击命中(get_attack_hits 过滤 + apply_hurt 校验)。
                 玩家/木桩 True,墙/水地 False(它们是地形,不是可破坏物)

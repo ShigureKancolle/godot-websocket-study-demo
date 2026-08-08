@@ -29,6 +29,7 @@ register_all 会遍历所有子模块,调各自的 register(server)。
 # 项目模块用 import xxx as xxx,不用 from xxx import(热更约束)
 import game.handlers.player_handlers as player_handlers
 import game.handlers.chat_handlers as chat_handlers
+import game.handlers.network_handlers as network_handlers
 
 
 def register_all(server) -> None:
@@ -40,3 +41,4 @@ def register_all(server) -> None:
     """
     player_handlers.register(server)
     chat_handlers.register(server)
+    network_handlers.register(server)
