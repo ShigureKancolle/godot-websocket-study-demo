@@ -151,12 +151,13 @@ class AttackConfig:
 # ChunkGenerator.get_tile_type_v3 返回 TerrainType 枚举值(int),
 # 本配置表把枚举值映射成能力字段,供寻路系统查询。
 # 地形类型 → 名称映射(和 map_generator.TerrainType / ChunkGenerator.gd 的 TerrainType 对齐):
-#   0=GRASS, 1=SAND, 2=DIRT, 3=BRICK
+#   0=GRASS, 1=SAND, 2=DIRT, 3=BRICK, 4=WATER
 _TERRAIN_ID_TO_NAME: Dict[int, str] = {
     0: "GRASS",
     1: "SAND",
     2: "DIRT",
     3: "BRICK",
+    4: "WATER",
 }
 
 

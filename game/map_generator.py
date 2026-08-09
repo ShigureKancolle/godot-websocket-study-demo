@@ -92,12 +92,13 @@ from typing import List
 # atlas coord 映射是客户端渲染层的事(见 InfiniteTileMap.gd 的 _TERRAIN_ATLAS)。
 #
 # 值必须和 ChunkGenerator.gd 的 TerrainType 枚举顺序一致:
-#   GRASS = 0, SAND = 1, DIRT = 2, BRICK = 3
+#   GRASS = 0, SAND = 1, DIRT = 2, BRICK = 3, WATER = 4
 class TerrainType:
     GRASS = 0   # 草地(可通行)
     SAND = 1    # 沙地(可通行)
     DIRT = 2    # 泥地(预留,可通行)
     BRICK = 3   # 砖地(预留,可能不可通行)
+    WATER = 4   # 水(障碍,以宏块为单位生成:竖排 2 block = 8 tile)
 
 
 # ===========================================================================
@@ -118,6 +119,29 @@ V3_NOISE_SCALE: float = 0.15
 # SAND 激活阈值。noise < 此值 → SAND,否则 GRASS。
 # 0.35 = ~35% SAND 覆盖率。
 V3_SAND_THRESHOLD: float = 0.35
+
+# ---------------------------------------------------------------------------
+# 水地形(以「水宏块」为单位生成)
+# ---------------------------------------------------------------------------
+# 水的特殊规则:每次生成占 1 block 宽 × 2 block 高 = 2×4 = 8 tile,
+# 样式是「竖着排列的两个 block」。因此不能像沙地那样每 block 独立判定,
+# 而是以更大的「水宏块」为判定单位 —— 同一宏块内的 2 个 block 永远同类型。
+#
+# 双端一致约束:宏块坐标公式、噪声调用、阈值必须和 ChunkGenerator.gd 一字不差。
+# 宏块坐标 = floor(block / WATER_MACRO),天然保证竖排 2 block 成对共享同一 mb_y。
+
+# 水宏块尺寸(block 数)。W=1 宽 × H=2 高 = 2×4 tile = 8 tile。
+WATER_MACRO_W: int = 1
+WATER_MACRO_H: int = 2
+
+# 水生成的独立噪声尺度。和沙地噪声(V3_NOISE_SCALE)分开,水有自己独立的分布。
+# 0.08 = 每 ~12 个宏块一个噪声周期,产生中等大小的水域。
+WATER_NOISE_SCALE: float = 0.08
+
+# 水激活阈值(固定值,不开放配置)。noise < 此值 → WATER。
+# 独立噪声层,水可能覆盖原本的 SAND/GRASS 区域。
+# 0.25:seed=12345 时玩家起始 3chunk 范围内可见水域(原 0.15 太稀,看不到水)
+WATER_THRESHOLD: float = 0.25
 
 
 # ===========================================================================
@@ -152,14 +176,32 @@ class ChunkGenerator:
         查询 block 的地形类型。纯函数,跨 chunk 友好。
 
         用 value noise 产生成片区域,避免碎块。
-        当前只区分 SAND 和 GRASS。扩展时在此函数增加 DIRT/BRICK 判断。
+        当前区分 SAND / GRASS / WATER。扩展时在此函数增加 DIRT/BRICK 判断。
+
+        判定优先级:
+            1. 水宏块判定(最高):水以「竖排 2 block = 8 tile」为整体生成,
+               用独立噪声层。同一宏块内的 2 个 block 算出相同 mb_y → 同类型。
+            2. 原有 SAND/GRASS 判定:value noise 每 block 独立。
 
         Args:
             block_x, block_y: block 坐标(世界 tile 坐标 / BLOCK_SIZE)
 
         Returns:
-            TerrainType.GRASS 或 TerrainType.SAND
+            TerrainType.GRASS / SAND / WATER
         """
+        # 1. 水宏块判定(优先级最高,独立噪声层)
+        #    宏块 = WATER_MACRO_W block 宽 × WATER_MACRO_H block 高。
+        #    竖排 2 block 成对共享 mb_y(floor 除法,双端一致)。
+        mb_x: int = int(math.floor(float(block_x) / WATER_MACRO_W))
+        mb_y: int = int(math.floor(float(block_y) / WATER_MACRO_H))
+        n_water: float = self._value_noise_2d(
+            mb_x * WATER_NOISE_SCALE,
+            mb_y * WATER_NOISE_SCALE,
+        )
+        if n_water < WATER_THRESHOLD:
+            return TerrainType.WATER
+
+        # 2. 原有 SAND/GRASS 判定
         n: float = self._value_noise_2d(
             block_x * V3_NOISE_SCALE,
             block_y * V3_NOISE_SCALE,
@@ -314,6 +356,8 @@ def _self_test() -> None:
     print("Python 版 map_generator 自测")
     print(f"seed = 12345, CHUNK_SIZE = {CHUNK_SIZE}, BLOCK_SIZE = {BLOCK_SIZE}")
     print(f"V3_NOISE_SCALE = {V3_NOISE_SCALE}, V3_SAND_THRESHOLD = {V3_SAND_THRESHOLD}")
+    print(f"WATER: MACRO_W={WATER_MACRO_W}, MACRO_H={WATER_MACRO_H}, "
+          f"SCALE={WATER_NOISE_SCALE}, THRESHOLD={WATER_THRESHOLD}")
     print("=" * 60)
 
     # 测试若干单点查询
@@ -321,18 +365,19 @@ def _self_test() -> None:
     test_points = [(0, 0), (1, 0), (0, 1), (15, 15), (16, 0), (-1, -1), (100, -50)]
     for wx, wy in test_points:
         t = gen.get_tile_type_v3(wx, wy)
-        type_name = {0: "GRASS", 1: "SAND", 2: "DIRT", 3: "BRICK"}.get(t, "?")
+        type_name = {0: "GRASS", 1: "SAND", 2: "DIRT", 3: "BRICK", 4: "WATER"}.get(t, "?")
         print(f"  get_tile_type_v3({wx:>4}, {wy:>4}) = {t} ({type_name})")
 
     # 测试 chunk 生成,打印成矩阵方便和客户端对比
-    print("\n[chunk 生成 generate_chunk_v3] (G=GRASS, S=SAND)")
+    print("\n[chunk 生成 generate_chunk_v3] (G=GRASS, S=SAND, W=WATER)")
     test_chunks = [(0, 0), (1, 0), (-1, 0)]
     for cx, cy in test_chunks:
         data = gen.generate_chunk_v3(cx, cy)
         print(f"\n  chunk({cx}, {cy}):")
         for ly in range(CHUNK_SIZE):
             row = "".join(
-                "G" if data[ly * CHUNK_SIZE + lx] == TerrainType.GRASS else "S"
+                "G" if data[ly * CHUNK_SIZE + lx] == TerrainType.GRASS
+                else ("W" if data[ly * CHUNK_SIZE + lx] == TerrainType.WATER else "S")
                 for lx in range(CHUNK_SIZE)
             )
             print(f"    {row}")
