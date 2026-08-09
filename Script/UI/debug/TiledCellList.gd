@@ -38,6 +38,18 @@ func init_tile_coord_list():
 	])
 	tile_coord_list.append({"data": _data})
 
+	# 纯水
+	var water_data = tile_data.new()
+	water_data.tile_id = -2
+	var water_atlas: Vector2i = InfiniteTileMap._TERRAIN_ATLAS[ChunkGenerator.TerrainType.WATER]
+	water_data.tiles.append_array([
+		TiledCell.new(water_atlas, 0, 1),
+		TiledCell.new(water_atlas, 0, 1),
+		TiledCell.new(water_atlas, 0, 1),
+		TiledCell.new(water_atlas, 0, 1)
+	])
+	tile_coord_list.append({"data": water_data})
+
 	for k in mytiles:
 		var mytile = mytiles[k]
 		var data = tile_data.new()

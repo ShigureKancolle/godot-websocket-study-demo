@@ -6,6 +6,17 @@ var last_draw_tile_pos = null
 var SAND_ATLAS = [
 	Vector2i(5, 10), Vector2i(6, 10)
 ]
+# 水的所有贴图坐标（纯水 + 过渡素材，见 InfiniteTileMap._build_water_forms）
+# 用于在调试场景判定某个 tile 是否属于"水"地形（邻居判定/自身刷新）
+var WATER_ATLAS = [
+	Vector2i(10, 14), Vector2i(10, 20), Vector2i(11, 20),  # 纯水（form0 + 变体）
+	Vector2i(10, 12), Vector2i(10, 13),                    # 上边岸/水（form1）
+	Vector2i(11, 12), Vector2i(11, 13), Vector2i(11, 15),  # 上+右岸/水、下+右角
+	Vector2i(9, 12), Vector2i(9, 13),                      # 上+左岸/水
+	Vector2i(9, 18), Vector2i(9, 16),                      # 角过渡（右上/右下/左下）
+	Vector2i(11, 18), Vector2i(11, 19),                    # 左上角岸/水
+	Vector2i(11, 14),                                      # 右岸（shore4）
+]
 @onready var _tile_map_layer: TileMapLayer = $Grass
 
 # 鼠标悬停时显示当前 cell 坐标的 Label（懒创建）
@@ -18,6 +29,7 @@ var _hover_label: Label
 # 在 TileMapLayer 上画出几种经典的沙地-草地过渡形态，验证贴图配置
 # 每个样式 = 1 个中心沙地 block（走沙地形态表）+ 周围按 form8 放草地 block
 var _v3_grass_forms: Dictionary = {}
+var _v3_water_forms: Dictionary = {}
 var _v3_alt_cache: Dictionary = {}
 const _BLOCK_SIZE: int = 2
 
@@ -40,9 +52,10 @@ func _show_v3_samples() -> void:
 	_tile_info_map.clear()
 
 	# 初始化配置（复用 InfiniteTileMap 的 static 函数）
-	# 草地已是静态地形（无形态表），沙地是当前唯一的过渡地形 → 展示沙地形态表
+	# 草地已是静态地形（无形态表），沙地和水是过渡地形 → 取各自的形态表
 	var terrain_forms: Dictionary = InfiniteTileMap._init_terrain_forms()
 	_v3_grass_forms = terrain_forms.get(ChunkGenerator.TerrainType.SAND, {})
+	_v3_water_forms = terrain_forms.get(ChunkGenerator.TerrainType.WATER, {})
 
 	# 经典 form8 列表（旋转归一化后的值）
 	# 0=全草地, 1=单边, 2=单角, 5=两边L, 10=两角对, 21=三边, 42=三角, 85=四边, 170=四角
@@ -339,11 +352,16 @@ func _on_debug_draw() -> void:
 	for pos in pos_list:
 		var tc: TiledCell = _tile_info_map.get(pos, null)
 		if tc == null:
-			continue  
+			continue
+		# 判定该 tile 属于哪种过渡地形（沙地/水），草地是静态地形不刷新
 		var is_sand: bool = (tc.assets_pos in SAND_ATLAS)
-		if not is_sand:
-			continue  # 草地是静态地形，不需要刷新
-		# 计算周围8个格子的掩码（对沙地来说，邻居是草地 = 异类 → bit=1）
+		var is_water: bool = (tc.assets_pos in WATER_ATLAS)
+		if not is_sand and not is_water:
+			continue
+		var forms: Dictionary = _v3_grass_forms if is_sand else _v3_water_forms
+		var atlas_set: Array = SAND_ATLAS if is_sand else WATER_ATLAS
+
+		# 计算周围8个格子的掩码（邻居不是本地形 = 异类 → bit=1）
 		var from8_mask: int = 0
 		for i in from8:
 			if i == Vector2i.ZERO:
@@ -352,56 +370,36 @@ func _on_debug_draw() -> void:
 			var neighbor_tc: TiledCell = _tile_info_map.get(neighbor_pos, null)
 			if neighbor_tc == null:
 				continue
-			var neighbor_is_sand: bool = (neighbor_tc.assets_pos in SAND_ATLAS)
-			if not neighbor_is_sand:
+			var neighbor_same: bool = (neighbor_tc.assets_pos in atlas_set)
+			if not neighbor_same:
 				from8_mask |= (1 << from8.find(i))  # 计算掩码，正上方为bit0，顺时针
 
-		# 对from8_mask归一化，获得最小值
-		var result = null
-		if pos.x==last_draw_tile_pos.x and pos.y==last_draw_tile_pos.y:
-			print("刷新 tile 坐标: ", pos, " from8_mask: ", from8_mask)
-		var norm: Dictionary = InfiniteTileMap._normalize_form8(from8_mask)
-		var base_form: int = norm.form
-		var rotations: int = norm.rotations
-		var mtc: MyTiledCell = _v3_grass_forms.get(base_form, null)
-		if mtc == null:
-			# 退化：去掉被相邻边覆盖的角，只保留孤立角（与 InfiniteTileMap 一致）
-			var reduced: int = InfiniteTileMap._reduce_covered_corners(from8_mask)
-			var norm4: Dictionary = InfiniteTileMap._normalize_form8(reduced)
-			mtc = _v3_grass_forms.get(norm4.form, null)
-			rotations = norm4.rotations
-		if mtc == null:
-			# fallback 到纯沙地块（form 0）
-			mtc = _v3_grass_forms.get(0, null)
-			rotations = 0
-		if mtc == null:
-			result = [
-				{atlas = InfiniteTileMap._TERRAIN_ATLAS.get(ChunkGenerator.TerrainType.SAND, Vector2i.ZERO), alt = 0},
-				{atlas = InfiniteTileMap._TERRAIN_ATLAS.get(ChunkGenerator.TerrainType.SAND, Vector2i.ZERO), alt = 0},
-				{atlas = InfiniteTileMap._TERRAIN_ATLAS.get(ChunkGenerator.TerrainType.SAND, Vector2i.ZERO), alt = 0},
-				{atlas = InfiniteTileMap._TERRAIN_ATLAS.get(ChunkGenerator.TerrainType.SAND, Vector2i.ZERO), alt = 0}
-			]
-		
-		if result == null:
-			result = []
-			if rotations > 0:
-				mtc = InfiniteTileMap._rotate_my_tiled_cell(mtc, (4 - rotations) % 4)
-			# var bx = pos.x / _BLOCK_SIZE
-			# var by = pos.y / _BLOCK_SIZE
-			# var local_bx: int = pos.x - bx * _BLOCK_SIZE
-			# var local_by: int = pos.y - by * _BLOCK_SIZE
-			# var local_idx: int = local_bx + local_by * 2
+		if pos.x == last_draw_tile_pos.x and pos.y == last_draw_tile_pos.y:
+			print("刷新 tile 坐标: ", pos, " from8_mask: ", from8_mask, " 地形: ", "沙地" if is_sand else "水")
 
-			# 从候选数组按权重抽取 TiledCell
-			
-			for i in range(4):
-				var local_idx: int = i
-				var candidates: Array = mtc.get_candidates(local_idx)
-				var _tc: TiledCell = InfiniteTileMap._pick_tiled_cell(candidates, pos.x, pos.y)
+		# 通用查找（与 InfiniteTileMap._compute_tile_atlas_v3 一致）：
+		# 先精确 form8 → 非上边旋转 → 归一化 → 覆盖角退化 → fallback form0
+		var found: Dictionary = InfiniteTileMap._lookup_form_mtc(forms, from8_mask)
+		if found.is_empty():
+			continue  # 形态表连 form 0 都没有（不该发生），跳过
+		var mtc: MyTiledCell = found.mtc
+		var rotations: int = found.rotations
 
-				# 获取或创建 alternative_tile（dir>0 时动态创建旋转变体）
-				var alt: int = _get_or_create_alt_tile(_tc.assets_pos, _tc.dir)
-				result.append({atlas = _tc.assets_pos, alt = alt})
+		# 旋转 MyTiledCell（归一化时 form8 顺时针转 N 次得到 min_form，
+		# mtc 需顺时针转 (4-N) 次回到 form8 方向）
+		if rotations > 0:
+			mtc = InfiniteTileMap._rotate_my_tiled_cell(mtc, (4 - rotations) % 4)
+
+		# 从候选数组按权重抽取 TiledCell
+		var result: Array = []
+		for i in range(4):
+			var local_idx: int = i
+			var candidates: Array = mtc.get_candidates(local_idx)
+			var _tc: TiledCell = InfiniteTileMap._pick_tiled_cell(candidates, pos.x, pos.y)
+
+			# 获取或创建 alternative_tile（dir>0 时动态创建旋转变体）
+			var alt: int = _get_or_create_alt_tile(_tc.assets_pos, _tc.dir)
+			result.append({atlas = _tc.assets_pos, alt = alt})
 
 		for i in range(4):
 			var cell_pos: Vector2i = pos + block_vector[i]

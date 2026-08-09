@@ -75,6 +75,7 @@ enum TerrainType {
 	SAND,   # 沙地
 	DIRT,   # 泥地
 	BRICK,  # 砖地
+	WATER,  # 水(障碍,以宏块为单位生成:竖排 2 block = 8 tile)
 }
 
 # Chunk 边长（tile 数）。双端必须一致。
@@ -92,6 +93,29 @@ const V3_NOISE_SCALE: float = 0.15
 # SAND 激活阈值。noise < 此值 → SAND，否则 GRASS。
 # 0.35 = ~35% SAND 覆盖率。
 const V3_SAND_THRESHOLD: float = 0.35
+
+# ---------------------------------------------------------------------------
+# 水地形（以「水宏块」为单位生成）
+# ---------------------------------------------------------------------------
+# 水的特殊规则：每次生成占 1 block 宽 × 2 block 高 = 2×4 = 8 tile，
+# 样式是「竖着排列的两个 block」。因此不能像沙地那样每 block 独立判定，
+# 而是以更大的「水宏块」为判定单位 —— 同一宏块内的 2 个 block 永远同类型。
+#
+# 双端一致约束：宏块坐标公式、噪声调用、阈值必须和 map_generator.py 一字不差。
+# 宏块坐标 = floor(block / WATER_MACRO)，天然保证竖排 2 block 成对共享同一 mb_y。
+
+# 水宏块尺寸（block 数）。W=1 宽 × H=2 高 = 2×4 tile = 8 tile。
+const WATER_MACRO_W: int = 1
+const WATER_MACRO_H: int = 2
+
+# 水生成的独立噪声尺度。和沙地噪声（V3_NOISE_SCALE）分开，水有自己独立的分布。
+# 0.08 = 每 ~12 个宏块一个噪声周期，产生中等大小的水域。
+const WATER_NOISE_SCALE: float = 0.08
+
+# 水激活阈值（固定值，不开放配置）。noise < 此值 → WATER。
+# 独立噪声层，水可能覆盖原本的 SAND/GRASS 区域。
+# 0.25：seed=12345 时玩家起始 3chunk 范围内可见水域（原 0.15 太稀，看不到水）
+const WATER_THRESHOLD: float = 0.25
 
 
 # ===========================================================================
@@ -111,8 +135,26 @@ func _init(seed: int = 0) -> void:
 ## 查询 block 的地形类型
 ## 纯函数，跨 chunk 友好。用 value noise 产生成片区域，避免碎块。
 ##
-## 当前只区分 SAND 和 GRASS。扩展时在此函数增加 DIRT/BRICK 判断。
+## 当前区分 SAND / GRASS / WATER。扩展时在此函数增加 DIRT/BRICK 判断。
+##
+## 判定优先级：
+##   1. 水宏块判定（最高）：水以「竖排 2 block = 8 tile」为整体生成，
+##      用独立噪声层。同一宏块内的 2 个 block 算出相同 mb_y → 同类型。
+##   2. 原有 SAND/GRASS 判定：value noise 每 block 独立。
 func get_block_type_v3(block_x: int, block_y: int) -> int:
+	# 1. 水宏块判定（优先级最高，独立噪声层）
+	#    宏块 = WATER_MACRO_W block 宽 × WATER_MACRO_H block 高。
+	#    竖排 2 block 成对共享 mb_y（floor 除法，双端一致）。
+	var mb_x: int = int(floor(float(block_x) / WATER_MACRO_W))
+	var mb_y: int = int(floor(float(block_y) / WATER_MACRO_H))
+	var n_water: float = _value_noise_2d(
+		mb_x * WATER_NOISE_SCALE,
+		mb_y * WATER_NOISE_SCALE
+	)
+	if n_water < WATER_THRESHOLD:
+		return TerrainType.WATER
+
+	# 2. 原有 SAND/GRASS 判定
 	var n: float = _value_noise_2d(
 		block_x * V3_NOISE_SCALE,
 		block_y * V3_NOISE_SCALE

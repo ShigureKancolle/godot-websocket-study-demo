@@ -1,6 +1,6 @@
 {
-	"_comment": "全局常量(单数据源,双端共享。改完跑 tools/sync_config.py 同步)",
-	"_unit": "所有时间字段用毫秒(ms),和服务端 timer_mgr 一致",
+    "_comment": "全局常量(单数据源,双端共享。改完跑 tools/sync_config.py 同步)",
+    "_unit": "所有时间字段用毫秒(ms),和服务端 timer_mgr 一致",
 
-	"HURT_DURATION_MS": 666
+    "HURT_DURATION_MS": 666
 }

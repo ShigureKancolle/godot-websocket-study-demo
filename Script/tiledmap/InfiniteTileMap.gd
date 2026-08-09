@@ -57,12 +57,14 @@ class_name InfiniteTileMap
 #   SAND  (6, 10) = 普通沙地
 #   DIRT  (1, 10) = 泥地（待确认）
 #   BRICK (9, 10) = 砖地（待确认）
+#   WATER (10,14) = 水面（像素分析确认：蓝占比100% avg(54,164,200)，纯亮水蓝，已注册 base tile）
 # atlas 布局：18 列 × 27 行，每个 tile 16×16 像素
 const _TERRAIN_ATLAS: Dictionary = {
 	ChunkGenerator.TerrainType.GRASS: Vector2i(4, 14),  # 普通草地
 	ChunkGenerator.TerrainType.SAND: Vector2i(6, 10),   # 普通沙地（3×3 中心）
 	ChunkGenerator.TerrainType.DIRT: Vector2i(1, 10),   # 泥地（占位）
 	ChunkGenerator.TerrainType.BRICK: Vector2i(9, 10),  # 砖地（占位）
+	ChunkGenerator.TerrainType.WATER: Vector2i(10, 14),  # 水面（亮水蓝，已确认）
 }
 
 # 变体选择专用 hash seed。和地图 seed 分开（变体是纯渲染层的事）。
@@ -94,6 +96,9 @@ const _VARIANT_HASH_SEED: int = 98765
 
 # block 边长（tile 数），和 ChunkGenerator.BLOCK_SIZE 一致
 const _BLOCK_SIZE: int = 2
+
+# 旋转同化排除「纯上边 bit0」：上(bit0=1) 独特（水是竖着 2 tile 素材）不能旋转。
+# 右上(bit1)/左上(bit7) 不排除 —— 它们可被右/左覆盖同化（见 _rot_lookup_no_top）。
 
 # 过渡地形形态表。key = 地形类型（TerrainType），value = 该地形的形态表
 # （key = 旋转归一化后的 8 位掩码，value = MyTiledCell）。
@@ -607,6 +612,287 @@ static func _init_sand_tiled() -> Dictionary:
 	}
 	return res
 
+## 水的完整形态表（★ 直接在这里配 MyTiledCell 的 4 个资源）
+## 水是"过渡地形"，过渡固定一套（竖着 2 tile），不随机。
+##
+## MyTiledCell.new(main_type, [4 个位置的候选数组])，4 个位置：
+##   index 0 = (0,0) 上左    index 1 = (1,0) 上右
+##   index 2 = (0,1) 下左    index 3 = (1,1) 下右
+##
+## 竖着 2 tile 过渡：上排 = 岸/过渡上半，下排 = 水/过渡下半。
+## 查找策略（_compute_tile_atlas_v3）：先按「原始 form8」精确查表，命中就用、
+## 不旋转；没命中才走旋转归一化派生。所以：
+##   - form 1 = 上边异类（bit0）→ 用竖着 2 tile 岸线
+##   - 若右/下/左的岸线素材不同，可额外配独立 form：
+##       form 4  = 右边异类（bit2）
+##       form 16 = 下边异类（bit4）
+##       form 64 = 左边异类（bit6）
+##     配了就走精确匹配（不旋转），没配就 fallback 到 form 1 旋转派生。
+## form 0 是纯水（可多格变体），form 2/5 是角过渡（可选）。
+## 缺失的复杂 form（9/10/11/17/21/34/42/170/85）自动退化到简单 form。
+static func _build_water_forms() -> Dictionary:
+	# ★ 你改这里：纯水（form 0 用，可多格变体随机）
+	var pure_water: Array = [
+		TiledCell.new(Vector2i(10, 14), 0, 100),  # 主水面
+		TiledCell.new(Vector2i(10, 20), 0, 1),
+		TiledCell.new(Vector2i(11, 20), 0, 1),
+	]
+	# ★ 你改这里：岸/过渡上半（form 1 上排用）
+	var shore1: Array = [TiledCell.new(Vector2i(10, 12), 0, 1)]
+	# ★ 你改这里：水/过渡下半（form 1 下排用）
+	var water1: Array = [TiledCell.new(Vector2i(10, 13), 0, 1)]
+
+	# ★ 两邻边是其他 上半
+	var shore5: Array = [TiledCell.new(Vector2i(11, 12), 0, 1)]
+	var water5: Array = [TiledCell.new(Vector2i(11, 13), 0, 1)]
+	# 下半
+	var water5_down: Array = [TiledCell.new(Vector2i(11, 15), 0, 1)]
+	var shore5_left: Array = [TiledCell.new(Vector2i(9, 12), 0, 1)]
+	var water5_left: Array = [TiledCell.new(Vector2i(9, 13), 0, 1)]
+
+	# ★ 两邻边是水 角是其他
+	var shore2: Array = [TiledCell.new(Vector2i(9, 18), 0, 1)]
+	var water2: Array = [TiledCell.new(Vector2i(9, 19), 0, 1)]
+	# 下半
+	var water2_down: Array = [TiledCell.new(Vector2i(9, 16), 0, 1)]
+	# 左侧
+	var shore2_left: Array = [TiledCell.new(Vector2i(11, 18), 0, 1)]
+	var water2_left: Array = [TiledCell.new(Vector2i(11, 19), 0, 1)]
+	
+
+	# 左或右或下是岸
+	var shore4: Array = [TiledCell.new(Vector2i(11, 14), 0, 1)]
+
+	# 右下是岸
+	var shore8: Array = [TiledCell.new(Vector2i(9, 16), 0, 1)]
+
+	# 下+右是岸
+	var shore20: Array = [TiledCell.new(Vector2i(11, 15), 0, 1)]
+
+	return {
+		# form 0：纯水（周围全是水）
+		0: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [pure_water]),
+		# form 1：上边异类 → 上排岸 + 下排水（竖着 2 tile 过渡）
+		1: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			shore1,       # (0,0) 上左：岸
+			shore1,       # (1,0) 上右：岸
+			water1,       # (0,1) 下左：水
+			water1,       # (1,1) 下右：水
+		]),
+		# form 2：右上角异类（上右=岸，其余水）
+		2: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			pure_water,       # (0,0) 上左：水
+			shore2,       # (1,0) 上右：岸
+			pure_water,       # (0,1) 下左：水
+			water2,       # (1,1) 下右：水
+		]),
+		# form 5：上 + 右异类（上排岸 + 下排水）
+		5: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			shore1,       # (0,0) 上左：岸
+			shore5,       # (1,0) 上右：岸
+			water1,       # (0,1) 下左：水
+			water5,       # (1,1) 下右：水
+		]),
+		# form 9：上边异类 + 右下角异类（上排岸 + 右下角过渡）
+		9: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			shore1,       # (0,0) 上左：岸
+			shore1,       # (1,0) 上右：岸
+			water1,       # (0,1) 下左：水
+			water2_down,  # (1,1) 下右：右下角过渡
+		]),
+		# form 10: 右上角 + 右下角异类 实际不会出现 退化到4 右边是岸 
+		4: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			pure_water,       # (0,0) 上左：水
+			shore4,       # (1,0) 上右：右上角过渡
+			pure_water,       # (0,1) 下左：水
+			shore4,  # (1,1) 下右：右下角过渡
+		]),
+		# form 11: 上边 + 右上角 + 右下角异类 实际不会出现退化到5
+		# 11: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+		# 	shore1,       # (0,0) 上左：岸
+		# 	shore1,       # (1,0) 上右：岸
+		# 	water1,       # (0,1) 下左：水
+		# 	water2,  # (1,1) 下右：右下角过渡
+		# ]),
+		# form 17：上边 + 下边异类（上下都是岸） 实际不会出现退化到1
+		# 17: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+		# 	shore1,       # (0,0) 上左：岸（上边过渡）
+		# 	shore1,       # (1,0) 上右：岸（上边过渡）
+		# 	_rotate_tiled_cell(shore1, 2),  # (0,1) 下左：岸（下边过渡）
+		# 	_rotate_tiled_cell(shore1, 2),  # (1,1) 下右：岸（下边过渡）
+		# ]),
+		# form 21：上 + 右 + 下 三边异类 实际不会出现 退化到 上+右 5  或者下+右20
+		20: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			pure_water,       # (0,0) 上左：水
+			_rotate_tiled_cell(shore4, 0),      # (1,0) 上右：右岸
+			_rotate_tiled_cell(shore4, 1),      # (0,1) 下左：下岸
+			shore20,  # (1,1) 下右：下+右角
+		]),
+		# form 34：右上角 + 左下角（对角角）异类
+		34: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			pure_water,       # (0,0) 上左：水
+			shore2,       # (1,0) 上右：右上角过渡
+			_rotate_tiled_cell(water2_down, 1),  # (0,1) 下左：左下角过渡
+			water2,       # (1,1) 下右：水
+		]),
+		# form 42：左下 + 右上 + 右下 三角异类 不会出现 实际是左下+右边 36
+		36: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			pure_water,       # (0,0) 上左：水
+			_rotate_tiled_cell(shore4, 1),       # (1,0) 上右：右上角过渡
+			_rotate_tiled_cell(water2_down, 1),  # (0,1) 下左：左下角过渡
+			_rotate_tiled_cell(shore4, 1),  # (1,1) 下右：右下角过渡
+		]),
+		# form 170：四角异类
+		170: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			_rotate_tiled_cell(shore2, 3),  # (0,0) 上左：左上角过渡
+			shore2,       # (1,0) 上右：右上角过渡
+			_rotate_tiled_cell(shore2, 2),  # (0,1) 下左：左下角过渡
+			_rotate_tiled_cell(shore2, 1),  # (1,1) 下右：右下角过渡
+		]),
+		# form 85：四边异类
+		85: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			_rotate_tiled_cell(shore5, 3),  # (0,0) 上左：左上边过渡
+			shore5,       # (1,0) 上右：右上边过渡
+			_rotate_tiled_cell(shore5, 2),  # (0,1) 下左：左下边过渡
+			_rotate_tiled_cell(shore5, 1),  # (1,1) 下右：右下边过渡
+		]),
+		# ===== 新增：涉及上边（bit0/bit1/bit7）的独立掩码 =====
+		# 位置 = [上左, 上右, 下左, 下右]
+		# 旋转约定：右=shore4(0°) 下=rotate(shore4,1) 左=rotate(shore4,2)
+		#         右下=shore8 左下=rotate(shore8,1) 上+右=shore5 上+左=shore5_left
+		#         右上=shore2 左上=shore2_left
+		18: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			pure_water,                          # (0,0) 上左：水
+			shore2,                              # (1,0) 上右：右上角
+			_rotate_tiled_cell(shore4, 1),       # (0,1) 下左：下岸
+			_rotate_tiled_cell(shore4, 1),       # (1,1) 下右：下岸
+		]),  # 右上+下
+		33: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			shore1,                              # (0,0) 上左：上边岸
+			shore1,                              # (1,0) 上右：上边岸
+			_rotate_tiled_cell(shore8, 1),       # (0,1) 下左：左下角
+			pure_water,                          # (1,1) 下右：水
+		]),  # 上+左下
+		37: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			shore1,                              # (0,0) 上左：上边岸
+			shore5,                              # (1,0) 上右：上+右角
+			_rotate_tiled_cell(shore8, 1),       # (0,1) 下左：左下角
+			shore4,                              # (1,1) 下右：右岸
+		]),  # 上+右+左下
+		41: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			shore1,                              # (0,0) 上左：上边岸
+			shore1,                              # (1,0) 上右：上边岸
+			_rotate_tiled_cell(shore8, 1),       # (0,1) 下左：左下角
+			shore8,                              # (1,1) 下右：右下角
+		]),  # 上+右下+左下
+		65: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			shore5_left,                         # (0,0) 上左：左上角
+			shore1,                          # (1,0) 上右：水
+			water5_left,                          # (0,1) 下左：水
+			water1,                          # (1,1) 下右：水
+		]),  # 左+上
+		66: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			_rotate_tiled_cell(shore4, 2),       # (0,0) 上左：左岸
+			shore2,                              # (1,0) 上右：右上角
+			_rotate_tiled_cell(shore4, 2),       # (0,1) 下左：左岸
+			pure_water,                          # (1,1) 下右：水
+		]),  # 左+右上
+		69: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			shore5_left,                         # (0,0) 上左：上+左角
+			shore5,                              # (1,0) 上右：上+右角
+			_rotate_tiled_cell(shore4, 2),       # (0,1) 下左：左岸
+			shore4,                              # (1,1) 下右：右岸
+		]),  # 左+上+右
+		73: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			shore5_left,                         # (0,0) 上左：上+左角
+			shore1,                              # (1,0) 上右：上边岸
+			_rotate_tiled_cell(shore4, 2),       # (0,1) 下左：左岸
+			shore8,                              # (1,1) 下右：右下角
+		]),  # 左+上+右下
+		82: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			_rotate_tiled_cell(shore4, 2),       # (0,0) 上左：左岸
+			shore2,                              # (1,0) 上右：右上角
+			_rotate_tiled_cell(shore20, 1),      # (0,1) 下左：下+左角（边优先：左、下都临岸）
+			_rotate_tiled_cell(shore4, 1),       # (1,1) 下右：下岸
+		]),  # 左+右上+下
+		128: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			shore2_left,                         # (0,0) 上左：左上角
+			pure_water,                          # (1,0) 上右：水
+			water2_left,                          # (0,1) 下左：水
+			pure_water,                          # (1,1) 下右：水
+		]),  # 左上
+		
+		130: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			shore2_left,                         # (0,0) 上左：左上角
+			shore2,                              # (1,0) 上右：右上角
+			pure_water,                          # (0,1) 下左：水
+			pure_water,                          # (1,1) 下右：水
+		]),  # 左上+右上
+		132: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			shore2_left,                         # (0,0) 上左：左上角
+			shore4,                              # (1,0) 上右：右岸
+			water2_left,                          # (0,1) 下左：水
+			shore4,                              # (1,1) 下右：右岸
+		]),  # 左上+右
+		136: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			shore2_left,                         # (0,0) 上左：左上角
+			pure_water,                          # (1,0) 上右：水
+			water2_left,                          # (0,1) 下左：水
+			shore8,                              # (1,1) 下右：右下角
+		]),  # 左上+右下
+		144: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			shore2_left,                         # (0,0) 上左：左上角
+			pure_water,                          # (1,0) 上右：水
+			_rotate_tiled_cell(shore4, 1),       # (0,1) 下左：下岸
+			_rotate_tiled_cell(shore4, 1),       # (1,1) 下右：下岸
+		]),  # 左上+下
+		146: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			shore2_left,                         # (0,0) 上左：左上角
+			shore2,                              # (1,0) 上右：右上角
+			_rotate_tiled_cell(shore4, 1),       # (0,1) 下左：下岸
+			_rotate_tiled_cell(shore4, 1),       # (1,1) 下右：下岸
+		]),  # 左上+右上+下
+		148: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			shore2_left,                         # (0,0) 上左：左上角
+			shore4,                              # (1,0) 上右：右岸
+			_rotate_tiled_cell(shore4, 1),       # (0,1) 下左：下岸
+			shore20,                             # (1,1) 下右：下+右角（边优先：右、下都临岸）
+		]),  # 左上+右+下
+		# ===== 不涉及上边的通用掩码（归并代表，供旋转复用）=====
+		8: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			pure_water,                          # (0,0) 上左：水
+			pure_water,                          # (1,0) 上右：水
+			pure_water,                          # (0,1) 下左：水
+			shore8,                              # (1,1) 下右：右下角
+		]),  # 右下角
+		40: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			pure_water,                          # (0,0) 上左：水
+			pure_water,                          # (1,0) 上右：水
+			_rotate_tiled_cell(shore8, 1),       # (0,1) 下左：左下角
+			shore8,                              # (1,1) 下右：右下角
+		]),  # 右下+左下
+		68: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			_rotate_tiled_cell(shore4, 2),       # (0,0) 上左：左岸
+			shore4,                              # (1,0) 上右：右岸
+			_rotate_tiled_cell(shore4, 2),       # (0,1) 下左：左岸
+			shore4,                              # (1,1) 下右：右岸
+		]),  # 右+左（对称）
+		72: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			_rotate_tiled_cell(shore4, 2),       # (0,0) 上左：左岸
+			pure_water,                          # (1,0) 上右：水
+			_rotate_tiled_cell(shore4, 2),       # (0,1) 下左：左岸
+			shore8,                              # (1,1) 下右：右下角
+		]),  # 右下+左
+		84: MyTiledCell.new(ChunkGenerator.TerrainType.WATER, [
+			_rotate_tiled_cell(shore4, 2),       # (0,0) 上左：左岸
+			shore4,                              # (1,0) 上右：右岸
+			_rotate_tiled_cell(shore20, 1),      # (0,1) 下左：下+左角（边优先：左、下都临岸）
+			shore20,                             # (1,1) 下右：下+右角（边优先：右、下都临岸）
+		]),  # 右+下+左
+		
+	}
+
+
 static func _rotate_tiled_cell(p_tiled_cell: Array, step: int = 0) -> Array:
 	# ⚠️ 不能用 duplicate(true)：RefCounted 对象只复制引用，修改 dir 会污染原对象
 	# 必须创建新的 TiledCell 实例
@@ -626,10 +912,8 @@ static func _init_terrain_forms() -> Dictionary:
 		ChunkGenerator.TerrainType.SAND: _build_terrain_forms(
 			_init_sand_tiled(), ChunkGenerator.TerrainType.SAND
 		),
-		# 未来加水时在此加一条：
-		# ChunkGenerator.TerrainType.WATER: _build_terrain_forms(
-		# 	_init_water_tiled(), ChunkGenerator.TerrainType.WATER
-		# ),
+		# 水：过渡固定一套（竖着 2 tile），直接在 _build_water_forms 里配 MyTiledCell
+		ChunkGenerator.TerrainType.WATER: _build_water_forms(),
 	}
 
 
@@ -813,27 +1097,12 @@ func _compute_tile_atlas_v3(world_tile_x: int, world_tile_y: int, data: PackedIn
 	# 算 block 的 8 邻居掩码（邻居不是本地形 → bit=1）
 	var form8: int = _compute_form8_for_block(bx, by, terrain)
 
-	# 旋转归一化：取 4 次旋转中的最小值作为查表 key
-	var norm: Dictionary = _normalize_form8(form8)
-	var base_form: int = norm.form
-	var rotations: int = norm.rotations
-
-	# 查该地形的形态表（先查 8 邻居表，没找到按"覆盖角"规则退化）
-	var mtc: MyTiledCell = forms.get(base_form, null)
-	if mtc == null:
-		# 退化：去掉被相邻边覆盖的角（角至少一条相邻边异类 → 边过渡已覆盖它），
-		# 只保留孤立角（两条相邻边都同类），再归一化查表。
-		# 例：46（右+右上+右下+左下）→ 去掉被右覆盖的右上/右下角，剩 右+左下 → 归一到 form 9
-		var reduced: int = _reduce_covered_corners(form8)
-		var norm_r: Dictionary = _normalize_form8(reduced)
-		mtc = forms.get(norm_r.form, null)
-		rotations = norm_r.rotations
-	if mtc == null:
-		# fallback 到纯地块（form 0）
-		mtc = forms.get(0, null)
-		rotations = 0
-	if mtc == null:
+	# 通用查找（先精确 → 非上边旋转 → 归一化 → 覆盖角退化 → fallback form0）
+	var found: Dictionary = _lookup_form_mtc(forms, form8)
+	if found.is_empty():
 		return {atlas = _TERRAIN_ATLAS.get(terrain, Vector2i.ZERO), alt = 0}
+	var mtc: MyTiledCell = found.mtc
+	var rotations: int = found.rotations
 
 	# 旋转 MyTiledCell（整体旋转：位置重排 + dir+1）
 	# 归一化时 form8 顺时针转 N 次得到 min_form，所以 mtc 需要顺时针转 (4-N) 次回到 form8 方向
@@ -935,6 +1204,81 @@ static func _reduce_covered_corners(form: int) -> int:
 	if form & (1 << 7) and (form & (1 << 6)) == 0 and (form & (1 << 0)) == 0:
 		result |= (1 << 7)
 	return result
+
+
+## 通用查找：在形态表里按 form8 找 MyTiledCell（沙地/水等所有过渡地形共用）
+## 查找顺序（与 _compute_tile_atlas_v3 一致，供调试场景复用保证不漂移）：
+##   1. 原始 form8 精确匹配 —— 用户配的独立素材（如水涉及上边的掩码）直接命中，不旋转
+##   2. 未命中且【不含纯上边 bit0】→ 旋转同化（右上/左上角可被右/左覆盖），
+##      优先命中专门配置的边素材（如 form6 → form4 右岸），避免落回上边素材旋转
+##   3. 未命中 → 旋转归一化查表
+##   4. 再没找到 → 退化（覆盖角）后先试旋转同化（form6 → reduce → form4 右岸）再归一化
+##   5. 仍没找到 → fallback 到 form 0（纯地块）
+## 返回 {mtc: MyTiledCell, rotations: int}；形态表连 form 0 都没有时返回 {}
+static func _lookup_form_mtc(forms: Dictionary, form8: int) -> Dictionary:
+	var mtc: MyTiledCell = forms.get(form8, null)
+	var rotations: int = 0
+	if mtc == null:
+		# 步骤 2：掩码不含「上边区域 bit0/bit1/bit7」→ 旋转同化（下边区域之间归并）
+		# 排除整个上边区域：右上/左上用独立上边素材，不能旋转同化到它们（否则 form32
+		# 左下角会落到 form128 左上角素材）。下边区域角可旋转归并（form32 → form8 右下角）。
+		# form6（右+右上）这类"角被边覆盖"的不靠这里，走步骤4 reduce 精确命中 form4
+		var r2: Dictionary = _rot_lookup_no_top(forms, form8)
+		if not r2.is_empty():
+			mtc = forms[r2.form]
+			rotations = r2.rotations
+		# 步骤 3：旋转归一化查表
+		if mtc == null:
+			var norm: Dictionary = _normalize_form8(form8)
+			var base_form: int = norm.form
+			rotations = norm.rotations
+			mtc = forms.get(base_form, null)
+			if mtc == null:
+				# 步骤 4：退化（去掉被相邻边覆盖的角）后再查，按优先级：
+				#   1) 精确匹配 reduced —— 如 form71 → reduce → 69（右上被右覆盖），69 是已配置
+				#      独立 form，直接命中（之前漏了这一步，导致 69 含纯上边走不了旋转同化，
+				#      归一化到 21 又不在表 → 错误 fallback 到 form0 纯水）
+				#   2) 非纯上边旋转同化 —— form6 → reduce → form4 右岸
+				#   3) 归一化
+				var reduced: int = _reduce_covered_corners(form8)
+				mtc = forms.get(reduced, null)
+				if mtc != null:
+					rotations = 0
+				else:
+					var r4: Dictionary = _rot_lookup_no_top(forms, reduced)
+					if not r4.is_empty():
+						mtc = forms[r4.form]
+						rotations = r4.rotations
+					else:
+						var norm_r: Dictionary = _normalize_form8(reduced)
+						mtc = forms.get(norm_r.form, null)
+						rotations = norm_r.rotations
+	# 步骤 5：fallback 到纯地块（form 0）
+	if mtc == null:
+		mtc = forms.get(0, null)
+		rotations = 0
+	if mtc == null:
+		return {}
+	return {mtc = mtc, rotations = rotations}
+
+
+## 非上边区域旋转同化：在 4 个顺时针旋转里找「不含上边区域 bit0/bit1/bit7 + 已配置」的 form
+## 返回 {form, rotations}；找不到返回 {}
+## 规则：下边区域（右4/下16/左64 + 右下8/左下32）之间可旋转同化；
+##      上边区域（上1/右上2/左上128）用独立上边素材，出现时不能旋转。
+## 例：form32（左下角）旋转族 {32,128,2,8}，128/2 属上边区域排除，8 命中 → 右下角素材
+##     （之前只排除 bit0，form32 会落到 form128 左上角素材 → 显示成"128旋转"）
+##     form6（右+右上）含右上 → 返回 {}（由步骤4 reduce 到 form4 精确匹配处理）
+static func _rot_lookup_no_top(forms: Dictionary, form8: int) -> Dictionary:
+	const TOP_REGION: int = 1 | 2 | 128
+	if (form8 & TOP_REGION) != 0:
+		return {}
+	var cur: int = form8
+	for r in range(4):
+		if (cur & TOP_REGION) == 0 and forms.has(cur):
+			return {form = cur, rotations = r}
+		cur = _rotate_form8_cw(cur)
+	return {}
 
 
 ## 旋转 MyTiledCell（整体旋转，Godot 式）

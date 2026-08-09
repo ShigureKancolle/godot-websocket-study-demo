@@ -14,6 +14,8 @@ func _ready():
 	$Bg/E_Map.pressed.connect(_on_click_map)
 	# 进入正式游戏场景的按钮(接入无限地图 + 玩家同步 + 战斗)
 	$Bg/E_GameReal.pressed.connect(_on_click_game_real)
+	# 进入地块选择/样式展示场景（TiledMap1）
+	$Bg/E_Tilemap1.pressed.connect(_on_click_tilemap1)
 	$Bg/E_Chat.visible = false
 	$Bg/E_Game.visible = false
 	$Bg/E_GameReal.visible = false
@@ -95,6 +97,14 @@ func _on_click_map():
 	# 进入无限地图调试场景
 	# 当前是纯客户端独立场景：用 DebugCursor（箭头键控制）测试 chunk 动态加载/卸载
 	# 不依赖 WebSocket，所以无需等待连接
+	var target_scene = load("res://tiledmap/TiledMap.tscn")
+	var target_scene_instance = target_scene.instantiate()
+	add_child(target_scene_instance)
+
+
+func _on_click_tilemap1():
+	# 进入地块选择/样式展示场景（TiledMap1：选择地块 + 展示过渡形态）
+	# 纯客户端独立场景，不依赖 WebSocket
 	var target_scene = load("res://tiledmap/TiledMap1.tscn")
 	var target_scene_instance = target_scene.instantiate()
 	add_child(target_scene_instance)

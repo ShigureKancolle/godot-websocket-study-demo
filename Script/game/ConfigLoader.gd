@@ -127,12 +127,13 @@ class AttackConfig:
 # 本配置表把枚举值映射成能力字段,供客户端调试/可视化寻路用。
 # 服务端也有一份对称的实现(见 server/config/config_loader.py)
 # 地形类型 → 名称映射(和 ChunkGenerator.TerrainType 枚举顺序对齐):
-#   0=GRASS, 1=SAND, 2=DIRT, 3=BRICK
+#   0=GRASS, 1=SAND, 2=DIRT, 3=BRICK, 4=WATER
 const _TERRAIN_ID_TO_NAME: Dictionary = {
 	0: "GRASS",
 	1: "SAND",
 	2: "DIRT",
 	3: "BRICK",
+	4: "WATER",
 }
 
 
