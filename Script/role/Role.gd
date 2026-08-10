@@ -36,10 +36,11 @@ Role 本身只是一个「位置容器」: 有坐标、能挂子节点。
 
     - 本地玩家: LocalPlayerController 读输入 → 发 PlayerMove{dir_x, dir_y}
                 发完立即本地预测 position += dir * speed * delta(消除 RTT 滞后和顿挫)
-                → 服务端 apply_move_dir 记方向 → tick_movement 推进权威位置 → 广播
+                → 服务端 apply_move_dir 记方向 → tick_movement 按实测 dt 推进权威位置 → 广播
                 → StateMirror 更新 → entity_updated → Role 更新 target_pos
-                → Role 软对账:回溯 RTT 前的预测位置,与服务端坐标误差小则忽略,
-                  误差大(服务端因碰撞/锁定没推进)才 lerp 平滑回正
+                → Role 软对账:回溯「RTT + 半个 tick」前的预测位置,与服务端坐标误差小则忽略,
+                  误差大(服务端因碰撞/锁定没推进)才 lerp 平滑回正;
+                  变向/急停后的宽限窗口内跳过回正(服务端还没按新方向推进,回正会折回)
     - 远程玩家/敌人: 同上,但 Role._process 用 lerp 平滑 30Hz 跳变(30Hz→60Hz)
     - 木桩: StateMirror 收到 GameState 快照 → state_replaced 信号 → Role 创建并定位
 
@@ -116,6 +117,17 @@ const RECONCILE_THRESHOLD: float = 15.0
 
 # 回正插值系数:脱节时 position.lerp(target_pos, 0.35) 平滑回正,不硬跳(避免瞬移)
 const RECONCILE_LERP: float = 0.35
+
+# 服务端 tick 周期(毫秒),和服务端 GameServer.TICK_INTERVAL_MS 对齐
+# 用于:对账回溯时刻修正(输入排队平均等半个 tick) + 变向宽限窗口计算
+const SERVER_TICK_MS: float = 33.0
+
+# 变向宽限窗口 = RTT + DIR_CHANGE_GRACE_TICKS × tick + DIR_CHANGE_GRACE_MARGIN_MS
+# 方向刚变过(含急停)时,服务端要等「输入排队(≤1 tick)+ tick 处理 + 半程 RTT 回传」
+# 才按新方向推进,这期间广播的仍是旧方向轨迹,回正会把玩家"折回"旧方向 → 窗口内跳过。
+# 1.5 个 tick 覆盖「排队最坏 1 tick + 处理/回传抖动」;margin 兜底时序噪声
+const DIR_CHANGE_GRACE_TICKS: float = 1.5
+const DIR_CHANGE_GRACE_MARGIN_MS: float = 30.0
 
 # 远程实体 lerp 因子系数:lerp(position, target_pos, delta * LERP_FACTOR)
 # 15.0 → 60fps 时 alpha≈0.25,约 4 帧(66ms)追上目标点,视觉平滑无卡顿
@@ -329,15 +341,30 @@ func _record_prediction() -> void:
 		_pred_history.pop_front()
 
 
-## 软对账:收到服务端广播时,回溯 RTT 前的预测位置,与服务端权威位置比较
+## 软对账:收到服务端广播时,回溯对应时刻的预测位置,与服务端权威位置比较
 ## 误差 <= 阈值:预测正确,忽略(不回正——回正就是"拉扯")
 ## 误差 > 阈值:真脱节(服务端因碰撞/attacking 锁定没推进,预测跑偏),
 ##   用 lerp 平滑回正(不是硬 snap,避免视觉瞬移),并清空轨迹
 ##   (必须清空:回正后旧错误轨迹会继续误判脱节,见项目 memory 记录)
+##
+## 变向宽限:方向刚变过(含急停)时,服务端要等「输入排队 ≤1 tick + tick 处理 +
+##   半程 RTT 回传」才按新方向推进,这期间广播的仍是旧方向轨迹,
+##   此刻回正会把玩家"折回"旧方向 → 宽限窗口内跳过回正(轨迹照常记录,
+##   避免窗口结束后轨迹空洞)。窗口外恢复正常对账:真脱节仅延迟一个窗口仍会被回正。
 func _reconcile_prediction() -> void:
 	if _pred_history.is_empty():
 		return  # 无轨迹可回溯(刚开始/刚回正清空),跳过——首次靠 snap,之后靠预测
-	var lookup_time: float = float(Time.get_ticks_msec()) - WebScoketMgr.get_rtt_ms()
+	var now: int = Time.get_ticks_msec()
+	# 变向宽限判断(只有本地玩家挂了 LocalPlayerController 才会走到这里)
+	var controller = get_node_or_null("LocalPlayerController")
+	if controller != null:
+		var grace_ms: float = WebScoketMgr.get_rtt_ms() \
+			+ SERVER_TICK_MS * DIR_CHANGE_GRACE_TICKS + DIR_CHANGE_GRACE_MARGIN_MS
+		if now - controller.get_last_dir_change_ms() < grace_ms:
+			return  # 宽限窗口内:跳过回正,继续信任本地预测
+	# 回溯时刻:服务端推进比客户端预测晚起步「RTT(输入上行+广播下行)+ 平均半个 tick
+	# (输入在 pending 里排队等 tick)」,所以要回溯相同跨度,对比的才是同一运动时刻
+	var lookup_time: float = float(now) - WebScoketMgr.get_rtt_ms() - SERVER_TICK_MS * 0.5
 	var predicted: Vector2 = _lookup_prediction_at(lookup_time)
 	if predicted.distance_to(target_pos) > RECONCILE_THRESHOLD:
 		# 真脱节:平滑回正(不用硬 snap,避免视觉瞬移)

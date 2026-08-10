@@ -261,6 +261,27 @@ func setup(seed: int) -> void:
 		print("[InfiniteTileMap] setup(seed=%d) 完成,已重新加载 chunk" % seed)
 
 
+## 查世界坐标 (world_x, world_y) 所在 tile 是否可通行。
+##
+## 供客户端本地预测用(LocalPlayerController 推进位移前查一次,
+## 不可走就不推进 → 预测和服务端阻挡一致,避免穿墙+被拉回抖动)。
+##
+## 实现走 _get_tile_type_at(优先读已加载 chunk 的 cache,未加载则单点查询),
+## 再用 ConfigLoader.is_walkable 查配置。和服务端 pathfinder.is_walkable_at
+## 用同一份 ChunkGenerator 算法 + 同一份 terrain_config.json,结果必然一致。
+##
+## setup 未调用前(_generator 还在用默认 seed 12345)也能查,只是结果可能
+## 和服务端不一致(seed 没同步)——正常流程 setup 会在 GameState 前调完,
+## 玩家开始移动时 _generator 已是服务端下发的 seed。
+func is_walkable_at(world_x: float, world_y: float) -> bool:
+	if _generator == null:
+		return true  # 防御:理论上不会发生(_ready 里已 new)
+	var tile_x: int = int(floor(world_x / _tile_size))
+	var tile_y: int = int(floor(world_y / _tile_size))
+	var terrain_id: int = _get_tile_type_at(tile_x, tile_y)
+	return ConfigLoader.is_walkable(terrain_id)
+
+
 func _process(_delta: float) -> void:
 	# 每帧检查 follow target 位置，更新待加载/卸载队列
 	var center_chunk: Vector2i = _world_to_chunk(_get_center_pos())
@@ -1030,6 +1051,13 @@ static func _build_terrain_forms(tiled: Dictionary, main_type: int) -> Dictionar
 			tiled[BASIC_MASKS.TOP],                        # index 1 = (1,0) 上右：上边过渡
 			_rotate_tiled_cell(tiled[BASIC_MASKS.TOP], 2), # index 2 = (0,1) 下左：下边过渡
 			_rotate_tiled_cell(tiled[BASIC_MASKS.TOP], 2), # index 3 = (1,1) 下右：下边过渡
+		]),
+		# form 18: 右上角 + 下边
+		18: MyTiledCell.new(main_type, [
+			tiled[BASIC_MASKS.PURE],                          # index 0 = (0,0) 上左：纯地块
+			tiled[BASIC_MASKS.CORNER],                        # index 1 = (1,0) 上右：右上角过渡
+			_rotate_tiled_cell(tiled[BASIC_MASKS.TOP], 2),   # index 2 = (0,1) 下左：下边过渡
+			_rotate_tiled_cell(tiled[BASIC_MASKS.TOP], 2), # index 3 = (1,1) 下右：右下角过渡
 		]),
 		# form 21: 上 + 右 + 下 三边异类
 		21: MyTiledCell.new(main_type, [
