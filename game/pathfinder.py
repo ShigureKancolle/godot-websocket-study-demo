@@ -126,6 +126,19 @@ class Pathfinder:
     # 对外接口
     # -------------------------------------------------------------------
 
+    def is_walkable_at(self, world_x: float, world_y: float) -> bool:
+        """
+        查世界坐标 (world_x, world_y) 所在 tile 是否可通行。
+
+        供 GameRoom.tick_movement 做物理阻挡用(实体位移推进前查一次,
+        不可走就拒绝推进)。和 _is_walkable 内部用的同一套逻辑,只是
+        接受世界坐标而非 tile 坐标,方便外部调用。
+
+        无状态:同输入永远同输出,线程安全。
+        """
+        tile = self._world_to_tile((world_x, world_y))
+        return self._is_walkable(tile[0], tile[1])
+
     def find_path(
         self,
         start_pos: Tuple[float, float],

@@ -11,6 +11,18 @@ if typing.TYPE_CHECKING:
     from game.game_room import EntityInfo
 
 max_chase_distance = 1000.0  # 最大追击距离,超过这个距离就放弃追击
+
+
+def _get_circle_radius(entity_type: str) -> float:
+    """取实体类型的圆形碰撞半径(非圆形/未配置返回 0)。
+    攻击距离判定用:圆心距离阈值 = attack_distance + 双方半径之和,
+    这样体型大的敌人边缘刚接触玩家就转攻击态,视觉合理。"""
+    cap = config_loader.get_capability(entity_type)
+    if cap.body_shape == config_loader.ShapeType.CIRCLE and isinstance(cap.body_params, config_loader.CircleParams):
+        return cap.body_params.radius
+    return 0.0
+
+
 class ChaseState(ai_state_base.AIStateBase):
     def __init__(self, entity_id: str):
         super().__init__(entity_id)
@@ -49,7 +61,16 @@ class ChaseState(ai_state_base.AIStateBase):
 
         entity_pos = (room.get_entity(self.entity_id).x, room.get_entity(self.entity_id).y)
         target_pos = (room.get_entity(self.target_entity_id).x, room.get_entity(self.target_entity_id).y)
-        if (target_pos[0] - entity_pos[0]) ** 2 + (target_pos[1] - entity_pos[1]) ** 2 < attack_distance ** 2:
+        # 攻击距离判定:圆心距离 < attack_distance + 目标半径
+        # 为什么加目标半径:攻击命中判定是"攻击形状(扇形/圆)从攻击者圆心发出,扫到目标 body 圆"。
+        #   目标 body 边缘进入攻击范围就能被打到,所以目标越近越容易打中,加目标半径让"刚够得着"
+        #   的临界提前到目标边缘接触攻击范围时(而非目标圆心进入攻击范围时)。
+        # 为什么不加攻击者半径:攻击从圆心发出,攻击者体积不参与命中判定。
+        #   若加攻击者半径,会出现"动画显示够得着但实际判定够不着"的偏差(动画范围和实际范围错位)。
+        # 例:enemy(20) 攻击 player(24),attack_distance=30 → 阈值 = 30+24 = 54px
+        target_radius = _get_circle_radius(room.get_entity(self.target_entity_id).entity_type)
+        attack_threshold = attack_distance + target_radius
+        if (target_pos[0] - entity_pos[0]) ** 2 + (target_pos[1] - entity_pos[1]) ** 2 < attack_threshold ** 2:
             # 到达攻击距离
             ai_state_helper.change_ai_state(room, self.entity_id, "attack", self.target_entity_id)
             return

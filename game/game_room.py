@@ -88,6 +88,7 @@ import config.config_loader as config_loader
 import typing
 if typing.TYPE_CHECKING:
     import game.enemy_mgr as enemy_mgr
+    from config.config_loader import AttackShape
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +207,21 @@ class GameRoom:
     - 不做 tick 调度：是否定时广播由 handler/web_server 决定，GameRoom 只在被调用时算
     """
 
+    # 上一 tick 结束时「仍在移动 / 正在被推着动」的实体集合(服务端瞬态,客户端不需要)。
+    # 用途:tick_movement 里检测「移动 → 停止」的状态迁移——AI 主动停下时
+    # apply_move_dir(False) 只改 moving/state 不改位置,进不了 moved_ids;
+    # 若不单独记录,客户端永远收不到"敌人停下了"的 PlayerMove 广播,会一直预测漂移。
+    # 和 _knockbacks 同理独立成表,不进 EntityInfo(避免污染 proto 快照)。
+    #
+    # 为什么要有类属性默认值(而不是只在 __init__ 初始化):
+    #   本项目热更(importlib.reload)只重载模块定义,不会重跑已实例化 GameRoom
+    #   的 __init__。若只在 __init__ 里建 _was_moving,热更后旧实例在 tick_movement
+    #   读 self._was_moving 会 AttributeError,每 tick 崩一次。
+    #   类属性兜底让旧实例也能读到空 set;tick_movement 每 tick 用
+    #   self._was_moving = still_moving 重新绑定成实例属性(覆盖类属性),
+    #   所以类默认值不会被跨实例共享污染。
+    _was_moving: set[str] = set()
+
     def __init__(self):
         # 所有实体表:entity_id -> EntityInfo
         # 玩家/木桩/箱子/陷阱都在这一张表里,用 entity_type 区分行为能力
@@ -216,6 +232,9 @@ class GameRoom:
         # 击退状态表:entity_id -> KnockbackState(服务端瞬态,客户端不需要)
         # 和 _combats 一样独立成表,不进 EntityInfo(避免污染 proto 快照广播)
         self._knockbacks: Dict[str, KnockbackState] = {}
+        # 重新赋一个空 set,覆盖类属性默认值——保证每个实例独立,不共享同一个 set
+        # (类属性默认值只作为热更旧实例的兜底,见类属性上的注释)
+        self._was_moving: set[str] = set()
         import game.enemy_mgr as enemy_mgr
         self._enemy_mgr = enemy_mgr.EnemyMgr()
 
@@ -235,6 +254,15 @@ class GameRoom:
         # 敌人 AI(ChaseState)通过 room.get_pathfinder() 取用,避免每次寻路
         # 都重新构造 ChunkGenerator(每次构造 = 重新算 seed 哈希,浪费)。
         self._pathfinder = None
+
+        # 穿墙白名单:集合内的 entity_type 在 tick_movement 推进时跳过地形阻挡。
+        # 默认空集 = 所有人都受阻挡(符合「玩家+敌人都不穿墙」的常规预期)。
+        # 为什么用 set 而非 dict:只需要「在/不在」判定,不需要附带数据。
+        # 为什么按 entity_type 而非 entity_id:GM 想开的是「整类」权限(调试用),
+        # 按实例开太碎;按类型开一行就能让所有玩家/敌人穿墙。
+        # 为什么不进 entity_config.json:那是「类型固有能力」,穿墙是「运行时调试权限」,
+        # 语义不同;放 GameRoom 上随用随开,不污染配置单数据源。
+        self._wallhack_types: set[str] = set()
         
     # region 只读访问
     # ------------------------------------------------------------------
@@ -415,7 +443,7 @@ class GameRoom:
             entity_id: 谁在移动
             dir_x, dir_y: 移动方向向量(理论归一化,内部会再归一化一次防作弊)
             moving: 是否正在移动
-            dt: 已废弃(保留签名兼容,持续推进由 tick_movement 用 TICK_INTERVAL 做)
+            dt: 已废弃(保留签名兼容,持续推进由 tick_movement 用实测 dt 做)
 
         Returns:
             True 表示方向/状态已更新;False 表示实体不存在/不能移动/锁定中
@@ -478,18 +506,40 @@ class GameRoom:
         敌人 AI(EnemyMgr.update)每 tick 调 apply_move_dir 改方向,
         tick_movement 统一推进所有实体(含玩家和敌人),逻辑收口在状态层。
 
+        =========================================================================
+         返回值为什么包含「停止迁移」的实体
+        =========================================================================
+        返回列表除了「本 tick 位移变化的实体」,还包含「本 tick 从移动→停止」的
+        实体(上一 tick 在移动、本 tick moving 变 False)。原因:
+            - AI 主动停下(PatrolState/AttackState 调 apply_move_dir(False))
+              只改 moving/state,不改位置,本 tick 不产生位移
+            - 若不广播,客户端收不到任何 PlayerMove,会一直按旧方向预测 → 漂移
+            - 把这些实体放进返回值,web_server 就广播一条 moving=False 的
+              PlayerMove,客户端据此切回 idle / 停止预测
+        玩家停止不会重复广播:web_server 用 set 收集(moved_entities),
+        玩家停止已在处理 pending 输入时入 set,天然去重。
+
         Args:
-            dt: 时间步长(秒),由 GameServer 传 TICK_INTERVAL
+            dt: 时间步长(秒),由 GameServer 传实测 tick 间隔(time.monotonic 差值,
+                已钳制)。必须用实测值而非固定 TICK_INTERVAL:真实 tick 间隔受系统
+                定时粒度影响会漂移(Windows 默认粒度下 33ms 请求实际约 47ms),
+                固定 dt 积分会让移速系统性偏慢,客户端预测对账累积超阈值 → 周期性回拉
 
         Returns:
-            本 tick 实际移动了的 entity_id 列表(供 web_server 收集广播用)
+            本 tick 需要广播 PlayerMove 的 entity_id 列表
+            (位移变化的 + 从移动→停止迁移的,供 web_server 收集广播用)
         """
         moved_ids = []
+        # 本 tick 结束时「仍在移动 / 正在被推着动」的实体集合,
+        # 存为 _was_moving 作为下一 tick 检测"停止迁移"(③)的基准。
+        still_moving: set[str] = set()
 
         # ① 击退推进:不受输入锁定(hurt/attacking/dead)影响——硬直期间也要被推走
         # 击退是服务端权威位移(被攻击时由 apply_knockback 设定),和"自己按方向走"
         # 是两回事,所以和下方普通移动互斥(被击退的实体不叠加普通移动)。
         # 时长 = hurt 硬直时长,所以"硬直结束 = 击退结束",恢复时正好停在被推出位置。
+        # 地形阻挡:击退也受地形约束(被推到墙边就沿墙滑,不穿墙)。分轴尝试:
+        # 先试 X 轴,再试 Y 轴,任一可走就推进该轴 → 自然贴墙滑行,不会原地卡死。
         for entity_id in list(self._knockbacks.keys()):
             kb = self._knockbacks[entity_id]
             if kb.time <= 0:
@@ -499,12 +549,26 @@ class GameRoom:
             if info is None:
                 self._knockbacks.pop(entity_id, None)  # 实体已移除(死亡/断连),清理
                 continue
-            info.x += kb.vx * dt
-            info.y += kb.vy * dt
+            step_x = kb.vx * dt
+            step_y = kb.vy * dt
+            # 分轴尝试:先 X 后 Y。某轴被挡就只推另一轴 → 沿墙滑行。
+            # ★ 击退只查地形(_is_blocked_by_terrain),不查实体间碰撞。
+            # 原因:击退是被攻击的硬直位移,必须强制发生(被打飞)。重叠时被击退者要推开
+            # 攻击者,若查实体碰撞,新位置还在攻击者 body 圆内 → 被挡 → 推不出去 → 卡死。
+            # 击退方向是远离攻击者,推一两帧后自然脱离重叠,穿实体只是瞬间,可接受。
+            # 地形还是要查——不能把人打进墙里。
+            if not self._is_blocked_by_terrain(info.x + step_x, info.y, info.entity_type):
+                info.x += step_x
+            if not self._is_blocked_by_terrain(info.x, info.y + step_y, info.entity_type):
+                info.y += step_y
             kb.time -= dt
             moved_ids.append(entity_id)
+            still_moving.add(entity_id)  # 被击退中,位置仍在变,不算停止
 
         # ② 普通移动推进(记住方向 + 每 tick 持续推进)
+        # 地形阻挡:分轴尝试,被挡的轴不推进,可走的轴照走 → 贴墙滑行。
+        # 两轴都被挡(正面撞墙)→ 不推进,但 moving 仍 True(下一 tick 会再试,
+        # 配合 AI 寻路重新算路径绕开,不会卡死)。
         for entity_id, info in self._entities.items():
             if entity_id in self._knockbacks:
                 continue  # 正在被击退,位移由击退分支推进,不叠加普通移动
@@ -512,11 +576,37 @@ class GameRoom:
                 continue
             # 锁定状态(hurt/attacking/dead)不推进位移
             if self._is_input_locked(info):
+                # 锁定只是「暂缓推进」不是「停止」,moving 仍是 True,
+                # 归入 still_moving,避免解锁后误判成"停止"广播
+                still_moving.add(entity_id)
                 continue
             speed = config_loader.get_speed(info.entity_type)
-            info.x += info.move_dir_x * speed * dt
-            info.y += info.move_dir_y * speed * dt
+            step_x = info.move_dir_x * speed * dt
+            step_y = info.move_dir_y * speed * dt
+            # 分轴尝试:先 X 后 Y。某轴被挡就只推另一轴 → 沿墙滑行
+            if not self._is_blocked(entity_id, info.x + step_x, info.y, info.entity_type):
+                info.x += step_x
+            if not self._is_blocked(entity_id, info.x, info.y + step_y, info.entity_type):
+                info.y += step_y
             moved_ids.append(entity_id)
+            still_moving.add(entity_id)
+
+        # ③ 停止迁移检测:上一 tick 在移动、本 tick 明确停止的实体也放进返回值。
+        # 场景:AI 主动停下(PatrolState/AttackState 调 apply_move_dir(False)),
+        # 只改 moving/state 不改位置,进不了 ② 的 moved_ids——若不广播,
+        # 客户端永远不知道敌人停下了,会继续按旧方向预测 → 漂移。
+        for entity_id in self._was_moving:
+            info = self._entities.get(entity_id)
+            if info is None:
+                continue  # 实体已移除(死亡/断连),无需同步
+            if entity_id in self._knockbacks:
+                continue  # 正在被击退,位置仍由击退分支推进,不算停止
+            if not info.moving:
+                # 上一 tick 还在移动、本 tick 停了 → 广播让客户端切回 idle
+                moved_ids.append(entity_id)
+
+        # 记录本 tick 结束时仍在移动的实体,供下一 tick 检测"停止迁移"
+        self._was_moving = still_moving
         return moved_ids
 
     def apply_facing(self, entity_id: str, facing: float) -> bool:
@@ -579,6 +669,146 @@ class GameRoom:
     def get_pathfinder(self):
         """取 A* 寻路器(敌人 AI 寻路用,可能为 None——未注入时降级为直线追击)"""
         return self._pathfinder
+
+    # ------------------------------------------------------------------
+    # 穿墙权限(GM 调试用)
+    # ------------------------------------------------------------------
+    def set_wallhack(self, entity_type: str, enabled: bool) -> None:
+        """
+        开启/关闭某类型实体的穿墙权限(GM 调试入口)
+
+        Args:
+            entity_type: 实体类型(如 "player" / "enemy_slime")
+            enabled:     True=可穿墙,False=受地形阻挡
+
+        幂等:重复设同一值不会出问题。set 内部用 add/discard 而非
+        直接赋值,避免误把整个集合覆盖掉。
+        """
+        if enabled:
+            self._wallhack_types.add(entity_type)
+        else:
+            self._wallhack_types.discard(entity_type)
+        logger.info(f"穿墙权限变更: {entity_type} = {enabled} (当前白名单: {self._wallhack_types})")
+
+    def is_wallhack(self, entity_type: str) -> bool:
+        """该类型当前是否允许穿墙(供调试/查询用,tick_movement 内部直接查 _wallhack_types)"""
+        return entity_type in self._wallhack_types
+
+    def _is_blocked(self, entity_id: str, x: float, y: float, entity_type: str) -> bool:
+        """
+        查实体「走一步后」是否被挡(供普通移动推进位移前调用)
+
+        两层阻挡判定:
+            ① 地形阻挡(脚点判定):脚点 (x, y + radius) 所在 tile 不可通行 → 阻挡
+                - 脚点 = 圆底部,角色和地面的接触点
+                - 效果:圆心停在障碍 tile 边界外,角色站在岸边、脚不踩水
+            ② 实体间碰撞(圆心判定):圆心 (x, y) 落在其他实体 body 圆内 → 阻挡
+                - 防止怪物寻路挤成一坨、玩家穿模重叠
+                - 圆-圆相交:distance² < (r1 + r2)²
+
+        普通移动调本方法(查地形 + 查实体)。击退调 _is_blocked_by_terrain(只查地形),
+        因为击退是被动位移,必须强制发生——重叠时被击退者要能推开攻击者,若查实体碰撞
+        会被攻击者挡住推不出去(详见 tick_movement 击退分支注释)。
+
+        radius 来源:entity_config.json 的 body_params.radius(player=24, enemy=20)
+            双端从同一份配置同步,保证服务端阻挡判定和客户端预测一致
+
+        穿墙白名单:只跳过①地形阻挡,不跳过②实体碰撞(穿墙≠穿人)
+
+        Args:
+            entity_id:   移动实体自己的 ID(排除自己用)
+            x, y:        待推进到的圆心世界坐标(实体「走一步后」的位置)
+            entity_type: 实体类型(查穿墙白名单 + 取 radius 用)
+
+        Returns:
+            True = 被挡,调用方不应推进该坐标
+            False = 可走,调用方可推进
+        """
+        # ① 地形阻挡(脚点判定)
+        if self._is_blocked_by_terrain(x, y, entity_type):
+            return True
+        # ② 实体间碰撞(圆心判定)
+        radius = self._get_circle_radius(entity_type)
+        return self._is_blocked_by_entity(entity_id, x, y, radius)
+
+    def _get_circle_radius(self, entity_type: str) -> float:
+        """取实体类型的圆形碰撞半径。非圆形/未配置返回 0。"""
+        cap = config_loader.get_capability(entity_type)
+        if cap.body_shape == config_loader.ShapeType.CIRCLE and isinstance(cap.body_params, config_loader.CircleParams):
+            return cap.body_params.radius
+        return 0.0
+
+    def _is_blocked_by_terrain(self, x: float, y: float, entity_type: str) -> bool:
+        """
+        只查地形阻挡(脚点判定),不查实体间碰撞
+
+        击退分支用本方法:击退是被攻击的硬直位移,物理上必须强制发生(被打飞)。
+        重叠时被击退者要推开攻击者,若查实体碰撞会被攻击者 body 挡住 → 推不出去 → 卡死。
+        击退期间穿实体可接受(被打飞穿过别人,比卡住不动合理),但地形还是要查(不能打进墙里)。
+
+        判定点 = 脚点 (x, y + radius):
+            - 穿墙白名单内 → 跳过
+            - pathfinder 未注入 → 跳过(降级)
+            - 否则查脚点 tile 可通行性
+        """
+        if entity_type in self._wallhack_types:
+            return False
+        if self._pathfinder is None:
+            return False
+        radius = self._get_circle_radius(entity_type)
+        foot_y = y + radius
+        return not self._pathfinder.is_walkable_at(x, foot_y)
+
+    def _is_blocked_by_entity(self, entity_id: str, x: float, y: float, self_radius: float) -> bool:
+        """
+        实体间圆-圆碰撞查询:圆心 (x, y) 是否落在其他实体 body 圆内
+
+        过滤规则(跳过以下实体,不挡路):
+            - 自己:entity_id 相同
+            - 非碰撞体:can_move=false 的实体(如木桩 stake 是测试靶,挡路会卡死玩家)
+            - 死亡实体:state=="dead"(正在播死亡动画等待移除,不该挡路)
+            - 被击退中的实体:位置不受控(被击退时位移由击退分支推进),
+              若挡路会让其他实体卡死在被击退者身上
+
+        判定方式:圆-圆相交
+            distance² < (r1 + r2)² → 碰撞
+            用平方比较避免开方,性能更好
+
+        Args:
+            entity_id:   移动实体自己的 ID(排除自己)
+            x, y:        待推进到的圆心世界坐标
+            self_radius: 移动实体的半径
+
+        Returns:
+            True = 撞到其他实体;False = 无碰撞
+        """
+        for other_id, other in self._entities.items():
+            if other_id == entity_id:
+                continue  # 不挡自己
+            # 跳过死亡实体(播死亡动画中,即将被移除)
+            if other.state == "dead":
+                continue
+            # 跳过被击退中的实体(位置不受控,挡路会卡死别人)
+            if other_id in self._knockbacks:
+                continue
+            # 取对方能力配置,过滤非碰撞体 + 取半径
+            other_cap = config_loader.get_capability(other.entity_type)
+            # can_move=false 的实体不挡路(木桩是测试靶,挡路卡死玩家)
+            if not other_cap.can_move:
+                continue
+            # 目前只支持圆形碰撞(和其他形状的判定未来扩展)
+            if other_cap.body_shape != config_loader.ShapeType.CIRCLE:
+                continue
+            if not isinstance(other_cap.body_params, config_loader.CircleParams):
+                continue
+            other_radius = other_cap.body_params.radius
+            # 圆-圆相交判定:用平方比较避免开方
+            dx = x - other.x
+            dy = y - other.y
+            r_sum = self_radius + other_radius
+            if dx * dx + dy * dy < r_sum * r_sum:
+                return True
+        return False
 
     def trigger_attack(self, entity_id: str, atk_id: int) -> bool:
         """

@@ -16,6 +16,10 @@ class PatrolState(ai_state_base.AIStateBase):
         target_entity_id = self._find_player_in_sight(room)
         if target_entity_id:
             ai_state_helper.change_ai_state(room, self.entity_id, "chase", target_entity_id)
+        else:
+            # 停在原地先
+            room.apply_move_dir(self.entity_id, 0, 0, False, dt)
+        
 
     def _find_player_in_sight(self, room: game_room.GameRoom):
         """查找最近的玩家"""

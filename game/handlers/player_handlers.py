@@ -146,7 +146,7 @@ def register(server: "GameServer") -> None:
 
         新协议(C2S 发方向,不发坐标):
             客户端不再发目标 x/y,改发方向向量 dir_x/dir_y。
-            服务端按 dir * speed * TICK_INTERVAL 推进位移,
+            服务端按 dir * speed * 实测 tick dt 推进位移,
             避免"客户端 60Hz 算位置,服务端 30Hz 节流丢半"的拉回问题。
             speed 不再从消息读,改由 entity_config.json 按类型查(config_loader.get_speed)。
         """

@@ -10,6 +10,7 @@ WebSocket 游戏服务器核心模块
 """
 
 import asyncio
+import sys
 import websockets
 import uuid
 import time
@@ -41,13 +42,22 @@ logger = logging.getLogger(__name__)
 
 
 class GameServer:
-    # tick 频率:30Hz(每 33ms 一个 tick)
-    # 为什么 30Hz:
+    # tick 周期:33ms(约 30.3Hz)
+    # 为什么 30Hz 量级:
     #   - 60Hz 流畅但带宽/CPU 消耗大,2D 学习项目没必要
     #   - 20Hz 动作游戏会感觉略卡,攻击朝向不跟手
     #   - 30Hz 主流平衡点,MOBA/ARPG 常用
-    TICK_HZ: float = 30.0
-    TICK_INTERVAL: float = 1.0 / TICK_HZ  # 0.0333 秒
+    # 为什么用整数毫秒而非 1/30 浮点秒:
+    #   - 与 Windows 定时粒度(提频到 1ms 后)天然对齐,asyncio.sleep 醒来时刻均匀,
+    #     避免 0.0333 无限小数在定时器取整时的系统性偏差
+    #   - 日志/调试输出读数直观(33ms 而非 33.333ms),和客户端宽限窗口计算语义一致
+    # 注意:本常量只用于控频(sleep 时长),位移积分用实测 dt(见 _tick_loop),
+    #   不再用 TICK_INTERVAL 当 dt——那是 tick 漂移导致移动拉扯的根因
+    TICK_INTERVAL_MS: int = 33
+
+    # 实测 dt 钳制上限(秒):防卡顿/调试断点后大步跳变把实体瞬移
+    # 截断会造成短暂慢速,属于可接受的退化行为
+    MAX_TICK_DT: float = 0.1
 
     def __init__(self, host: str = "0.0.0.0", port: int = 8765, bus=None):
         self.host = host
@@ -119,6 +129,10 @@ class GameServer:
         # 顺序保证:asyncio.Queue 是 FIFO,tick 塞的消息顺序 = 发送顺序
         self._send_queue: asyncio.Queue = asyncio.Queue()
         self._sender_task = None
+
+        # Windows 定时粒度是否已被本进程提升(timeBeginPeriod 成功才置 True)
+        # 用于 stop 时对称调 timeEndPeriod,避免重复/无效调用
+        self._timer_resolution_raised: bool = False
 
     async def handle_client(self, websocket: websockets.WebSocketServerProtocol):
         """处理单个客户端连接
@@ -283,29 +297,42 @@ class GameServer:
 
     async def _tick_loop(self) -> None:
         """
-        tick 循环:每 TICK_INTERVAL 秒处理一次 pending
+        tick 循环:每 TICK_INTERVAL_MS 毫秒处理一次 pending
 
         asyncio 单线程事件循环:tick_loop 和 handle_client 在同一线程,
         通过 await 切换执行。pending_inputs 不需要锁——
         handler 存入 pending 时不会 await(原子执行),不会在存入中途被 tick 打断。
 
-        为什么 tick 间隔严格 30Hz:
+        为什么 tick 节奏稳定:
             tick 循环里不再有 await self.broadcast(...)(那会因网络 I/O 拉长间隔)。
             tick 只做状态计算(apply_move_dir 等,纯内存微秒级)+ 塞队列(put_nowait 不阻塞)。
             真正的广播在 _sender_loop 独立协程里发,不影响 tick 节奏。
+
+        实测 dt(关键):
+            sleep 的实际唤醒间隔受系统定时粒度影响(Windows 默认 15.6ms,
+            33ms 请求实际约 47ms 才醒),不能用固定 TICK_INTERVAL 当 dt 积分——
+            那会让服务端移速系统性慢于客户端预测,累积超对账阈值触发周期性回拉。
+            这里用 time.monotonic() 实测两次 tick 的真实间隔作为 dt,
+            位移推进与墙钟一致,tick 率漂移不影响移速。
         """
-        logger.info(f"tick 循环启动,频率 {self.TICK_HZ}Hz")
+        logger.info(f"tick 循环启动,周期 {self.TICK_INTERVAL_MS}ms")
         # 启动 sender 协程:tick 只算状态+塞队列,sender 负责真正发
         # tick 和 sender 通过 _send_queue 解耦,互不阻塞
         self._sender_task = asyncio.create_task(self._sender_loop())
+        last_tick_ts = time.monotonic()
         try:
             while self.is_running:
-                await asyncio.sleep(self.TICK_INTERVAL)
+                await asyncio.sleep(self.TICK_INTERVAL_MS / 1000.0)
+                # 实测 dt:真实 tick 间隔,钳制到 [0, MAX_TICK_DT]
+                # 上限防卡顿/断点后大步跳变把实体瞬移(截断代价是短暂慢速,可接受)
+                now = time.monotonic()
+                dt = min(max(now - last_tick_ts, 0.0), self.MAX_TICK_DT)
+                last_tick_ts = now
                 # inner try:单个 tick 出错不能停整个循环
                 # asyncio 默认不会把 create_task 的异常打到控制台,
                 # 这里手动 catch + logger.exception 打完整 traceback
                 try:
-                    await self._process_tick()
+                    await self._process_tick(dt)
                 except asyncio.CancelledError:
                     raise   # CancelledError 要继续往外抛,不能吞
                 except Exception as e:
@@ -320,7 +347,7 @@ class GameServer:
                     pass
         logger.info("tick 循环已停止")
 
-    async def _process_tick(self) -> None:
+    async def _process_tick(self, dt: float) -> None:
         """
         处理一个 tick 的 pending 输入 + 持续移动推进
 
@@ -333,9 +360,11 @@ class GameServer:
             6. 收集广播(改方向的 + 被推进的 + 朝向变化的)
             7. 统一广播
 
-        核心改动(第三版移动模型):
-            旧:apply_move_dir 收到输入才推进一次 → 丢 tick → 误差累积 → snap 拉回
-            新:apply_move_dir 只记方向 → tick_movement 每 tick 持续推进 → 无误差累积
+        Args:
+            dt: 实测 tick 间隔(秒,由 _tick_loop 用 time.monotonic() 测得并钳制)。
+                位移推进/AI 都用它积分,不能用固定 TICK_INTERVAL 替代——
+                真实 tick 间隔受系统定时粒度影响会漂移,固定 dt 会让服务端移速
+                系统性偏慢,客户端预测对账累积超阈值 → 周期性回拉。
         """
         # 取出并清空(下一 tick 重新收集新的输入)
         pending = self._pending_inputs
@@ -343,7 +372,7 @@ class GameServer:
 
         # 收集本 tick 要广播的消息:List[(protoname, protodata)]
         broadcasts = []
-        # 需要广播 PlayerMove 的实体集合(改方向 + 被持续推进)
+        # 需要广播 PlayerMove 的实体集合(改方向 + 被持续推进 + AI 停止迁移)
         moved_entities: set = set()
 
         # ① 处理 pending 输入(只改方向/朝向/攻击,不推进位移)
@@ -354,7 +383,7 @@ class GameServer:
             # 处理移动输入:apply_move_dir 只记住方向,不推进位移
             if "move" in inputs:
                 m = inputs["move"]
-                if self.room.apply_move_dir(entity_id, m["dir_x"], m["dir_y"], m["moving"], self.TICK_INTERVAL):
+                if self.room.apply_move_dir(entity_id, m["dir_x"], m["dir_y"], m["moving"], dt):
                     # 标记需要广播(方向/移动状态可能变了,即使停止也要广播让客户端切 idle)
                     moved_entities.add(entity_id)
 
@@ -391,7 +420,7 @@ class GameServer:
                 })
 
         # ③ 敌人 AI tick(内部调 apply_move_dir 改方向,apply_facing 改朝向)
-        self.room.get_enemy_manager().update(self.TICK_INTERVAL, self.room)
+        self.room.get_enemy_manager().update(dt, self.room)
         # 脏敌人 = 朝向变化了的敌人(用于 PlayerFacing 广播)
         # 注:位置变化不在 dirty 里(apply_move_dir 不再推进位移),
         # 位置变化由下面的 tick_movement 统一推进,通过 moved_entities 收集广播
@@ -400,11 +429,11 @@ class GameServer:
         # ④ ★ 持续移动推进:所有 moving=True 的实体每 tick 推进位移
         # 这是第三版移动模型的核心:服务端记住方向后每 tick 都推进,不依赖客户端输入是否到达
         # 解决了"丢 tick → 误差累积 → snap 拉回"的问题
-        moved_ids = self.room.tick_movement(self.TICK_INTERVAL)
+        moved_ids = self.room.tick_movement(dt)
         moved_entities.update(moved_ids)
 
         # ⑤ 收集广播
-        # PlayerMove: 所有位置/方向变化的实体(改方向 + 被持续推进)
+        # PlayerMove: 所有需要同步移动状态的实体(改方向 + 被持续推进 + 停止迁移)
         for entity_id in moved_entities:
             info = self.room.get_entity(entity_id)
             if info is not None:
@@ -426,7 +455,19 @@ class GameServer:
         for proto_name, proto_data in broadcasts:
             self._queue_broadcast(proto_name, proto_data)
 
-        
+    def set_wallhack(self, entity_type: str, enabled: bool) -> None:
+        """
+        GM 指令入口:开启/关闭某类型实体的穿墙权限
+
+        转发给 GameRoom.set_wallhack,tick_movement 推进位移时据此跳过地形阻挡。
+        用法:
+            server.set_wallhack("player", True)        # 玩家可穿墙(调试用)
+            server.set_wallhack("enemy_slime", False)   # 史莱姆恢复受阻挡
+
+        为什么放 GameServer 而非 GameRoom:GameServer 是「外部入口层」(main/
+        GM 工具/未来聊天指令都从这里进),GameRoom 是「纯状态层」不暴露给外部。
+        """
+        self.room.set_wallhack(entity_type, enabled)
 
     def _trigger_attack(self, attacker_id: str, atk_id: int) -> bool:
         """
@@ -607,10 +648,51 @@ class GameServer:
             # 走发送队列,和 tick 广播一致(避免 cleanup_player 被一条慢消息阻塞)
             self._queue_broadcast("PlayerLeave", {"entity_id": player_id})
 
+    # ------------------------------------------------------------------
+    # Windows 定时器提频
+    # ------------------------------------------------------------------
+    # Windows 默认定时粒度约 15.6ms,asyncio.sleep(0.033) 实际约 47ms 才醒,
+    # tick 率从 30Hz 掉到约 21Hz:
+    #   - pending 输入排队等 tick 的延迟变长(变向时服务端滞后更久,客户端对账易误判)
+    #   - tick 间隔抖动大,位移步长不均匀
+    # timeBeginPeriod(1) 把系统定时粒度提到 1ms,sleep 精度接近 1ms,tick 节奏稳定。
+    # 实测 dt(见 _tick_loop)保证移速不受 tick 率影响,提频是让它"又快又稳"的补充。
+    # 非 Windows 平台定时粒度本身约 1ms,无需处理。
+
+    def _enable_high_timer_resolution(self) -> None:
+        """Windows 下把系统定时粒度提到 1ms(timeBeginPeriod),其他平台跳过"""
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            # winmm.timeBeginPeriod(1):请求 1ms 定时粒度,进程级生效
+            if ctypes.windll.winmm.timeBeginPeriod(1) == 0:  # 0 = TIMERR_NOERROR
+                self._timer_resolution_raised = True
+                logger.info("Windows 定时粒度已提升到 1ms(timeBeginPeriod)")
+            else:
+                logger.warning("timeBeginPeriod(1) 请求被拒绝,定时粒度保持系统默认")
+        except Exception as e:
+            # 提频失败不阻断启动:实测 dt 已保证移速正确,只是 tick 节奏粗一些
+            logger.warning(f"定时器提频失败,使用系统默认粒度: {e}")
+
+    def _restore_timer_resolution(self) -> None:
+        """对称释放 timeBeginPeriod(timeEndPeriod),只在成功提频过时调用"""
+        if sys.platform != "win32" or not self._timer_resolution_raised:
+            return
+        try:
+            import ctypes
+            ctypes.windll.winmm.timeEndPeriod(1)
+            self._timer_resolution_raised = False
+        except Exception as e:
+            logger.warning(f"定时粒度恢复失败: {e}")
+
     async def start(self):
         self.is_running = True
         logger.info(f"游戏服务器启动，监听 {self.host}:{self.port}")
         logger.info(f"已注册的处理器: {list(self.bus.list_handlers().keys())}")
+
+        # Windows 定时器提频(仅 win32 生效):让 asyncio.sleep 精度接近 1ms
+        self._enable_high_timer_resolution()
 
         # 启动 tick 循环(和 websocket serve 并行,asyncio 单线程交替执行)
         self._tick_task = asyncio.create_task(self._tick_loop())
@@ -626,6 +708,8 @@ class GameServer:
         # _tick_loop 的 finally 会连带取消 _sender_task,这里不用单独 cancel sender
         if self._tick_task and not self._tick_task.done():
             self._tick_task.cancel()
+        # 对称恢复系统定时粒度(start 里 timeBeginPeriod 过的话)
+        self._restore_timer_resolution()
         logger.info("服务器停止中...")
 
 
