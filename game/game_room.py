@@ -248,6 +248,14 @@ class GameRoom:
         #   room.trigger_attack(),调用方无需关心是玩家还是敌人。
         self._attack_trigger: Optional[Callable[[str, int], bool]] = None
 
+        # 实体创建钩子:由 GameServer 在初始化时通过 set_entity_spawn_hook 注册。
+        # 为什么需要钩子(而不让 GameRoom 直接广播):
+        #   GameRoom 是纯状态层,不碰网络。GM/控制台调 room.create_enemy 后,
+        #   新敌人已入 _entities,但客户端不知道——需要网络层广播新实体。
+        #   和 _attack_trigger 同理:GameServer 把"广播新实体"作为回调注册进来,
+        #   room.create_enemy 对调用方透明,GM 不用关心广播细节。
+        self._entity_spawn_hook: Optional[Callable[[EntityInfo], None]] = None
+
         # A* 寻路器:由 GameServer 在初始化时通过 set_pathfinder 注入。
         # 为什么不放 GameRoom 内部 new:GameRoom 不知道 map_seed(seed 在
         # GameServer 上,通过 MapInfo 下发给客户端)。注入而非自建,保持
@@ -657,6 +665,21 @@ class GameRoom:
         返回 True 表示攻击已发起(状态已变更为 attacking)。
         """
         self._attack_trigger = cb
+
+    def set_entity_spawn_hook(self, cb: Callable[[EntityInfo], None]) -> None:
+        """
+        注册实体创建回调(由 GameServer 在初始化时调用)
+
+        回调签名: cb(entity_info) -> None
+            entity_info 是已入房间的 EntityInfo(add_entity 之后)。
+            网络层收到后负责广播新实体(当前广播 GameState + StatsInit 全量快照)。
+
+        为什么不放进 add_entity:add_entity 是所有实体(玩家/木桩/敌人)的通用入口,
+        玩家加入已走 PlayerJoin 流程、木桩在启动时注册(那时还没客户端),只有敌人
+        是「运行时由 GM 动态创建」且需要即时广播给在线客户端。所以钩子只挂在
+        create_enemy 上,不污染 add_entity 的通用语义。
+        """
+        self._entity_spawn_hook = cb
 
     def set_pathfinder(self, pf) -> None:
         """
@@ -1254,6 +1277,12 @@ class GameRoom:
         )
         self.add_entity(entity_id, enemy)               # 共有状态 + 战斗组件
         self._enemy_mgr.on_enemy_created(entity_id, entity_type)  # AI 状态
+
+        # 通知网络层广播新实体(GM 运行时创建时在线客户端要能看到)。
+        # 启动期(main.py)创建时还没有玩家连接,广播是空 no-op;玩家加入时
+        # on_player_join 会发全量 GameState,自然包含这个敌人,不受影响。
+        if self._entity_spawn_hook is not None:
+            self._entity_spawn_hook(enemy)
         return enemy
 
     # endregion
