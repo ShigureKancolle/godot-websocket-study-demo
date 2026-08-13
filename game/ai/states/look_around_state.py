@@ -28,8 +28,9 @@ class LookAroundState(ai_state_base.AIStateBase):
 
         # 朝向转转
         cur_facing = room.get_entity(self.entity_id).facing
-        next_facing = (cur_facing + fact_speed * dt) % (2 * math.pi)
+        
         if self.left_facing is not None: 
+            next_facing = (cur_facing + fact_speed * dt) % (2 * math.pi)
             room.apply_facing(self.entity_id, next_facing)
             # 这里要判断是否足够接近 并且之后是远离
             if abs(next_facing - self.left_facing) < 0.1:
@@ -38,6 +39,7 @@ class LookAroundState(ai_state_base.AIStateBase):
                 return
            
         if self.right_facing is not None:
+            next_facing = (cur_facing - fact_speed * dt) % (2 * math.pi)
             room.apply_facing(self.entity_id, next_facing)
             if abs(next_facing - self.right_facing) < 0.1:
                 # 转到右边了,该往左边转了

@@ -48,7 +48,7 @@ class AttackState(ai_state_base.AIStateBase):
 
         # 看看距离
         if (self_entity.x - target_entity.x) ** 2 + (self_entity.y - target_entity.y) ** 2 > 100 ** 2:
-            ai_state_helper.change_ai_state(room, self.entity_id, "patrol", self.target_entity_id)
+            ai_state_helper.change_ai_state(room, self.entity_id, "chase", self.target_entity_id)
             return
     
         print(f"{self.entity_id} is attacking {dt}")

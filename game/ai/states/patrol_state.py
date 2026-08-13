@@ -20,11 +20,15 @@ class PatrolState(ai_state_base.AIStateBase):
             self.init_x = entity.x
             self.init_y = entity.y
 
-    def init_enter(self, room: game_room.GameRoom):      
+    def init_enter(self, room: game_room.GameRoom):
         self.cur_target_x, self.cur_target_y = self._get_random_patrol_pos()
-        dir_x = self.cur_target_x - self.init_x
-        dir_y = self.cur_target_y - self.init_y
-        facing = math.atan2(dir_y, dir_x)
+        entity = room.get_entity(self.entity_id)
+        if not entity:
+            return
+        # 朝向要和移动方向一致:方向从「当前位置」指向目标点,而不是出生点
+        dir_x = self.cur_target_x - entity.x
+        dir_y = self.cur_target_y - entity.y
+        facing = ai_state_helper.get_facing_by_vector2((dir_x, dir_y))
         room.apply_facing(self.entity_id, facing)
 
     def enter(self, target_entity_id: str = None):
@@ -53,6 +57,9 @@ class PatrolState(ai_state_base.AIStateBase):
             dir_x = self.cur_target_x - cur_x
             dir_y = self.cur_target_y - cur_y
             room.apply_move_dir(self.entity_id, dir_x, dir_y, True, dt)
+            # 移动过程中朝向始终跟着移动方向,避免出生点朝向和实际走向不一致
+            facing = ai_state_helper.get_facing_by_vector2((dir_x, dir_y))
+            room.apply_facing(self.entity_id, facing)
         
 
     def _find_player_in_sight(self, room: game_room.GameRoom):
