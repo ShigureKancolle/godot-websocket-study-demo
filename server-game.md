@@ -78,11 +78,13 @@ ID 格式统一带类型前缀:`player:uuid-xxx` / `entity:stake_1`。
 
 - `add_entity(entity_id, entity_info: EntityInfo)` — 强制覆盖 entity_id(不变式:状态里的 entity_id 永远=传入的 key)。重复加入抛 ValueError(bug 早暴露)
 - `remove_entity(entity_id)` — pop,不存在返回 None(幂等,断连清理可能重复调用)。连带清理 `_combats`(战斗组件)+ `_knockbacks`(击退状态)+ EnemyMgr AI 状态,避免遗留幽灵状态
+- `create_enemy(entity_type, pos) -> EntityInfo` — 敌人创建语法糖:分配 `enemy:{type}_{序号}` entity_id(序号按该类型现有数量+1 推算)→ 构造 EntityInfo 设好位置 → `add_entity`(自动建 CombatComponent)→ `EnemyMgr.on_enemy_created` 挂 AI(默认 patrol)。创建完成后回调 `_entity_spawn_hook` 通知网络层广播新实体——**GM 运行时调 room.create_enemy 时,在线客户端才能立刻看到新敌人**
 - `apply_move_dir(entity_id, dir_x, dir_y, moving, dt)` — **只记住方向,不推进位移!** 能力校验:can_move=False 直接拒(木桩不能动)。**输入锁定校验:调 `_is_input_locked`,hurt(硬直)/dead(死亡)/attacking(攻击中)期间拒移动**。归一化方向存到 `EntityInfo.move_dir_x/y`,设 moving/state。位移推进由 `tick_movement` 每 tick 统一做。moving=false 时清零方向,设 state='idle'。
 - `tick_movement(dt) -> list` — 每 tick 推进位移,分两段:**① 击退推进** 遍历 `_knockbacks` 表,对被击退实体按 vx/vy 推进(不受输入锁定影响,硬直中被推走),耗时耗尽自动清理;**② 普通移动推进** 所有 moving=True 且未锁定实体的位移 `info.x += move_dir_x * speed * dt`(击退中的实体不叠加普通移动)。返回本 tick 移动了的 entity_id 列表(供 web_server 收集广播)。**这是服务端权威移动的核心**:服务端记住方向后每 tick 都推进,不依赖客户端输入是否到达,无累积误差。
 - `apply_facing(entity_id, facing)` — 能力校验:can_move=False 直接拒(木桩不转向)。**输入锁定校验:调 `_is_input_locked`,hurt/dead/attacking 期间锁朝向**。只改 facing,弧度归一到 [0, 2*PI)。
 - `trigger_attack(entity_id, atk_id) -> bool` — **攻击发动统一入口**(玩家和敌人都调本方法)。内部转调 GameServer 注册的 `attack_trigger` 钩子(由 web_server._trigger_attack 实现),完成 apply_attack_start + 广播 AttackStart + 注册 AttackTimer(hit_cb/end_cb)的完整流程。钩子未注册时退化为 apply_attack_start(供单测)。**AI 不要直接调 apply_attack_start**——那只改状态,不广播也不判定,敌人攻击会"空挥"
 - `set_attack_trigger(cb)` — 注册攻击发动回调(由 GameServer 在 __init__ 时调),cb 签名 `(attacker_id, atk_id) -> bool`
+- `set_entity_spawn_hook(cb)` — 注册实体创建回调(由 GameServer 在 __init__ 时调),cb 签名 `(entity_info) -> None`。在 `create_enemy` 的 `add_entity` 之后被调,网络层据此广播新实体(GameState + StatsInit 全量快照)
 - `apply_attack_start(entity_id, atk_id)` — 能力校验:can_attack=False 直接拒。**输入锁定校验:调 `_is_input_locked`,hurt/dead 期间不能发起攻击**;另外 state=="attacking" 也拒(防连点造成一次攻击多次伤害)。设 state='attacking'。只做状态变更,判定在 get_attack_hits。**由 trigger_attack 内部调用,外部一般不直接调**
 - `apply_attack_end(entity_id, atk_id)` — 攻击结束恢复 state='idle'
 - `apply_hurt(target_id, atk_id, atk_shape_idx, damage, attacker_id) -> HurtResult` — 能力校验:can_be_hurt=False 直接拒返回 FAILED(墙/水地不会进入 hurt)。**统一处理玩家和木桩,不区分类型**。扣血后判定:cur_hp<=0 且 can_die=True → 设 state='dead' 返回 DEAD(调用方启 DeadTimer);否则设 state='hurt' 返回 HURT(调用方启 HurtTimer)。玩家 can_die=False,hp 扣到 0 也走 HURT 分支(死亡流程暂不实现)。
@@ -124,7 +126,7 @@ ID 格式统一带类型前缀:`player:uuid-xxx` / `entity:stake_1`。
 ### apply_move_dir / tick_movement 移动模型
 当前移动模型:"记住方向 + 每 tick 持续推进":
 - 客户端发方向向量(dir_x/dir_y),服务端 apply_move_dir 只记住方向到 EntityInfo.move_dir_x/y,不推进位移
-- tick_movement 每 tick 对所有 moving=True 的实体统一按 dir * speed * TICK_INTERVAL 推进位移
+- tick_movement 每 tick 对所有 moving=True 的实体统一按 dir * speed * dt 推进位移。**dt 是实测 tick 间隔**(GameServer._tick_loop 用 time.monotonic() 测得并钳制,详见 server-net.md),不能用固定 TICK_INTERVAL——真实 tick 间隔受系统定时粒度影响会漂移(Windows 默认粒度下 33ms 请求实际约 47ms),固定 dt 积分让服务端移速系统性偏慢,客户端预测对账累积超阈值 → 周期性回拉(移动拉扯根因)
 - speed 从 config_loader.get_speed(entity_type) 查配置(防作弊,不从消息读)
 - moving=false 时清零方向,只更新 state
 - **核心优势**:服务端记住方向后每 tick 都推进,不依赖客户端输入是否到达——即使某个 tick 没收到输入,服务端也会按记住的方向继续推进,无累积误差,无 snap 拉回
@@ -333,7 +335,7 @@ hurt 定时器到期
 - 服务端 apply_move_dir 只记住方向到 EntityInfo.move_dir_x/y,不推进位移
 - 服务端 tick_movement 每 tick 对所有 moving=True 的实体统一推进 EntityInfo.x/y
 - 服务端广播 PlayerMove{x, y, moving}(S2C 语义,发算出的坐标)
-- 客户端本地预测 position += dir * speed * delta,收到服务端广播后软对账(回溯 RTT 前预测位置,误差大才 lerp 平滑回正)
+- 客户端本地预测 position += dir * speed * delta,收到服务端广播后软对账(回溯 RTT+半个 tick 前预测位置,误差大才 lerp 平滑回正;变向/急停后宽限窗口内跳过回正,详见 client-role.md)
 
 核心优势:服务端记住方向后每 tick 都推进,不依赖客户端输入是否到达——无累积误差,无 snap 拉回。
 后续可演进为纯快照:把 `broadcast("PlayerMove", ...)` 换成 `broadcast("GameState", room.snapshot())`,GameRoom 不用改。
@@ -352,11 +354,13 @@ hurt 定时器到期
 - **ID 统一加前缀**:player:uuid-xxx / entity:stake_1
 - GameRoom 功能完整:实体加入/离开/移动/朝向状态管理已实现,所有方法带能力校验
 - **服务端权威移动已实现**:apply_move_dir 只记住方向(不推进位移)+ tick_movement 每 tick 持续推进所有 moving=True 实体的位移;EntityInfo 加 move_dir_x/y 字段;PlayerMove 协议改为双向语义(C2S 发方向,S2C 发坐标);解决了"丢 tick → 误差累积 → snap 拉回"问题
+- **tick_movement 改用实测 dt**:dt 由 GameServer._tick_loop 用 time.monotonic() 实测(钳制 [0,100ms]),替代原固定 TICK_INTERVAL 积分——修复 Windows 15.6ms 定时粒度下 tick 实际约 47ms、服务端移速只有 71%、客户端预测对账周期性回拉的问题
 - **hurt 硬直已实现**:apply_move_dir/apply_facing/apply_attack_start 在 state=="hurt" 时拒绝输入;apply_hurt_end 恢复 idle;config_loader.get_hurt_duration_ms()=666ms
 - **击退已实现**:AttackShape 加 knockback_distance 配置(1001/1002 最后一段=80px);GameRoom 加 `_knockbacks` 击退表 + apply_knockback(方向=目标-攻击者,时长=hurt 时长,速度=距离/时长);tick_movement 先推进击退(不受输入锁定影响);web_server.hit_cb 只对连段最后一段且 knockback_distance>0 触发,死亡不击退;remove_entity 连带清理击退状态
 - **死亡流程已实现**:apply_hurt 返回 HurtResult(FAILED/HURT/DEAD),hp<=0 且 can_die=True 走死亡分支;apply_dead 设 state="dead";_is_input_locked 统一校验 hurt/dead/attacking 锁定状态;get_attack_hits 过滤 state=="dead" 实体;DeadTimer + TimerManager.start_dead 实现延迟移除;config_loader 加 can_die/dead_duration_ms 字段 + get_dead_duration_ms() API
 - 攻击状态三件套已实现:apply_attack_start/apply_attack_end/apply_hurt(原 apply_attack_hurt 改名,统一处理玩家和木桩)
 - **trigger_attack 攻击发动钩子已实现**:GameRoom 持有 `_attack_trigger` 回调(由 GameServer._trigger_attack 注册),玩家和敌人都调 `room.trigger_attack()` 走完整流程(状态变更+广播+判定帧定时器+命中扣血),修复敌人 AI 直接调 apply_attack_start 导致"只改状态不发动"的问题
+- **create_enemy 实体创建钩子已实现**:GameRoom 持有 `_entity_spawn_hook` 回调(由 GameServer._on_entity_spawned 注册),GM 运行时调 `room.create_enemy` 后网络层广播 GameState + StatsInit 全量快照,在线客户端立刻创建并显示新敌人(修复 GM 创建敌人客户端看不到的问题)
 - 攻击命中判定已接入:get_attack_hits 遍历 _entities,用 can_be_hurt 过滤,每个目标查 entity_config 取 body_params 构造 Circle
 - **阵营掩码改用实体 attack_mask**:原 attack_config 的 hit_mask 字段移除(它挂在攻击上,导致敌人复用 1001 只能打敌人)。改用实体类型的 attack_mask(玩家=2 打敌人层,敌人=1 打玩家层),玩家和敌人可复用同一 atk_id 各打各阵营,get_attack_hits 用 `attacker_cap.attack_mask & target_cap.hit_layer` 过滤
 - **配置已迁移到 JSON 单数据源**:ATTACK_CONFIG / ENTITY_CAPABILITIES / HURT_DURATION_MS 改为读 shared_config/*.json(由 sync_config.py 同步)
