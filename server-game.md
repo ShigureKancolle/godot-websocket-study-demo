@@ -11,7 +11,12 @@
 | [game/entity_config.py](file:///d:/work2/godot_demo/server/game/entity_config.py) | 实体能力配置表:entity_config 是 config_loader 的薄包装,提供 get_capability API |
 | [game/timer_mgr.py](file:///d:/work2/godot_demo/server/game/timer_mgr.py) | AttackTimer + TimerManager:攻击生命周期定时器(判定帧+结束两个时间点回调) |
 | [game/collision.py](file:///d:/work2/godot_demo/server/game/collision.py) | 纯几何碰撞判定:形状定义(Circle/Sector)+ 相交判定函数,无外部依赖,可独立单测 |
-| [config/config_loader.py](file:///d:/work2/godot_demo/server/config/config_loader.py) | 配置加载层:读 server/config/*.json 构造对象(攻击配置+实体能力+全局常量) |
+| [config/config_loader.py](file:///d:/work2/godot_demo/server/config/config_loader.py) | 配置加载层:读 server/config/*.json 构造对象(攻击配置+实体能力+全局常量+视野) |
+| [game/enemy_mgr.py](file:///d:/work2/godot_demo/server/game/enemy_mgr.py) | 敌人 AI 管理器:持有每个敌人的 AI 状态机,每 tick 驱动决策 |
+| [game/ai/enemy_ai_machine.py](file:///d:/work2/godot_demo/server/game/ai/enemy_ai_machine.py) | 敌人 AI 状态机(状态注册/切换/update) |
+| [game/ai/ai_state_base.py](file:///d:/work2/godot_demo/server/game/ai/ai_state_base.py) | AI 状态基类(enter/exit/update 生命周期) |
+| [game/ai/states/](file:///d:/work2/godot_demo/server/game/ai/states) | 具体 AI 状态:patrol/chase/attack/look_around |
+| [game/helper/ai_state_helper.py](file:///d:/work2/godot_demo/server/game/helper/ai_state_helper.py) | AI 状态帮助:视锥寻人(is_in_sight/find_nearest_entity_in_sight)+ 寻路 + 状态切换 |
 | [game/handlers/__init__.py](file:///d:/work2/godot_demo/server/game/handlers/__init__.py) | handlers 统一入口:register_all(server) 遍历子模块注册 |
 | [game/handlers/player_handlers.py](file:///d:/work2/godot_demo/server/game/handlers/player_handlers.py) | 玩家 handler:PlayerJoin/PlayerMove/PlayerFacing/AttackStart |
 | [game/handlers/chat_handlers.py](file:///d:/work2/godot_demo/server/game/handlers/chat_handlers.py) | 聊天 handler:ChatMessage/Heartbeat |
@@ -267,6 +272,28 @@ await duration-hit_time → end_cb (apply_attack_end + 广播 AttackEnd)
 - 玩家(经 pending_inputs→_process_tick)和敌人(AI 状态机直接调 `room.trigger_attack`)走同一条完整攻击流程
 - cleanup_player 已调 TimerManager.cancel(取消该实体所有 attack/hurt/dead 定时器)
 
+## 敌人 AI 状态机(EnemyMgr + ai/states)
+
+### 为什么 AI 状态不进 EntityInfo
+敌人 AI 决策状态(当前状态/追击目标/路径)是所有实体共用的 EntityInfo 不该承载的,单独由 EnemyMgr 持有,以 entity_id 关联 GameRoom._entities。AI 只读 GameRoom 共有状态、通过 apply_xxx 改状态,不直接写 _entities。
+
+### 状态机
+EnemyAIMachine 持有 states dict,EnemyMgr.add_enemy_ai_state 注册四个状态:
+- patrol(巡逻):出生点附近随机移动,视锥内发现玩家 → chase;走到目标点 → look_around
+- look_around(张望):原地左右转头,转动中视锥发现玩家 → chase,转完 → patrol
+- chase(追逐):A* 寻路追击,进攻击距离 → attack;目标死亡/超距离/脱离追逐视锥 → patrol
+- attack(攻击):调 trigger_attack 完整攻击流程,目标消失/距离过远 → patrol
+
+### 视锥视野
+敌人寻人用「视锥」判定:距离(半径)+ 角度(朝向左右半角)。
+- 配置:shared_config/vision_config.json,两套模式:
+  - normal(常态,除 chase 外的所有状态):half_angle_deg=30°,radius=750px(宽而近)
+  - chase(追逐态):half_angle_deg=22.5°,radius=1000px(窄而远,盯死目标)
+- loader:config_loader.get_vision(mode) 返回 VisionParams(half_angle 弧度 / radius 像素),未知 mode 回退 normal
+- 判定:ai_state_helper.is_in_sight(finder, target, vision) 纯几何判「距离 + 角度」(目标方向与 facing 夹角 ≤ 半角);遮挡不在此判,由 find_path 可达性承担(墙后目标即使可见也追不到)
+- 寻人:ai_state_helper.find_nearest_entity_in_sight(room, entity_id, entity_type, vision_mode) 先视锥过滤,再 find_path 可达性过滤,取最近目标
+- 用途:patrol/look_around 用 normal 视野寻人;chase 用 chase 视野判定「目标是否脱离视野」,脱离即放弃追击回 patrol
+
 ## collision.py — 纯几何碰撞判定
 
 ### 为什么单独一个文件
@@ -371,3 +398,4 @@ hurt 定时器到期
 - **timer_mgr.py 已实现 AttackTimer + HurtTimer + DeadTimer + TimerManager**:attack 三段定时器 + hurt 单段定时器 + dead 单段定时器,start_hurt 内部 cancel 旧 attack(攻击被中断)+ 旧 hurt(连击重置);start_dead 内部 cancel 旧 attack + hurt(死亡打断一切);cancel(player_id) 取消该玩家所有 attack/hurt/dead 定时器
 - collision.py 已实现:Circle/Sector 形状 + 相交判定函数,冒烟测试通过
 - 冒烟测试通过:A 攻击命中 entity:stake_1;apply_hurt 设 stake state='hurt';木桩 apply_move_dir 被能力配置拒绝
+- **敌人视锥视野已实现**:vision_config.json 新增 normal(30°/750px)/chase(22.5°/1000px) 两套视野;config_loader.get_vision(mode) 读取为 VisionParams(half_angle 弧度/radius);ai_state_helper.is_in_sight 纯几何判定(距离+角度,遮挡由 find_path 可达性承担);find_nearest_entity_in_sight 先视锥过滤再寻路;patrol/look_around 用常态视野寻人,chase 用追逐视野判「目标脱离视野即放弃追击」;enemy_mgr 补注册 look_around 状态

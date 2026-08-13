@@ -18,7 +18,9 @@ d:\work2\godot_demo\
 ├── shared_config/  # 双端共享配置单数据源(改完跑 tools/sync_config.py 同步)
 │   ├── attack_config.json     # 攻击配置表(shape_list + duration/hit_time)
 │   ├── entity_config.json     # 实体能力+碰撞形状表(can_xxx + body_shape/params)
-│   └── constants.json         # 全局常量(HURT_DURATION_MS 等)
+│   ├── constants.json         # 全局常量(HURT_DURATION_MS 等)
+│   ├── terrain_config.json    # 地形能力表(walkable/move_cost)
+│   └── vision_config.json     # 敌人视锥视野表(normal/chase 两套角度+半径)
 ├── server/         # Python 服务端
 │   ├── main.py             # 唯一入口(实例创建+handler注册+启动)
 │   ├── hotreload_config.py # 热更模块配置(声明 HOT_MODULES 列表)
