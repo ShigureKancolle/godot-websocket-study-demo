@@ -26,6 +26,9 @@ def find_nearest_entity_in_sight(room: "GameRoom", entity_id: str, entity_type: 
         dy = other_entity.y - finder_entity.y
         distance = (dx ** 2 + dy ** 2) ** 0.5
         if nearest_entity_id == "" or distance < nearest_distance:
+            # 判断是否在视野中
+            
+
             # 达不到的路径不算找到了
             move_path = find_path(room, (finder_entity.x, finder_entity.y), (other_entity.x, other_entity.y))
             if move_path is None:
@@ -34,6 +37,7 @@ def find_nearest_entity_in_sight(room: "GameRoom", entity_id: str, entity_type: 
             nearest_distance = distance
 
             # TODO 这里可以加上视野判断,比如角度范围、障碍物遮挡等
+            
     return nearest_entity_id
 
 

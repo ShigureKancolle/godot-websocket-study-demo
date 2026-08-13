@@ -39,7 +39,7 @@ class ChaseState(ai_state_base.AIStateBase):
     def exit(self):
         print(f"{self.entity_id} exits chase state")
 
-    def update(self, dt: float, room: game_room.GameRoom):
+    def update_state(self, dt: float, room: game_room.GameRoom):
         # print(f"{self.entity_id} is chasing {dt}")
         if self.target_entity_id is None or room.get_entity(self.target_entity_id) is None:
             # 这种情况可能发生在玩家死亡或离开房间时, 需要切换回巡逻状态
@@ -145,6 +145,8 @@ class ChaseState(ai_state_base.AIStateBase):
         # 检查距离 太远了不追了
         if (target_entity.x - my_entity.x) ** 2 + (target_entity.y - my_entity.y) ** 2 > max_chase_distance ** 2:
             return None
+
+        # 已经离开视野范围 也不追了 进入警戒
 
         my_pos = (my_entity.x, my_entity.y)
         target_pos = (target_entity.x, target_entity.y)

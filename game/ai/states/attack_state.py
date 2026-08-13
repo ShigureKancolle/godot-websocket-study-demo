@@ -23,7 +23,7 @@ class AttackState(ai_state_base.AIStateBase):
     def exit(self):
         print(f"{self.entity_id} exits attack state")
 
-    def update(self, dt: float, room: "GameRoom"):
+    def update_state(self, dt: float, room: "GameRoom"):
         self.attack_after_time += dt
         if self.attack_after_time < self.attack_time:
             return

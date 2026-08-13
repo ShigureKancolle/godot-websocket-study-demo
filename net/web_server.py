@@ -95,6 +95,11 @@ class GameServer:
         # 统一入口,避免敌人 AI 绕过网络层导致"只改状态不发动"的问题(详见 game_room.trigger_attack)
         self.room.set_attack_trigger(self._trigger_attack)
 
+        # 把"新实体出现广播"注册给 GameRoom 作为钩子。
+        # GM/控制台调 room.create_enemy 后,GameRoom 会回调这里,由网络层广播
+        # GameState + StatsInit,让所有在线客户端能看到新敌人。
+        self.room.set_entity_spawn_hook(self._on_entity_spawned)
+
         # 构造 A* 寻路器并注入 GameRoom。
         # 敌人 AI(ChaseState)通过 room.get_pathfinder() 取用,基于双端一致的
         # ChunkGenerator(seed 来自 self.map_seed)做网格寻路,绕开不可通行地形。
@@ -107,6 +112,12 @@ class GameServer:
         self.room.set_pathfinder(self._pathfinder)
 
         self.is_running = False
+
+        # 事件循环引用(start 时用 asyncio.get_running_loop() 填充)。
+        # 为什么需要:GM 控制台在独立线程里调 room.create_enemy,回调 _on_entity_spawned
+        # 会从该线程触发;broadcast/_queue_broadcast 操作 asyncio 队列,必须投递回
+        # 事件循环线程执行,用 loop.call_soon_threadsafe 做线程安全投递。
+        self._loop = None
 
         # tick 机制:pending_inputs 收集高频输入(move/facing),每 tick 统一处理+广播
         # 结构: {player_id: {"move": {...}, "facing": {...}}}
@@ -231,6 +242,44 @@ class GameServer:
         真正的发送在 _sender_loop 里进行,不影响 tick 节奏。
         """
         self._send_queue.put_nowait((protoname, protodata))
+
+    def _on_entity_spawned(self, entity_info) -> None:
+        """
+        实体创建钩子(由 GameRoom.create_enemy 回调,见 game_room.set_entity_spawn_hook)
+
+        线程安全:GM 控制台在独立线程调 room.create_enemy,本方法会从该线程进入。
+        asyncio 队列不是线程安全的,不能直接 _queue_broadcast,改用
+        loop.call_soon_threadsafe 投递回事件循环线程执行真正的广播。
+        start() 之前(如 main.py 启动期创建敌人)loop 还是 None,此时没有并发,
+        直接同步广播塞队列是安全的(队列尚未被 sender 消费)。
+        """
+        if self._loop is not None and not self._loop.is_closed():
+            self._loop.call_soon_threadsafe(self._broadcast_entity_spawn, entity_info)
+        else:
+            self._broadcast_entity_spawn(entity_info)
+
+    def _broadcast_entity_spawn(self, entity_info) -> None:
+        """
+        广播新实体出现(在事件循环线程内执行)
+
+        为什么广播 GameState + StatsInit 全量快照而非单条增量:
+            当前契约里没有通用的"EntitySpawn"消息(PlayerJoin 语义是玩家加入,复用会
+            把客户端 _local_entity_id 覆盖成敌人 id,破坏本地玩家识别),因此用已有的
+            全量快照消息把新实体带到所有客户端。全量快照代价是渲染层重建所有 Role,
+            对 GM 调试场景可接受;换来自洽性(实体和战斗属性都一次对齐)。
+
+        为什么先 StatsInit 再 GameState:
+            客户端 _create_role 创建 Role 时会查 mirror.get_combat() 决定是否初始化
+            血条。先发 StatsInit 让新敌人的战斗属性先进 _combats,再发 GameState 触发
+            state_replaced 重建 Role,创建时就能取到 combat,血条当前值正确显示。
+        """
+        combat_list = [dataclasses.asdict(c) for c in self.room.snapshot_combats()]
+        self._queue_broadcast("StatsInit", {"entries": combat_list})
+        entities_list = [dataclasses.asdict(e) for e in self.room.snapshot()]
+        self._queue_broadcast("GameState", {
+            "entities": entities_list,
+            "timestamp": int(time.time() * 1000)
+        })
 
     async def _sender_loop(self) -> None:
         """发送协程:独立运行,从队列取消息调 broadcast 发出
@@ -688,6 +737,7 @@ class GameServer:
 
     async def start(self):
         self.is_running = True
+        self._loop = asyncio.get_running_loop()
         logger.info(f"游戏服务器启动，监听 {self.host}:{self.port}")
         logger.info(f"已注册的处理器: {list(self.bus.list_handlers().keys())}")
 
