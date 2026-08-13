@@ -221,6 +221,8 @@ class EnemyMgr:
         import game.ai.states.patrol_state as patrol_state
         import game.ai.states.chase_state as chase_state
         import game.ai.states.attack_state as attack_state
+        import game.ai.states.look_around_state as look_around_state
         state_machine.add_state("patrol", patrol_state.PatrolState(state_machine.entity_id))
         state_machine.add_state("chase", chase_state.ChaseState(state_machine.entity_id))
         state_machine.add_state("attack", attack_state.AttackState(state_machine.entity_id))
+        state_machine.add_state("look_around", look_around_state.LookAroundState(state_machine.entity_id))

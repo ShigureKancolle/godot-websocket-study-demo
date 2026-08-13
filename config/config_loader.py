@@ -207,6 +207,23 @@ class EntityCapability:
 
 
 # ===========================================================================
+# 视野配置(敌人视锥)
+# ===========================================================================
+@dataclass
+class VisionParams:
+    """
+    敌人视野(视锥)参数。
+
+    字段:
+        half_angle: 视野半角(弧度),朝向左右各多少。JSON 里 half_angle_deg 用角度存,
+                    构造时转弧度。常态(normal)=30°,追逐(chase)=22.5°(追逐更窄)。
+        radius:     视野半径(像素)。常态=750,追逐=1000(追逐更远,盯死目标)。
+    """
+    half_angle: float = math.radians(30.0)
+    radius: float = 750.0
+
+
+# ===========================================================================
 # 内部辅助:从 dict 构造对象
 # ===========================================================================
 
@@ -299,6 +316,14 @@ def _build_terrain_capability(entry_dict: dict) -> TerrainCapability:
     )
 
 
+def _build_vision(entry_dict: dict) -> VisionParams:
+    """从 dict 构造 VisionParams(JSON 里 half_angle_deg 用角度存,这里转弧度)"""
+    return VisionParams(
+        half_angle=math.radians(float(entry_dict.get("half_angle_deg", 30.0))),
+        radius=float(entry_dict.get("radius", 750.0)),
+    )
+
+
 # ===========================================================================
 # 配置缓存(模块加载时一次性读取)
 # ===========================================================================
@@ -363,16 +388,28 @@ def _build_constants(raw: dict) -> dict:
     return {k: v for k, v in raw.items() if not _is_comment_key(k)}
 
 
+def _build_vision_map(raw: dict) -> Dict[str, VisionParams]:
+    """从 vision_config.json 原始数据构造 {mode: VisionParams} 表(mode=normal/chase)"""
+    result = {}
+    for key, value in raw.items():
+        if _is_comment_key(key):
+            continue
+        result[key] = _build_vision(value)
+    return result
+
+
 # 模块加载时一次性读取并缓存
 _ATTACK_CONFIG_RAW = _load_json("attack_config.json")
 _ENTITY_CONFIG_RAW = _load_json("entity_config.json")
 _CONSTANTS_RAW = _load_json("constants.json")
 _TERRAIN_CONFIG_RAW = _load_json("terrain_config.json")
+_VISION_CONFIG_RAW = _load_json("vision_config.json")
 
 _ATTACK_CONFIG_MAP: Dict[int, AttackConfig] = _build_attack_config_map(_ATTACK_CONFIG_RAW)
 _ENTITY_CAPABILITY_MAP: Dict[str, EntityCapability] = _build_entity_capability_map(_ENTITY_CONFIG_RAW)
 _CONSTANTS: dict = _build_constants(_CONSTANTS_RAW)
 _TERRAIN_CAPABILITY_MAP: Dict[str, TerrainCapability] = _build_terrain_capability_map(_TERRAIN_CONFIG_RAW)
+_VISION_MAP: Dict[str, VisionParams] = _build_vision_map(_VISION_CONFIG_RAW)
 
 
 # ===========================================================================
@@ -434,6 +471,20 @@ def get_constant(name: str, default=None):
 def get_hurt_duration_ms() -> int:
     """取 hurt 硬直时长(毫秒),语法糖"""
     return int(_CONSTANTS.get("HURT_DURATION_MS", 666))
+
+
+def get_vision(mode: str = "normal") -> VisionParams:
+    """
+    取敌人视野(视锥)配置。
+
+    Args:
+        mode: "normal"(常态:除追逐外的所有状态,如巡逻/张望/攻击) / "chase"(追逐态)。
+              未知 mode 回退 normal(安全默认)。
+
+    Returns:
+        VisionParams(half_angle 弧度 / radius 像素)
+    """
+    return _VISION_MAP.get(mode, _VISION_MAP.get("normal", VisionParams()))
 
 
 # ===========================================================================

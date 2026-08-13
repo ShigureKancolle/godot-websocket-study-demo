@@ -146,7 +146,10 @@ class ChaseState(ai_state_base.AIStateBase):
         if (target_entity.x - my_entity.x) ** 2 + (target_entity.y - my_entity.y) ** 2 > max_chase_distance ** 2:
             return None
 
-        # 已经离开视野范围 也不追了 进入警戒
+        # 已经离开非常态(追逐)视野(22.5°/1000px) 也不追了 进入警戒
+        chase_vision = config_loader.get_vision("chase")
+        if not ai_state_helper.is_in_sight(my_entity, target_entity, chase_vision):
+            return None
 
         my_pos = (my_entity.x, my_entity.y)
         target_pos = (target_entity.x, target_entity.y)

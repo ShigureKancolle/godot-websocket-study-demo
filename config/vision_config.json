@@ -1,0 +1,17 @@
+{
+    "_comment": "敌人视野(视锥)配置,单数据源双端共享。改完跑 tools/sync_config.py 同步",
+    "_angle_unit": "half_angle_deg 用角度(degree)存,loader 读取时转弧度",
+    "_vision_desc": "normal=常态视野(除追逐外的所有状态:巡逻/张望/攻击),chase=非常态(追逐)视野。追逐视野更窄但更远,用于判定追击目标是否脱离视野",
+
+    "normal": {
+        "_desc": "常态视野:朝向左右各 30 度,半径 750px(宽而近)",
+        "half_angle_deg": 30.0,
+        "radius": 750.0
+    },
+
+    "chase": {
+        "_desc": "追逐态视野:朝向左右各 22.5 度,半径 1000px(窄而远,盯死目标)",
+        "half_angle_deg": 22.5,
+        "radius": 1000.0
+    }
+}

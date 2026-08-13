@@ -20,6 +20,12 @@ class LookAroundState(ai_state_base.AIStateBase):
         print(f"{self.entity_id} exits look around state")
 
     def update_state(self, dt: float, room: game_room.GameRoom):
+        # 张望过程中持续寻找玩家(常态视野 30°/750px),发现就切追逐
+        player_id = self._find_nearest_entity_in_sight(room)
+        if player_id:
+            ai_state_helper.change_ai_state(room, self.entity_id, "chase", player_id)
+            return
+
         # 朝向转转
         cur_facing = room.get_entity(self.entity_id).facing
         next_facing = (cur_facing + fact_speed * dt) % (2 * math.pi)
