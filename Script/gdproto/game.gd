@@ -728,6 +728,11 @@ class EntityInfo:
 		service.field = __moving
 		data[__moving.tag] = service
 		
+		__account_id = PBField.new("account_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 10, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
+		service = PBServiceField.new()
+		service.field = __account_id
+		data[__account_id.tag] = service
+		
 	var data = {}
 	
 	var __entity_id: PBField
@@ -833,6 +838,19 @@ class EntityInfo:
 		__moving.value = DEFAULT_VALUES_3[PB_DATA_TYPE.BOOL]
 	func set_moving(value : bool) -> void:
 		__moving.value = value
+	
+	var __account_id: PBField
+	func has_account_id() -> bool:
+		if __account_id.value != null:
+			return true
+		return false
+	func get_account_id() -> String:
+		return __account_id.value
+	func clear_account_id() -> void:
+		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__account_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
+	func set_account_id(value : String) -> void:
+		__account_id.value = value
 	
 	func _to_string() -> String:
 		return PBPacker.message_to_string(data)
