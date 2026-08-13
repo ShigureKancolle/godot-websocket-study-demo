@@ -1,41 +1,41 @@
 {
-	"_comment": "攻击配置表(单数据源,双端共享。改完跑 tools/sync_config.py 同步到 server/config 和 client/res/config)",
-	"_shape_type_values": "sector|rect|circle|ring(和服务端 ShapeType enum 的 value 对齐)",
-	"_angle_unit": "角度(degree),loader 读取时转弧度。理由:人读角度比弧度直观",
-	"_hit_mask_removed": "原 hit_mask 字段已移除。命中层级改由实体类型的 attack_mask 决定(见 entity_config.json),玩家和敌人复用同一 atk_id 时各自打各自阵营,避免攻击配置耦合阵营",
+    "_comment": "攻击配置表(单数据源,双端共享。改完跑 tools/sync_config.py 同步到 server/config 和 client/res/config)",
+    "_shape_type_values": "sector|rect|circle|ring(和服务端 ShapeType enum 的 value 对齐)",
+    "_angle_unit": "角度(degree),loader 读取时转弧度。理由:人读角度比弧度直观",
+    "_hit_mask_removed": "原 hit_mask 字段已移除。命中层级改由实体类型的 attack_mask 决定(见 entity_config.json),玩家和敌人复用同一 atk_id 时各自打各自阵营,避免攻击配置耦合阵营",
 
-	"1001": {
-		"_desc": "扇形一刀(唯一一段=最后一段,命中击退 80px)",
-		"shape_list": [
-			{
-				"shape": "sector",
-				"params": {"radius": 35.0, "angle": 120.0},
-				"duration": 583,
-				"hit_time": 83,
-				"damage_multiplier": 1.1,
-				"knockback_distance": 80.0
-			}
-		]
-	},
+    "1001": {
+        "_desc": "扇形一刀(唯一一段=最后一段,命中击退 80px)",
+        "shape_list": [
+            {
+                "shape": "sector",
+                "params": {"radius": 35.0, "angle": 120.0},
+                "duration": 583,
+                "hit_time": 83,
+                "damage_multiplier": 1.1,
+                "knockback_distance": 80.0
+            }
+        ]
+    },
 
-	"1002": {
-		"_desc": "扇形两刀(当前两个 shape 配置相同;第二段为最后一段,命中击退 80px)",
-		"shape_list": [
-			{
-				"shape": "sector",
-				"params": {"radius": 35.0, "angle": 120.0},
-				"duration": 583,
-				"hit_time": 83,
-				"damage_multiplier": 0.7
-			},
-			{
-				"shape": "sector",
-				"params": {"radius": 35.0, "angle": 120.0},
-				"duration": 583,
-				"hit_time": 83,
-				"damage_multiplier": 0.9,
-				"knockback_distance": 80.0
-			}
-		]
-	}
+    "1002": {
+        "_desc": "扇形两刀(当前两个 shape 配置相同;第二段为最后一段,命中击退 80px)",
+        "shape_list": [
+            {
+                "shape": "sector",
+                "params": {"radius": 35.0, "angle": 120.0},
+                "duration": 583,
+                "hit_time": 83,
+                "damage_multiplier": 0.7
+            },
+            {
+                "shape": "sector",
+                "params": {"radius": 35.0, "angle": 120.0},
+                "duration": 583,
+                "hit_time": 83,
+                "damage_multiplier": 0.9,
+                "knockback_distance": 80.0
+            }
+        ]
+    }
 }
