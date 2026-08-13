@@ -1,8 +1,8 @@
 # coding=utf-8
 # patrolling状态
 
+import math
 import random
-
 import game.ai.ai_state_base as ai_state_base
 import game.game_room as game_room
 import game.helper.ai_state_helper as ai_state_helper
@@ -20,11 +20,18 @@ class PatrolState(ai_state_base.AIStateBase):
             self.init_x = entity.x
             self.init_y = entity.y
 
+    def init_enter(self, room: game_room.GameRoom):      
+        self.cur_target_x, self.cur_target_y = self._get_random_patrol_pos()
+        dir_x = self.cur_target_x - self.init_x
+        dir_y = self.cur_target_y - self.init_y
+        facing = math.atan2(dir_y, dir_x)
+        room.apply_facing(self.entity_id, facing)
+
     def enter(self, target_entity_id: str = None):
         print(f"{self.entity_id} enters patrol state")
         self.cur_target_x, self.cur_target_y = self._get_random_patrol_pos()
 
-    def exit(self):
+    def pre_exit(self):
         print(f"{self.entity_id} exits patrol state")
         self.cur_target_x, self.cur_target_y = self.init_x, self.init_y  # 重置到出生位置
 

@@ -16,7 +16,7 @@ class LookAroundState(ai_state_base.AIStateBase):
     def enter(self, target_entity_id: str = None):
         print(f"{self.entity_id} enters look around state {target_entity_id}")
 
-    def exit(self):
+    def pre_exit(self):
         print(f"{self.entity_id} exits look around state")
 
     def update_state(self, dt: float, room: game_room.GameRoom):
@@ -44,8 +44,10 @@ class LookAroundState(ai_state_base.AIStateBase):
                 self.right_facing = None
                 return
 
-        # 回到巡逻状态
-        ai_state_helper.change_ai_state(room, self.entity_id, "patrol")
+        if self.left_facing is None and self.right_facing is None:
+            # 左右都转完了,回到巡逻状态
+            ai_state_helper.change_ai_state(room, self.entity_id, "patrol")
+            return
            
 
     def init_enter(self, room: game_room.GameRoom):
