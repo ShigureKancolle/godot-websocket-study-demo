@@ -90,10 +90,12 @@ Role 本身只是"位置容器":有坐标、能挂子节点。它不知道自己
 - **本地玩家**:半预测 + 软对账
   - LocalPlayerController 发方向后立即本地预测推进(`position += dir * speed * delta`)
   - Role._process 每帧把预测位置记入 `_pred_history`(预测轨迹,窗口 1000ms)
-  - 收到服务端广播时,`_reconcile_prediction` 回溯 RTT 前(`now - RTT`)的预测位置,
+  - 收到服务端广播时,`_reconcile_prediction` 回溯「RTT + 半个 tick」前的预测位置,
     与服务端权威 `target_pos` 比较:
     - 误差 ≤ 15px:预测正确,忽略(不回正 → 不拉扯)
     - 误差 > 15px:真脱节(服务端因碰撞/attacking 锁定没推进),`position.lerp(target_pos, 0.35)` 平滑回正 + 清空历史
+  - **变向宽限**:LocalPlayerController 检测到方向突变(夹角>60° 或 移动→停止)时记录时刻 `_last_dir_change_ms`;变向后 `RTT + 1.5×tick + 30ms` 的宽限窗口内 `_reconcile_prediction` 跳过回正(轨迹照常记录)——服务端要等「输入排队 ≤1 tick + tick 处理 + 半程 RTT 回传」才按新方向推进,这期间广播的仍是旧方向轨迹,回正会把玩家"折回"旧方向。窗口外恢复正常对账,真脱节仅延迟一个窗口仍会被回正
+  - 回溯时刻为什么是「RTT + 半个 tick」而非「RTT」:服务端收到输入后要在 pending 里排队等下一个 tick(平均半个 tick)才生效,推进起步比客户端预测晚这一段,回溯要覆盖它,否则匀速移动也有 speed×tick/2≈5px 的稳态误差
   - 效果:位置由本地方向自推进,无"追-停"顿挫、无 RTT 输入滞后;服务端坐标只做校验
 
 - **硬直(hurt)期间(含击退)**:本地玩家停止预测,改为 lerp 跟随服务端位置
@@ -119,7 +121,8 @@ Role 本身只是"位置容器":有坐标、能挂子节点。它不知道自己
 > | 指数 lerp | 追赶匀速目标有稳定滞后 → "被往前拖";松键停止滑行 → "脚滑" |
 > | 纯 snap(position=target_pos) | 30Hz 广播每 33ms 跳 10px → 步进抖动 |
 > | 限速线性追赶(speed×1.2) | 追到位→停等→等广播;30Hz 广播到达不均匀(局域网 tick 也有 10-20ms 抖动)→ 本地玩家"走走停停"顿挫;方向切换追着旧方向坐标滑一段再折回 → 回跳 |
-> | 预测+软对账(当前) | ✅ 本地方向自推进无停等;服务端坐标只做校验,误差>15px 才 lerp 平滑回正 |
+> | 预测+软对账(初版) | Windows 15.6ms 定时粒度下服务端 tick 实际约 47ms + 固定 dt 积分 → 服务端移速只有 71% → 匀速移动周期性回拉;变向时服务端推进滞后(排队等 tick + RTT)未被对账覆盖 → 变向折回 |
+> | 预测+软对账(当前) | ✅ 服务端实测 dt 积分 + timeBeginPeriod(1) 提频(移速与墙钟一致);客户端对账回溯修正为 RTT+半个 tick;变向/急停后宽限窗口内跳过回正。本地方向自推进无停等,服务端坐标只做校验,误差>15px 才 lerp 平滑回正 |
 
 新增字段/常量:
 - `target_pos: Vector2` — 服务端权威位置(从 entity_updated 信号拿到,只读)
@@ -131,6 +134,9 @@ Role 本身只是"位置容器":有坐标、能挂子节点。它不知道自己
 - `RECONCILE_THRESHOLD = 15.0` — 软对账阈值(需盖住 RTT 偏差引起的回溯偏移,speed×偏差≈9px)
 - `RECONCILE_LERP = 0.35` — 回正插值系数(平滑回正,不硬跳)
 - `LERP_FACTOR = 15.0` — 远程实体 lerp 因子系数
+- `SERVER_TICK_MS = 33.0` — 服务端 tick 周期(和服务端 TICK_INTERVAL_MS 对齐),对账回溯修正 + 宽限窗口计算用
+- `DIR_CHANGE_GRACE_TICKS = 1.5` / `DIR_CHANGE_GRACE_MARGIN_MS = 30.0` — 变向宽限窗口 = RTT + 1.5×tick + 30ms
+- `_last_dir_change_ms`(LocalPlayerController) — 最近一次方向突变(夹角>60° 或 移动→停止)的时刻,`get_last_dir_change_ms()` 暴露给 Role 对账做宽限判断;`DIR_CHANGE_DOT_THRESHOLD = 0.5` 是变向夹角阈值(点积)
 
 ## PlayerVisual.gd — 视觉组件
 
@@ -373,7 +379,7 @@ DeadManScene.tscn 里有个 E_Back 按钮用于返回 MainScene。Role 实例用
 
 ## 当前状态
 - 统一 Entity 模型 + 强类型 ClientEntityInfo 重构完成:Role 按 EntityType 枚举分发,玩家/木桩统一在 `_entities` 表管理,字段访问全用强类型属性
-- **服务端权威移动 + 本地预测软对账已实现**:LocalPlayerController 发方向(dir_x/dir_y)+ 本地预测(position += dir * speed * delta);Role 记预测轨迹 + 软对账(回溯 RTT 前预测位置,误差>15px 才 lerp 平滑回正)/ 远程 lerp 插值(30Hz→60Hz 平滑);服务端 apply_move_dir 只记方向 + tick_movement 每 tick 持续推进,解决"丢 tick → 误差累积 → 拉回"问题;本地玩家不再"限速追赶"(那会追到位→停等→广播抖动顿挫)
+- **服务端权威移动 + 本地预测软对账已实现**:LocalPlayerController 发方向(dir_x/dir_y)+ 本地预测(position += dir * speed * delta);Role 记预测轨迹 + 软对账(回溯 RTT+半个 tick 前预测位置,误差>15px 才 lerp 平滑回正;变向/急停后宽限窗口内跳过回正)/ 远程 lerp 插值(30Hz→60Hz 平滑);服务端 apply_move_dir 只记方向 + tick_movement 按实测 dt 持续推进,解决"丢 tick → 误差累积 → 拉回"和"Windows 定时粒度 → 移速漂移 → 周期性回拉"问题;本地玩家不再"限速追赶"(那会追到位→停等→广播抖动顿挫)
 - 玩家同步闭环已跑通:两个客户端能互相看到对方移动+朝向(本地蓝箭头/远程棕箭头)
 - 攻击流程已实现:LocalPlayerController 发 AttackStart,StateMirror 处理 AttackHit/AttackEnd,AnimStateMachine 支持 attack/hurt 状态
 - **hurt 硬直已实现**:StateMirror 处理 AttackHit(进 hurt)+ HurtEnd(恢复 idle),纯服务端权威恢复(路径X);AnimStateMachine 的 change_state 加 `_reenter_state` 重入机制,HurtState override 后调 replay_cur_anim() 实现连击重启动画;StateBase 加 `_reenter_state` 虚方法(基类默认空)

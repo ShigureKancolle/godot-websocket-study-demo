@@ -41,16 +41,22 @@
 - `_send_queue: asyncio.Queue` — 发送队列(逻辑层塞消息,传输层独立协程发,见下方"发送队列"章节)
 - `TICK_HZ = 30` / `TICK_INTERVAL = 0.033s` — tick 频率常量
 - `handle_client(websocket)` — 处理单个连接:先收首条消息(必须是 PlayerJoin)并从中取客户端本地账号 id(`entity_info.account_id`,带 `player:` 前缀则优先用作 player_id,跨会话稳定识别同一账号)→ 无账号 id 才回退随机 `player:uuid` → 构造 ctx → 进主循环分发消息
+- `_loop: asyncio.AbstractEventLoop | None` — 事件循环引用(start 时 get_running_loop 填充)。GM 控制台在独立线程调 room.create_enemy,实体创建回调 `_on_entity_spawned` 用它把广播投递回事件循环线程
+- `TICK_INTERVAL_MS = 33` — tick 周期(整数毫秒,约 30.3Hz,只用于控频 sleep);`MAX_TICK_DT = 0.1` — 实测 dt 钳制上限(秒)
+- `handle_client(websocket)` — 处理单个连接:分配 `player:uuid` 作为 entity_id → 等首条消息(必须是 PlayerJoin)→ 进主循环分发消息
 - `broadcast(protoname, params, exclude_player=None)` — 真正的广播(遍历玩家 await ws.send)。**只被 _sender_loop 调用**,业务代码不直接调
 - `_queue_broadcast(protoname, params)` — 塞队列(不阻塞)。**业务代码(tick/timer 回调/cleanup)用这个替代 await broadcast**
+- `_on_entity_spawned(entity_info)` — 实体创建钩子(注册给 GameRoom 的 `entity_spawn_hook`,由 `room.create_enemy` 回调)。GM 控制台在独立线程调 create_enemy,本方法会从该线程进入,所以用 `loop.call_soon_threadsafe` 投递回事件循环线程执行真正广播(start 前 loop 未建立时直接同步广播,此时无并发安全)
+- `_broadcast_entity_spawn(entity_info)` — 在事件循环线程内执行:先 `_queue_broadcast("StatsInit", ...)` 再 `_queue_broadcast("GameState", ...)`(全量快照)。**先 StatsInit 再 GameState**:客户端 _create_role 创建 Role 时会查 mirror.get_combat() 初始化血条,先发 StatsInit 让新敌人战斗属性先进 _combats,再发 GameState 触发 state_replaced 重建 Role,创建时就能取到 combat、血条当前值正确。用全量快照而非复用 PlayerJoin:PlayerJoin 语义是玩家加入,复用会把客户端 _local_entity_id 覆盖成敌人 id,破坏本地玩家识别
 - `_sender_loop()` — 独立协程,从 _send_queue 取消息调 broadcast 发出。和 _tick_loop 并行
 - `add_pending_input(entity_id, action, data)` — 存入 pending,等 tick 处理(同一 tick 内同动作覆盖=节流)
-- `_tick_loop()` — asyncio task,启动 _sender_loop + 每 TICK_INTERVAL 秒调 _process_tick,退出时 cancel sender
-- `_process_tick()` — 取出 pending → apply_move_dir(只记方向)/apply_facing/room.trigger_attack(attackstart) → 木桩回血 → 敌人 AI tick → **tick_movement 持续推进所有 moving=True 实体位移** → 收集广播 → _queue_broadcast 塞队列
+- `_tick_loop()` — asyncio task,启动 _sender_loop + 每 TICK_INTERVAL_MS 毫秒调 _process_tick(dt),退出时 cancel sender。**dt 用 time.monotonic() 实测两次 tick 的真实间隔(钳制到 [0, MAX_TICK_DT])**——sleep 实际唤醒间隔受系统定时粒度影响(Windows 默认 15.6ms 粒度下 33ms 请求约 47ms 才醒),用固定值当 dt 积分会让服务端移速系统性偏慢,客户端预测对账累积超阈值 → 周期性回拉(拉扯根因)
+- `_process_tick(dt)` — 取出 pending → apply_move_dir(只记方向)/apply_facing/room.trigger_attack(attackstart) → 木桩回血 → 敌人 AI tick(dt) → **tick_movement(dt) 持续推进所有 moving=True 实体位移** → 收集广播 → _queue_broadcast 塞队列
 - `_trigger_attack(attacker_id, atk_id)` — 完整攻击发动流程(注册给 GameRoom 作为 `attack_trigger` 钩子,由 `room.trigger_attack` 转调)。apply_attack_start 改状态 → 广播 AttackStart → 遍历 shape_list 注册 AttackTimer(hit_cb/end_cb)。**玩家(经 pending)和敌人(AI 直接调)走同一条路**,避免敌人 AI 直接调 apply_attack_start 导致"只改状态不发动"
 - `cleanup_player(player_id)` — 断连清理:删连接表 + timer_mgr.cancel + room.remove_entity + _queue_broadcast(PlayerLeave)
-- `start()` — create_task(_tick_loop) + websockets.serve 启动
-- `stop()` — 取消 tick_task(tick 的 finally 会连带 cancel sender_task)
+- `start()` — _enable_high_timer_resolution(win32 提频) + 记录 self._loop(asyncio.get_running_loop,供实体创建回调线程安全投递) + create_task(_tick_loop) + websockets.serve 启动
+- `stop()` — 取消 tick_task(tick 的 finally 会连带 cancel sender_task) + _restore_timer_resolution(对称恢复)
+- `_enable_high_timer_resolution()` / `_restore_timer_resolution()` — **Windows 定时器提频**:ctypes 调 winmm.timeBeginPeriod(1) 把系统定时粒度从 15.6ms 提到 1ms,asyncio.sleep 精度接近 1ms,tick 真正跑在 33ms 周期(否则 Windows 下实际约 47ms)。pending 输入排队延迟和 tick 间隔抖动随之减小。仅 win32 生效,失败静默降级(实测 dt 已保证移速正确,提频是"又快又稳"的补充);stop 时对称 timeEndPeriod
 
 ### 统一 Entity 模型(本次重构)
 - player_id 改为带 `player:` 前缀的 entity_id(如 `player:uuid-xxx`)
@@ -128,20 +134,22 @@ _sender_loop(传输层,独立协程)
     ↓ await self.broadcast(protoname, data)  # 慢就慢,不影响 tick
 ```
 
-- **tick 严格 30Hz**:tick 只做状态计算 + put_nowait(都不阻塞),间隔 = TICK_INTERVAL + 几微秒
+- **tick 节奏稳定**:tick 只做状态计算 + put_nowait(都不阻塞),间隔 ≈ TICK_INTERVAL_MS + 几微秒(Windows 下配合 timeBeginPeriod(1) 提频后成立)
 - **某玩家网络慢只影响 sender_loop**:不卡 tick,不卡其他协程
 - **顺序保证**:asyncio.Queue 是 FIFO,tick 塞的消息顺序 = 发送顺序
 - **积压可接受**:sender 发得慢会积压,但客户端最终收到最新状态。积压严重说明带宽不足,需要优化广播内容(如 delta 压缩)
 - **所有 broadcast 都走队列**:tick / hit_cb / end_cb / hurt_end / cleanup_player 全部用 `_queue_broadcast`,没有业务代码直接 `await self.broadcast`
 
 ### tick 机制(限定同步速率)
-高频输入(PlayerMove/PlayerFacing)不立即处理,存入 `_pending_inputs`,每 33ms(30Hz)统一处理+塞队列:
+高频输入(PlayerMove/PlayerFacing)不立即处理,存入 `_pending_inputs`,每 33ms(TICK_INTERVAL_MS,约 30Hz)统一处理+塞队列:
 - **节流**:同一 tick 内同一动作的多次输入只保留最后一次(覆盖)。客户端 60Hz 发 → 服务端 30Hz 处理
 - **合并**:一个 tick 内所有玩家的变更统一塞队列,sender 按 FIFO 发出,频率从 60Hz 降到 30Hz(带宽减半)
 - **哪些走 tick**:PlayerMove / PlayerFacing(高频输入)
 - **哪些不走 tick**:PlayerJoin / PlayerLeave / ChatMessage / Heartbeat(低频事件,立即处理)
 - **线程安全**:asyncio 单线程事件循环,handler 存 pending 时无 await(原子),不会在存入中途被 tick 打断
 - **间隔稳定**:tick 不再 await broadcast(改 put_nowait),间隔不受网络 I/O 影响(见上方"发送队列"章节)
+- **实测 dt 积分**:tick_movement / 敌人 AI 用 time.monotonic() 实测的真实 tick 间隔做 dt(钳制 [0, 100ms]),不用固定值——真实间隔受系统定时粒度影响会漂移,固定 dt 积分让移速系统性偏慢,是客户端移动被周期性回拉的根因
+- **tick 周期用整数毫秒**:TICK_INTERVAL_MS=33 而非 1/30 浮点秒,与提频后的 1ms 定时粒度天然对齐,sleep 唤醒时刻均匀,日志读数直观
 
 ### broadcast 的 exclude_player 语义
 **重要**:状态更新类广播(PlayerJoin/PlayerMove/PlayerFacing)**不要**用 exclude_player 排除发起者。
@@ -276,7 +284,8 @@ start_console 之前写在 web_server.py 里,但它和 WebSocket 服务逻辑无
 - **统一 Entity 模型已落地**:player_id 加 `player:` 前缀,GameRoom 用 _entities 表统一存玩家和木桩
 - **proto 字段名已统一**:role_id/player_id → entity_id(AttackHit 的 attacker_id 保留)
 - **数据存储用 dataclass**:EntityInfo 替代 dict,广播时用 dataclasses.asdict() 转 dict
-- **发送队列已实现**:tick / timer 回调 / cleanup_player 都用 `_queue_broadcast` 塞队列,`_sender_loop` 独立协程负责真正广播。tick 间隔不再被网络 I/O 拉长,30Hz 严格稳定
+- **发送队列已实现**:tick / timer 回调 / cleanup_player 都用 `_queue_broadcast` 塞队列,`_sender_loop` 独立协程负责真正广播。tick 间隔不再被网络 I/O 拉长
+- **实测 dt + Windows 定时提频已实现**:tick 周期改整数毫秒 TICK_INTERVAL_MS=33;_tick_loop 用 time.monotonic() 实测真实间隔作 dt(钳制 [0,100ms])透传 _process_tick/tick_movement/EnemyMgr,修复"Windows 15.6ms 定时粒度 + 固定 dt 积分 → 服务端移速只有 71% → 客户端周期性回拉"的问题;start 时 timeBeginPeriod(1) 提频(stop 对称 timeEndPeriod),tick 真正接近 33ms 周期
 - 玩家同步闭环已跑通:两个客户端能互相看到对方移动+朝向(本地蓝箭头/远程棕箭头)
 - tick 机制已实现:30Hz 限定同步速率,PlayerMove/PlayerFacing/AttackStart 走 pending 统一处理
 - 攻击命中判定已接入:hit_cb 调 `room.get_attack_hits` 取命中列表,遍历调 `room.apply_hurt` 设 hurt 状态(统一处理玩家和木桩)
