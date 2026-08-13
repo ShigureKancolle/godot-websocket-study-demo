@@ -57,7 +57,8 @@ ID 格式统一带类型前缀:`player:uuid-xxx` / `entity:stake_1`。
 
 ### 内部结构
 - `_entities: Dict[entity_id, EntityInfo]` — 实体表,dict 而非 list(O(1) 查找+天然 entity_id 唯一)
-- `EntityInfo` dataclass 字段:entity_id/entity_type/x/y/facing/state/player_name/moving(后两个是 player 特有)
+- `EntityInfo` dataclass 字段:entity_id/entity_type/x/y/facing/state/player_name/account_id/moving(后三个是 player 特有)
+  - `account_id` — 客户端本地存档生成的账号ID(跨会话稳定),PlayerJoin 时从消息读入;web_server 优先用它作 player_id
 - **注**:原 `radius` 字段已删除——碰撞形状改由 entity_type 查 entity_config 决定(形状是类型属性,所有同类型实体形状相同)
 
 ### 只读方法

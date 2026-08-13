@@ -8,7 +8,9 @@
 ### 脚本
 | 文件 | 职责 |
 |------|------|
-| [init.gd](file:///d:/work2/godot_demo/client/Script/init.gd) | 启动场景脚本,直接跳转 MainScene |
+| [init.gd](file:///d:/work2/godot_demo/client/Script/init.gd) | 启动场景脚本,先跳 LoginScene(登录场景) |
+| [Account/AccountManager.gd](file:///d:/work2/godot_demo/client/Script/Account/AccountManager.gd) | 本地用户存档(账号系统):名字→账号id 映射,登录/新建/最近登录排序,存 user://player_accounts.json |
+| [UI/login/login_scene.gd](file:///d:/work2/godot_demo/client/Script/UI/login/login_scene.gd) | 登录场景逻辑:选择/输入名字→登录→进主界面 |
 | [UI/UIManager.gd](file:///d:/work2/godot_demo/client/Script/UI/UIManager.gd) | autoload,窗口类型枚举(WindowType) |
 | [UI/main/MainUI.gd](file:///d:/work2/godot_demo/client/Script/UI/main/MainUI.gd) | 主界面逻辑:连接状态显示+进聊天/进游戏按钮 |
 | [UI/chat/chat_main.gd](file:///d:/work2/godot_demo/client/Script/UI/chat/chat_main.gd) | 聊天界面逻辑 |
@@ -19,6 +21,7 @@
 | [UI/debug/DebugConsoleLoader.gd](file:///d:/work2/godot_demo/client/Script/UI/debug/DebugConsoleLoader.gd) | autoload,feature flag 检查,决定是否实例化控制台 |
 | [UI/debug/DebugConsole.gd](file:///d:/work2/godot_demo/client/Script/UI/debug/DebugConsole.gd) | 调试控制台面板:`键唤出+UI构建+命令解析器 |
 | [UI/debug/DebugCommands.gd](file:///d:/work2/godot_demo/client/Script/UI/debug/DebugCommands.gd) | 内置命令实现(state/me/ws/send/signal 等) |
+| [UI/hud/hud_main.gd](file:///d:/work2/godot_demo/client/Script/UI/hud/hud_main.gd) | HUD 显示控制(纯客户端,详见 client-hud.md) |
 | [tiledmap/ChunkGenerator.gd](file:///d:/work2/godot_demo/client/Script/tiledmap/ChunkGenerator.gd) | 纯函数式区块生成器:hash + value noise + 阈值切分地形类型(2×2 block 为单位) |
 | [tiledmap/InfiniteTileMap.gd](file:///d:/work2/godot_demo/client/Script/tiledmap/InfiniteTileMap.gd) | 无限地图节点:按 follow target 动态加载/卸载 chunk,含草地过渡贴图计算 |
 | [tiledmap/DebugCursor.gd](file:///d:/work2/godot_demo/client/Script/tiledmap/DebugCursor.gd) | 调试游标:箭头键控制,作为 InfiniteTileMap 的 follow target 测试 |
@@ -31,9 +34,12 @@
 |------|------|
 | [Scene/init.tscn](file:///d:/work2/godot_demo/client/Scene/init.tscn) | 启动场景(挂 init.gd) |
 | [Scene/DeadManScene.tscn](file:///d:/work2/godot_demo/client/Scene/DeadManScene.tscn) | 木桩场景(挂 dead_man_scene.gd) |
+| [prefab/login/LoginScene.tscn](file:///d:/work2/godot_demo/client/prefab/login/LoginScene.tscn) | 登录场景预制体(挂 login_scene.gd) |
 | [prefab/main/MainScene.tscn](file:///d:/work2/godot_demo/client/prefab/main/MainScene.tscn) | 主界面预制体(挂 MainUI.gd) |
 | [prefab/chat/ChatMain.tscn](file:///d:/work2/godot_demo/client/prefab/chat/ChatMain.tscn) | 聊天界面预制体 |
 | [prefab/tips/ConfirmDialog.tscn](file:///d:/work2/godot_demo/client/prefab/tips/ConfirmDialog.tscn) | 确认对话框预制体 |
+| [prefab/hud/HudMain.tscn](file:///d:/work2/godot_demo/client/prefab/hud/HudMain.tscn) | 局内 HUD 预制体(详见 client-hud.md) |
+| [prefab/hud/TeammateItem.tscn](file:///d:/work2/godot_demo/client/prefab/hud/TeammateItem.tscn) | HUD 队友列表项预制体 |
 | [prefab/role/Role.tscn](file:///d:/work2/godot_demo/client/prefab/role/Role.tscn) | Role 预制体(当前空,实际用脚本 new()) |
 | [prefab/CommonTexture/](file:///d:/work2/godot_demo/client/prefab/CommonTexture/) | 通用贴图资源(buttonRound/panel/bar 等) |
 | [prefab/chat/Tex/](file:///d:/work2/godot_demo/client/prefab/chat/Tex/) | 聊天界面贴图 |
@@ -42,7 +48,22 @@
 
 ## init.gd — 启动跳转
 
-挂载在 init.tscn 上。`_ready` 里直接 `change_scene_to_file.call_deferred("res://prefab/main/MainScene.tscn")`。
+挂载在 init.tscn 上。`_ready` 里先跳 `res://prefab/login/LoginScene.tscn`(登录场景),选择完名字后再进 MainScene。
+
+## LoginScene — 登录场景(login_scene.gd / LoginScene.tscn)
+
+启动流程:`init.tscn → LoginScene.tscn(选择名字) → MainScene.tscn(主界面)`。
+登录场景是**唯一入口**:未选择名字就无法进行任何其他操作,登录成功(输入/选中名字)后才跳转主界面。
+
+节点:Title + AccLabel + NameInput(LineEdit 输入名字) + RecentSelect(OptionButton 最近登录下拉框) + LoginButton + LoginState(提示文案)。
+
+流程:
+- 玩家**只输入名字**登录。名字不存在 → `AccountManager.login` 分配新账号 id 并存档;存在 → 加载已有账号(更新最近登录时间)
+- 下拉框列出本地存档全部账号(按最近登录时间降序,最近登录的默认选中并把名字填入输入框);没有存档则下拉框为空
+- 下拉框点选某账号 → `quick_login` 快捷登录(不新建)并跳主界面;输入名字 + 点登录/回车 → `login`(新建或加载)并跳主界面
+- 登录成功后 LoginState 显示"欢迎回来,xxx" / "已创建新账号,欢迎 xxx"
+
+账号 id 由 `AccountManager._generate_id()` 生成(机器唯一id+时间戳+随机数,带 `player:` 前缀),登录时随 PlayerJoin 的 `entity_info.account_id` 发给服务端作 player_id——服务端因此能跨会话识别同一账号(详见 client-net.md)。
 
 ## UIManager.gd — 窗口类型枚举
 
@@ -68,7 +89,8 @@
 
 ### 按钮处理
 - `_on_click_chat()` — instantiate ChatMain.tscn 加到当前场景
-- `_on_click_game()` — instantiate DeadManScene.tscn 加到当前场景
+- `_on_click_game()` — 发 PlayerJoin(带真实名字+账号id) → instantiate DeadManScene.tscn。登录已在 LoginScene 前置完成,此处仅防御校验
+- `_on_click_game_real()` — 同上,进正式游戏场景 GameScene.tscn
 - `_on_click_map()` — instantiate TiledMap.tscn 加到当前场景(纯客户端无限地图调试)
 
 ## SignalMgr / SignalConst — 信号系统

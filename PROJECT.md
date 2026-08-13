@@ -30,18 +30,19 @@ d:\work2\godot_demo\
 │   └── extension_example.py # 独立示例,不参与主线
 └── client/         # Godot 客户端
     ├── Script/
+    │   ├── Account/        # 本地账号存档(AccountManager:名字→账号id 映射 + 最近登录排序)
     │   ├── Net/            # 网络层(WebSocket/MessageBus/StateMirror/MessageContract)
     │   ├── role/           # 角色组件(Role/PlayerVisual/LocalPlayerController)
     │   ├── game/           # 战斗层(ConfigLoader配置访问 + collision碰撞 + attack_config命中点)
-    │   ├── UI/             # UI 层(UIManager/MainUI/chat_main + debug 调试控制台)
+    │   ├── UI/             # UI 层(UIManager/login/MainUI/chat_main + debug 调试控制台)
     │   ├── proto/          # 客户端 proto 副本+契约副本
     │   ├── gdproto/        # godobuf 生成的 GDScript proto 代码
     │   ├── signal/         # 信号管理(SignalMgr/SignalConst)
     │   ├── dead_man_scene.gd # 木桩场景(当前只做玩家同步)
-    │   └── init.gd         # 启动后直接跳 MainScene
+    │   └── init.gd         # 启动后先跳 LoginScene 登录,再进 MainScene
     ├── res/config/         # 客户端配置副本(sync_config.py 从 shared_config 复制)
     ├── Scene/              # 场景文件(.tscn)
-    ├── prefab/             # 预制体(MainScene/ChatMain/Role/ConfirmDialog/CommonTexture)
+    ├── prefab/             # 预制体(LoginScene/MainScene/ChatMain/Role/ConfirmDialog/CommonTexture)
     └── project.godot
 ```
 
@@ -67,6 +68,7 @@ d:\work2\godot_demo\
 | [client-role.md](file:///d:/work2/godot_demo/docs/client-role.md) | Script/role/* + dead_man_scene | 角色容器、视觉组件、本地控制、场景管理 Role |
 | [client-game.md](file:///d:/work2/godot_demo/docs/client-game.md) | Script/game/* | 客户端战斗层:攻击配置镜像、命中坐标计算 |
 | [client-ui.md](file:///d:/work2/godot_demo/docs/client-ui.md) | Script/UI/* + Scene + prefab + signal + init | UI 层、场景跳转、信号管理 |
+| [client-hud.md](file:///d:/work2/godot_demo/docs/client-hud.md) | Script/UI/hud/* + prefab/hud/* | 局内 HUD 预制体、纯客户端显示控制、服务端协议数据需求 |
 
 ## 全局架构
 ```
@@ -93,7 +95,7 @@ d:\work2\godot_demo\
 - **状态收口**:服务端 GameRoom 是唯一能改状态的地方;客户端 ClientStateMirror 只能镜像不能算
 
 ### 消息流向
-- C2S: PlayerJoin, PlayerMove, ChatMessage, Heartbeat
+- C2S: PlayerJoin(带 player_name + account_id,服务端优先用 account_id 作 player_id), PlayerMove, ChatMessage, Heartbeat
 - S2C: PlayerLeave, GameState, (PlayerJoin/PlayerMove/ChatMessage/Heartbeat 的广播回传)
 - 方向校验:双端都加载 messages.json 契约,服务端校验入站方向,客户端校验出站方向
 

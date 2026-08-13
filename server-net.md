@@ -40,7 +40,7 @@
 - `_pending_inputs: Dict[entity_id, Dict[action, data]]` — tick 待处理输入(move/facing/attackstart 高频输入先存这里)
 - `_send_queue: asyncio.Queue` — 发送队列(逻辑层塞消息,传输层独立协程发,见下方"发送队列"章节)
 - `TICK_HZ = 30` / `TICK_INTERVAL = 0.033s` — tick 频率常量
-- `handle_client(websocket)` — 处理单个连接:分配 `player:uuid` 作为 entity_id → 等首条消息(必须是 PlayerJoin)→ 进主循环分发消息
+- `handle_client(websocket)` — 处理单个连接:先收首条消息(必须是 PlayerJoin)并从中取客户端本地账号 id(`entity_info.account_id`,带 `player:` 前缀则优先用作 player_id,跨会话稳定识别同一账号)→ 无账号 id 才回退随机 `player:uuid` → 构造 ctx → 进主循环分发消息
 - `broadcast(protoname, params, exclude_player=None)` — 真正的广播(遍历玩家 await ws.send)。**只被 _sender_loop 调用**,业务代码不直接调
 - `_queue_broadcast(protoname, params)` — 塞队列(不阻塞)。**业务代码(tick/timer 回调/cleanup)用这个替代 await broadcast**
 - `_sender_loop()` — 独立协程,从 _send_queue 取消息调 broadcast 发出。和 _tick_loop 并行
@@ -58,6 +58,11 @@
 - web_server 通过 `room.has_entity` / `room.remove_entity` / `room.get_entity` 访问
 - PlayerJoin handler 构造 EntityInfo dataclass 存入,广播时用 `dataclasses.asdict()` 转 dict
 - 广播 GameState 时用 `[dataclasses.asdict(e) for e in room.snapshot()]` 转 dict 列表
+
+### 账号系统(account_id 作 player_id)
+- 客户端本地存档生成稳定账号 id(带 `player:` 前缀),随 PlayerJoin 的 `entity_info.account_id` 传来
+- `handle_client` 优先用它作为 player_id:同一账号跨会话/跨重启 id 稳定,服务端日志、未来持久化都能识别
+- 老客户端/测试工具不带 account_id,回退随机 `player:uuid`(兼容)
 
 ### 攻击配置已迁回 game 层
 `ATTACK_CONFIG` / `AttackShape` / `AttackConfig` / `SectorParams` 等数据类原本写在 web_server.py 的 `# region` 块里,现已迁移到 [game_room.py](file:///d:/work2/godot_demo/server/game/game_room.py)。

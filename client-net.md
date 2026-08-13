@@ -41,18 +41,22 @@ _init_websocket():
 - `connect_to_url(url)` — 创建 WebSocketPeer 并连接
 - `poll()` — 每帧调,按状态处理:
   - STATE_CONNECTING: 等待
-  - STATE_OPEN: 首次连接时发 PlayerJoin + fire `websocket_connected` 信号;循环取 packet 调 `_dispatch_packet`
+  - STATE_OPEN: 首次连接时 fire `websocket_connected` 信号(UI 层监听它显示"已连接");循环取 packet 调 `_dispatch_packet`
   - STATE_CLOSED: 打印关闭信息
 - `_dispatch_packet(packet)` — `MessageBus.instance().dispatch(packet)`
 
-### 连接成功后自动发 PlayerJoin
-STATE_OPEN 首次进入时发:
+### PlayerJoin 不再由 WebSocket 层自动发
+PlayerJoin 改为**用户在主界面登录后点击进游戏时发**(见 client-ui.md 的 MainUI 章节),WebSocket 层只负责连接。发 PlayerJoin 时带上登录账号的真实名字 + 账号 id:
 ```gdscript
 MessageBus.instance().send("game.PlayerJoin", {
-    "entity_info": { "player_name": "测试名字", "x": 0.0, "y": 0.0 }
+    "entity_info": {
+        "player_name": acc.get("name", ""),
+        "account_id": acc.get("id", ""),  # 本地存档生成的账号ID,服务端优先用它作 player_id
+        "x": 0.0,
+        "y": 0.0
+    }
 })
 ```
-并 fire `websocket_connected` 信号(UI 层监听它显示"已连接")。
 注意:统一 Entity 模型后,字段名是 `entity_info`(原 `player_info` 已废弃);服务端 add_entity 会初始化 facing=0。
 
 ## MessageBus.gd — 客户端消息总线
@@ -165,6 +169,7 @@ enum EntityType { PLAYER, STAKE, UNKNOWN }
 - `facing: float` — 朝向(弧度)
 - `state: String` — 动画状态(idle/run/attacking/hurt)
 - `player_name: String` — 玩家名字(只有 player 类型有)
+- `account_id: String` — 账号ID(本地存档生成,登录时随 PlayerJoin 发给服务端作 player_id;只有 player 类型有)
 - `atk_id: int` — 攻击ID(非 EntityInfo proto 字段,攻击消息携带,客户端临时存)
 
 ### 静态构造

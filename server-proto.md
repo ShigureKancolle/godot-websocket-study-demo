@@ -22,7 +22,7 @@
 ### 消息类型(8 个)
 | 消息 | 字段 | 用途 |
 |------|------|------|
-| `EntityInfo` | entity_id, entity_type, x, y, facing, state, radius, player_name, moving | 实体状态(统一模型,player_name/moving 是 player 特有字段,其他类型不填) |
+| `EntityInfo` | entity_id, entity_type, x, y, facing, state, player_name, moving, account_id | 实体状态(统一模型,player_name/moving/account_id 是 player 特有字段,其他类型不填)。account_id 是客户端本地存档生成的账号ID,服务端优先用它作 player_id |
 | `PlayerJoin` | entity_info: EntityInfo | 加入请求/通知 |
 | `PlayerLeave` | entity_id | 离开通知 |
 | `PlayerMove` | entity_id, x, y, speed, moving, dir_x, dir_y | 移动消息(双向语义,见下方说明) |
@@ -137,8 +137,9 @@ proto 只描述消息"长什么样",契约描述消息"怎么用":
 - 被客户端复制:messages.json 和 game.proto 在 client/Script/proto/ 有副本
 
 ## 当前状态
-- 11 个消息类型定义完整,EntityInfo 统一描述所有实体(9 个字段含 entity_type/radius/player_name/moving)
+- 消息类型定义完整,EntityInfo 统一描述所有实体(字段含 entity_type/player_name/moving/account_id,radius 已删除)
+- account_id:客户端本地存档生成的账号ID,随 PlayerJoin 传入,服务端优先用它作 player_id(跨会话稳定识别同一账号)
 - ID 格式统一带类型前缀(player: / entity:)
 - AttackStart/AttackHit/AttackEnd 三条攻击协议已加入(判定帧模型)
-- 契约 10 条消息已登记,AttackHit 的 state_affecting=true(调 apply_hurt 改状态)
+- 契约 19 条消息已登记,AttackHit 的 state_affecting=true(调 apply_hurt 改状态)
 - 编译流程正常
