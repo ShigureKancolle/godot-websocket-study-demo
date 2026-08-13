@@ -32,7 +32,7 @@
             "direction": "C2S",
             "category": "meta",
             "state_affecting": true,
-            "comment": "客户端连接后发送，请求加入游戏。服务端处理后广播 PlayerJoin 给其他人，并回 GameState 给新玩家。严格说方向是 C2S+广播，这里标 C2S 指「原始触发方向——由客户端发起」"
+            "comment": "客户端连接后发送，请求加入游戏。entity_info.player_name 是玩家输入的名字；entity_info.account_id 是客户端本地存档生成的账号ID(跨会话稳定)，服务端优先用它作为 player_id(web_server.handle_client 取)，没有则回退随机 uuid。服务端处理后广播 PlayerJoin 给其他人，并回 GameState 给新玩家。严格说方向是 C2S+广播，这里标 C2S 指「原始触发方向——由客户端发起」"
         },
         "PlayerLeave": {
             "direction": "S2C",

@@ -22,6 +22,7 @@ message EntityInfo {
   // player 特有字段(其他类型不填)
   string player_name = 8;    // 玩家名称
   bool moving = 9;           // 是否正在移动(客户端发,服务端据此设 state=idle/run)
+  string account_id = 10;    // 账号ID(客户端本地存档生成,跨会话稳定;服务端优先用它作 player_id)
 }
 
 // 聊天消息
