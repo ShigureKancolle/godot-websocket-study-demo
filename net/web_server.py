@@ -151,28 +151,38 @@ class GameServer:
         注意：websockets 13.0+ 版本不再传 path 参数，如需路径可从 websocket.request.path 获取
         """
         async with websocket:
-            # entity_id 统一带类型前缀(见 game_room.py 的统一 Entity 模型说明)
-            # player: 前缀区分玩家和木桩等实体,避免 ID 撞名,调试时一眼看出类型
-            player_id = f"player:{uuid.uuid4()}"
-            logger.info(f"新客户端连接，分配玩家ID: {player_id}")
+            # 先收客户端第一条消息(应该是 PlayerJoin),从中取客户端本地账号 id(account_id)
+            # 顺序调整原因:账号 id 是随 PlayerJoin 传来的,服务端要先用它确定 player_id,
+            # 再构造 ctx / 存连接 / 分发——所以 recv 提前到 player_id 分配之前。
+            try:
+                first_message = await websocket.recv()
+
+                # 注意:第一条消息需要特殊处理,先解析判断是否是 PlayerJoin
+                game_msg = game_pb2.GameMessage()
+                game_msg.ParseFromString(first_message)
+
+                if not game_msg.HasField('player_join'):
+                    logger.warning("第一条消息不是加入消息，断开连接")
+                    return
+            except websockets.exceptions.ConnectionClosed:
+                logger.info("客户端在发送加入消息前断开连接")
+                return
+
+            # 优先用客户端本地账号 id 作为 player_id(跨会话/跨重启稳定识别同一账号)
+            # 老客户端/测试工具不带 account_id(proto3 未设置返回 "")，回退随机 uuid
+            account_id = game_msg.player_join.entity_info.account_id
+            if account_id.startswith("player:"):
+                player_id = account_id
+                logger.info(f"新客户端连接，使用账号ID作为玩家ID: {player_id}")
+            else:
+                player_id = f"player:{uuid.uuid4()}"
+                logger.info(f"新客户端连接(无账号ID)，随机分配玩家ID: {player_id}")
 
             # 构造消息上下文，后续所有消息分发都带上它
             # MessageContext 定义在 message_bus 模块里，用 message_bus.MessageContext 访问
             ctx = message_bus.MessageContext(websocket=websocket, player_id=player_id, is_server=True)
 
             try:
-                # 等待客户端的第一条消息（应该是 PlayerJoin）
-                first_message = await websocket.recv()
-
-                # 直接用 bus 分发，handler 里会处理加入逻辑
-                # 注意：第一条消息需要特殊处理，先解析判断是否是 PlayerJoin
-                game_msg = game_pb2.GameMessage()
-                game_msg.ParseFromString(first_message)
-
-                if not game_msg.HasField('player_join'):
-                    logger.warning(f"玩家 {player_id} 第一条消息不是加入消息，断开连接")
-                    return
-
                 # 保存连接信息（在 handler 之前，因为 handler 里要用）
                 self.players[player_id] = websocket
 

@@ -83,7 +83,7 @@ class Vector2:
         """向量内积"""
         return self.x * other.x + self.y * other.y
 
-    def angle(self, zero: tuple[float, float] | "Vector2" | List[float] = (1.0, 0.0)) -> float:
+    def angle(self, zero: "tuple[float, float] | Vector2 | List[float]" = (1.0, 0.0)) -> float:
         """返回以zero为零的向量角度"""
         if self == Vector2(0.0, 0.0):
             raise ValueError("向量为零,无法计算角度") 

@@ -127,6 +127,7 @@ class EntityInfo:
     # (形状是类型属性:所有玩家一样大,所有木桩一样大,没必要每个实例存一份)
     # player 特有字段(其他类型不填,保持默认空值)
     player_name: str = ""                   # 玩家名称(只有 player 有)
+    account_id: str = ""                    # 账号ID(客户端本地存档生成,跨会话稳定;只有 player 有)
     moving: bool = False                    # 是否正在移动(玩家+敌人都用)
     # 当前移动方向(归一化),服务端记住方向后每 tick 持续推进位移
     # 旧模型:apply_move_dir 收到输入才推进一次,网络丢 tick 导致误差累积 → 拉回
@@ -319,7 +320,7 @@ class GameRoom:
         """
         return [entity for entity in self._entities.values() if entity.entity_type == "stake"]
 
-    def get_enemy_manager(self) -> enemy_mgr.EnemyMgr:
+    def get_enemy_manager(self) -> "enemy_mgr.EnemyMgr":
         return self._enemy_mgr
 
     def get_combat(self, entity_id) -> Optional[CombatComponent]:

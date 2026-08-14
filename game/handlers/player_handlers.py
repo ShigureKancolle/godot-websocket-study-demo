@@ -80,6 +80,7 @@ def register(server: "GameServer") -> None:
             facing=float(player_info.get("facing", 0.0)),
             state="idle",
             player_name=player_info.get("player_name", "未命名"),
+            account_id=player_info.get("account_id", ""),
             moving=False,
         )
 
