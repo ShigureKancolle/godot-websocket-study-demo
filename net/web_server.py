@@ -100,6 +100,12 @@ class GameServer:
         # GameState + StatsInit,让所有在线客户端能看到新敌人。
         self.room.set_entity_spawn_hook(self._on_entity_spawned)
 
+        # 把"AI 状态变更广播"注册给 EnemyMgr 作为钩子。
+        # 敌人 AI 状态切换(patrol/chase/attack/look_around)时,EnemyMgr 回调这里,
+        # 网络层广播 AiStateChanged 增量消息——客户端据此切换视锥形态(normal/chase),
+        # 切换视野不能等低频快照,所以状态切换即广播(低频事件,不走 tick dirty 集合)。
+        self.room.get_enemy_manager().set_ai_state_change_hook(self._on_ai_state_changed)
+
         # 构造 A* 寻路器并注入 GameRoom。
         # 敌人 AI(ChaseState)通过 room.get_pathfinder() 取用,基于双端一致的
         # ChunkGenerator(seed 来自 self.map_seed)做网格寻路,绕开不可通行地形。
@@ -267,6 +273,28 @@ class GameServer:
             self._loop.call_soon_threadsafe(self._broadcast_entity_spawn, entity_info)
         else:
             self._broadcast_entity_spawn(entity_info)
+
+    def _on_ai_state_changed(self, entity_id: str, ai_state: str) -> None:
+        """
+        AI 状态变更钩子(由 EnemyMgr 回调,见 enemy_mgr.set_ai_state_change_hook)
+
+        两件事:
+            1. 同步 AI 状态到 EntityInfo.ai_state——GameState 快照用 asdict 转 dict,
+               新玩家加入时能带真实 AI 状态(否则快照里 ai_state 永远是默认 "idle")。
+            2. 广播 AiStateChanged 增量消息——客户端据此切换视锥形态。
+
+        状态切换即广播(不走 tick dirty 集合):AI 状态切换是低频事件
+        (patrol→chase→attack),而视锥形态必须实时跟随——等低频快照会延迟。
+        和 tick 广播同一条发送队列(FIFO 保序),调用方都在事件循环线程,
+        不需要 call_soon_threadsafe。
+        """
+        entity = self.room.get_entity(entity_id)
+        if entity is not None:
+            entity.ai_state = ai_state
+        self._queue_broadcast("AiStateChanged", {
+            "entity_id": entity_id,
+            "ai_state": ai_state,
+        })
 
     def _broadcast_entity_spawn(self, entity_info) -> None:
         """

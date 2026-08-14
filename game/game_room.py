@@ -123,6 +123,11 @@ class EntityInfo:
     y: float = 0.0                          # Y坐标
     facing: float = 0.0                     # 朝向(弧度,0=右,逆时针正)。木桩永远 0
     state: str = "idle"                     # 动画状态:idle/run/attack/hurt/...
+    ai_state: str = "idle"                  # AI 状态:patrol/chase/attack/look_around(只有敌人填,玩家/木桩留空)
+    # 注:ai_state 和 state 是两个独立维度——state 是动画状态(所有实体都有),
+    # ai_state 是 AI 决策状态(只有敌人有,由 EnemyAIMachine 持有并同步到 EntityInfo,
+    # 客户端据此切换视锥形态 normal/chase)。proto EntityInfo 必须同步加 ai_state 字段
+    # (GameState 用 asdict 转 dict 后 ParseDict,未知字段会报错,见 KnockbackState 注释)。
     # 注:碰撞形状不再存 EntityInfo,改由 entity_type 查 entity_config 决定
     # (形状是类型属性:所有玩家一样大,所有木桩一样大,没必要每个实例存一份)
     # player 特有字段(其他类型不填,保持默认空值)

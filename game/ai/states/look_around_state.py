@@ -30,32 +30,32 @@ class LookAroundState(ai_state_base.AIStateBase):
         cur_facing = room.get_entity(self.entity_id).facing
         
         if self.left_facing is not None: 
-            next_facing = (cur_facing + fact_speed * dt) % (2 * math.pi)
+            next_facing = (cur_facing - fact_speed * dt) % (2 * math.pi)
             room.apply_facing(self.entity_id, next_facing)
             # 这里要判断是否足够接近 并且之后是远离
             if abs(next_facing - self.left_facing) < 0.1:
                 # 转到左边了,该往右边转了
                 self.left_facing = None
-                return
+                
            
-        if self.right_facing is not None:
-            next_facing = (cur_facing - fact_speed * dt) % (2 * math.pi)
+        elif self.right_facing is not None:
+            next_facing = (cur_facing + fact_speed * dt) % (2 * math.pi)
             room.apply_facing(self.entity_id, next_facing)
             if abs(next_facing - self.right_facing) < 0.1:
                 # 转到右边了,该往左边转了
                 self.right_facing = None
-                return
+                
 
-        if self.left_facing is None and self.right_facing is None:
+        elif self.left_facing is None and self.right_facing is None:
             # 左右都转完了,回到巡逻状态
             ai_state_helper.change_ai_state(room, self.entity_id, "patrol")
-            return
+            
            
 
     def init_enter(self, room: game_room.GameRoom):
         room.apply_move_dir(self.entity_id, 0, 0, False, 0)  # 停止移动
         self.left_facing = (room.get_entity(self.entity_id).facing - math.pi / 2) % (2 * math.pi)
-        self.right_facing = (self.left_facing + math.pi) % (2 * math.pi)
+        self.right_facing = (room.get_entity(self.entity_id).facing + math.pi / 2) % (2 * math.pi)
 
 
     def _find_nearest_entity_in_sight(self, room: game_room.GameRoom):

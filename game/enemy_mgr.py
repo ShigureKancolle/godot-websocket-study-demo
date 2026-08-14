@@ -98,6 +98,24 @@ class EnemyMgr:
         # 用 Dict 而非 List:O(1) 按 entity_id 查 AI 状态(AI tick 频繁查)
         self._ai_machine: Dict[str, enemy_ai_machine.EnemyAIMachine] = {}
         self._dirty_entities: set[str] = set()
+        # AI 状态变更回调(由 GameServer 在 __init__ 时注册,注入给每个状态机)。
+        # 状态机切换状态时回调,网络层据此广播 AiStateChanged(客户端切换视锥形态)。
+        self._ai_state_change_hook = None
+
+    def set_ai_state_change_hook(self, cb) -> None:
+        """
+        注册 AI 状态变更回调(由 GameServer 在初始化时调用)
+
+        回调签名: cb(entity_id, new_state_name) -> None
+        网络层实现为广播 AiStateChanged 消息(见 web_server._on_ai_state_changed)。
+
+        为什么走 EnemyMgr 中转而非直接注册到每个状态机:
+            状态机由 EnemyMgr 统一创建(on_enemy_created),这里注册一次,
+            已存在的状态机立即注入,后续新建的由 on_enemy_created 注入——调用方不用管细节。
+        """
+        self._ai_state_change_hook = cb
+        for machine in self._ai_machine.values():
+            machine.set_ai_state_change_hook(cb)
 
     # ------------------------------------------------------------------
     # 生命周期回调(由 GameRoom.create_enemy / remove_entity 调用)
@@ -118,6 +136,9 @@ class EnemyMgr:
             # 重复创建通常是 bug,早暴露
             raise ValueError(f"敌人 AI 状态已存在: {entity_id}")
         state_machine = enemy_ai_machine.EnemyAIMachine(entity_id=entity_id)
+        # 注入 AI 状态变更钩子(在 change_state("patrol") 之前,保证初始状态也走回调)
+        if self._ai_state_change_hook is not None:
+            state_machine.set_ai_state_change_hook(self._ai_state_change_hook)
         # state_machine.add_state("idle", ai_state_base.IDLEState())
         self.add_enemy_ai_state(state_machine)
         state_machine.change_state("patrol")  # 默认巡逻,后续可按类型改

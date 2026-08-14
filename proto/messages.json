@@ -141,6 +141,12 @@
             "category": "snapshot",
             "state_affecting": false,
             "comment": "地图信息(新玩家加入时单播给该玩家,在 GameState 之前发)。字段:seed(地图种子)。客户端 InfiniteTileMap.setup(seed) 用 seed 构造 ChunkGenerator,双端一致生成无限地图(见 map_generator.py)。state_affecting=false 因为是配置数据下发,不改 GameRoom 状态。只单播不广播:每个玩家只需要在加入时收到一次,已在线玩家早就收到过了"
+        },
+        "AiStateChanged": {
+            "direction": "S2C",
+            "category": "event",
+            "state_affecting": false,
+            "comment": "AI 状态变更(服务端广播,敌人 AI 状态切换时实时发,和 PlayerFacing 平行的独立维度)。字段:entity_id(实体ID)/ai_state(新的 AI 状态:patrol/chase/attack/look_around,只有敌人有,玩家/木桩不填)。触发时机:EnemyAIMachine.change_state 状态真正切换(old != new)时,由 GameServer 注册的钩子广播(低频事件,切换即广播,不走 tick dirty 集合)。客户端 StateMirror 收到后只改镜像里的 ai_state 字段,不动坐标/朝向,渲染层据此切换视锥形态(normal/chase)。state_affecting=false:广播本身不改 GameRoom 状态(AI 状态在 EnemyMgr 里已切换,广播只是通知客户端)"
         }
     }
 }

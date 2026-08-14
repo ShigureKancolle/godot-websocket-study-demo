@@ -43,6 +43,10 @@ class PatrolState(ai_state_base.AIStateBase):
         # print(f"{self.entity_id} is patrolling {dt}")
         target_entity_id = self._find_player_in_sight(room)
         if target_entity_id:
+            dir_x = room.get_entity(target_entity_id).x - room.get_entity(self.entity_id).x
+            dir_y = room.get_entity(target_entity_id).y - room.get_entity(self.entity_id).y
+            facing = ai_state_helper.get_facing_by_vector2((dir_x, dir_y))
+            room.apply_facing(self.entity_id, facing)
             ai_state_helper.change_ai_state(room, self.entity_id, "chase", target_entity_id)
         else:
             # 在出生点附近随机移动           
