@@ -87,6 +87,10 @@ var state: String = "idle"
 # 玩家名字(只有 player 类型有,其他类型为空)
 var player_name: String = ""
 
+# 账号ID(本地存档生成,跨会话稳定;登录时随 PlayerJoin 发给服务端作 player_id)
+# 只有 player 类型有,其他类型为空
+var account_id: String = ""
+
 # 攻击ID(攻击消息携带,非 EntityInfo proto 字段,客户端临时存)
 # 默认 0 表示无攻击;服务端 AttackStart 广播带 atk_id,客户端存下供后续逻辑用
 # 注:目前客户端没有读取此字段的逻辑,保留是为了和原 dict 行为一致
@@ -113,6 +117,7 @@ static func from_dict(d: Dictionary) -> ClientEntityInfo:
 	info.facing = float(d.get("facing", 0.0))
 	info.state = d.get("state", "idle")
 	info.player_name = d.get("player_name", "")
+	info.account_id = d.get("account_id", "")
 	info.atk_id = int(d.get("atk_id", 0))
 	return info
 

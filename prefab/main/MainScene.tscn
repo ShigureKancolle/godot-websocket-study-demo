@@ -128,3 +128,5 @@ theme_override_styles/disabled = SubResource("StyleBoxEmpty_aor65")
 theme_override_styles/focus = SubResource("StyleBoxEmpty_k0nax")
 text = "地块"
 icon_alignment = 1
+
+
