@@ -5,6 +5,7 @@
 
 ## 修改决策
 在进行代码修改之后同步到相应的md文件中，并且不论是注释还是md文件，都只保留最新版本的描述，旧版描述需要清理。
+**每次改完代码必须生成 diff 对比给开发者 review 再提交**(见 `开发指南.md` 的「代码修改后的 Review 流程」;工具 `tools/gen_review_diff.ps1` + `tools/生成diff对比.bat`,用 TortoiseMerge 图形化对比所有 git 仓库的未提交改动)。
 
 ## 技术栈
 - 客户端: Godot 4 (GDScript)
@@ -34,7 +35,7 @@ d:\work2\godot_demo\
     ├── Script/
     │   ├── Account/        # 本地账号存档(AccountManager:名字→账号id 映射 + 最近登录排序)
     │   ├── Net/            # 网络层(WebSocket/MessageBus/StateMirror/MessageContract)
-    │   ├── role/           # 角色组件(Role/PlayerVisual/LocalPlayerController)
+    │   ├── role/           # 角色组件(Role/PlayerVisual/VisionFan/LocalPlayerController;VisionFan=敌人视锥渲染)
     │   ├── game/           # 战斗层(ConfigLoader配置访问 + collision碰撞 + attack_config命中点)
     │   ├── UI/             # UI 层(UIManager/login/MainUI/chat_main + debug 调试控制台)
     │   ├── proto/          # 客户端 proto 副本+契约副本
@@ -46,6 +47,12 @@ d:\work2\godot_demo\
     ├── Scene/              # 场景文件(.tscn)
     ├── prefab/             # 预制体(LoginScene/MainScene/ChatMain/Role/ConfirmDialog/CommonTexture)
     └── project.godot
+└── tools/            # 项目工具脚本
+    ├── sync_config.py         # 配置同步(shared_config → server/config + client/res/config)
+    ├── gen_review_diff.ps1    # ★ Review 流程核心:扫描各 git 仓库未提交改动 → 生成 TortoiseMerge 对比脚本
+    ├── 生成diff对比.bat        # ★ Review 入口:双击运行,弹出图形化 diff(左=改前,右=改后)
+    ├── git_onekey.ps1         # ★ Git 一键操作核心:拉取(pull --rebase)/逐仓库提交/推送
+    └── git一键操作.bat        # ★ Git 一键操作入口:双击出菜单(0=review / 1=拉取 / 2=提交推送)
 ```
 
 ## 配置同步机制
@@ -98,7 +105,7 @@ d:\work2\godot_demo\
 
 ### 消息流向
 - C2S: PlayerJoin(带 player_name + account_id,服务端优先用 account_id 作 player_id), PlayerMove, ChatMessage, Heartbeat
-- S2C: PlayerLeave, GameState, (PlayerJoin/PlayerMove/ChatMessage/Heartbeat 的广播回传)
+- S2C: PlayerLeave, GameState, AiStateChanged(敌人 AI 状态切换即广播,客户端切视锥形态), (PlayerJoin/PlayerMove/ChatMessage/Heartbeat 的广播回传)
 - 方向校验:双端都加载 messages.json 契约,服务端校验入站方向,客户端校验出站方向
 
 ## 关键设计决策

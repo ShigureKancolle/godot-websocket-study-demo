@@ -19,14 +19,15 @@
 所有可交互物体(玩家/木桩/箱子/陷阱)统一用 `EntityInfo` 描述,不再区分 PlayerInfo/EntityInfo。
 区别在 `entity_type` 字段决定行为能力(见 server-game.md 的 entity_config.py)。
 
-### 消息类型(8 个)
+### 消息类型(20 条,GameMessage oneof tag 1~20)
 | 消息 | 字段 | 用途 |
 |------|------|------|
-| `EntityInfo` | entity_id, entity_type, x, y, facing, state, player_name, moving, account_id | 实体状态(统一模型,player_name/moving/account_id 是 player 特有字段,其他类型不填)。account_id 是客户端本地存档生成的账号ID,服务端优先用它作 player_id |
+| `EntityInfo` | entity_id, entity_type, x, y, facing, state, ai_state, player_name, moving, account_id | 实体状态(统一模型,player_name/moving/account_id 是 player 特有字段,其他类型不填)。ai_state 是 AI 状态(patrol/chase/attack/look_around,只有敌人填),和 state 动画状态是两个独立维度 |
 | `PlayerJoin` | entity_info: EntityInfo | 加入请求/通知 |
 | `PlayerLeave` | entity_id | 离开通知 |
 | `PlayerMove` | entity_id, x, y, speed, moving, dir_x, dir_y | 移动消息(双向语义,见下方说明) |
 | `PlayerFacing` | entity_id, facing | 朝向事件(瞬时动作,和 PlayerMove 平行) |
+| `AiStateChanged` | entity_id, ai_state | AI 状态变更(S2C 广播,敌人 AI 状态切换时实时发,和 PlayerFacing 平行;客户端据此切换视锥形态 normal/chase) |
 | `AttackStart` | entity_id, atk_id | 攻击开始(C2S 发起 / S2C 广播,判定帧模型下 S2C 不带 hit_list) |
 | `AttackHit` | attacker_id, hit_list, atk_id | 攻击命中(S2C 广播,判定帧到时通知命中列表。attacker_id 保持不变,语义就是攻击者) |
 | `AttackEnd` | entity_id | 攻击结束(S2C 广播,客户端切回 IdleState) |
@@ -38,8 +39,9 @@
 | `GameMessage` | oneof message_type | 通用包装器 |
 
 ### 关键区分:EntityInfo(状态) vs PlayerMove/PlayerFacing(事件)
-- EntityInfo 有 facing、state 但没有 speed — 状态只存位置+朝向+动画状态
+- EntityInfo 有 facing、state、ai_state 但没有 speed — 状态只存位置+朝向+动画/AI 状态
 - EntityInfo.state 是动画状态(idle/run/attacking/hurt),是持久状态
+- EntityInfo.ai_state 是 AI 状态(patrol/chase/attack/look_around,只有敌人有),和 state 是两个独立维度——动画状态里没有 chase,视锥形态必须靠 ai_state 切换
 - EntityInfo.radius 是碰撞半径(用于攻击命中判定),不同实体类型可有不同半径
 - EntityInfo.entity_type 决定行为能力(见 server-game.md 的 entity_config.py)
 - PlayerMove 是**双向语义**消息(同一个 proto,C2S 和 S2C 字段含义不同,见下方"PlayerMove 双向语义"章节)
@@ -103,6 +105,7 @@ proto 只描述消息"长什么样",契约描述消息"怎么用":
 | PlayerLeave | S2C | meta | true | 服务端广播,客户端不主动发 |
 | PlayerMove | C2S | input | true | 客户端发请求,服务端 apply_move_dir 记住方向 + tick_movement 推进后转发 |
 | PlayerFacing | C2S | input | true | 客户端发朝向请求,服务端 apply_facing 后转发。和 PlayerMove 平行 |
+| AiStateChanged | S2C | event | false | 服务端广播敌人 AI 状态切换(EnemyAIMachine.change_state 真正切换时,由 GameServer 钩子广播)。客户端只改镜像 ai_state,渲染层切视锥形态 |
 | AttackStart | C2S | input | true | 客户端发攻击请求(带 atk_id),服务端 apply_attack_start 后广播 |
 | AttackHit | S2C | event | true | 服务端判定帧到时调 apply_hurt 设被命中者 state=hurt 后广播命中列表 |
 | AttackEnd | S2C | snapshot | true | 服务端攻击结束定时器到,调 apply_attack_end 设 state=idle 后广播 |
@@ -141,5 +144,6 @@ proto 只描述消息"长什么样",契约描述消息"怎么用":
 - account_id:客户端本地存档生成的账号ID,随 PlayerJoin 传入,服务端优先用它作 player_id(跨会话稳定识别同一账号)
 - ID 格式统一带类型前缀(player: / entity:)
 - AttackStart/AttackHit/AttackEnd 三条攻击协议已加入(判定帧模型)
-- 契约 19 条消息已登记,AttackHit 的 state_affecting=true(调 apply_hurt 改状态)
+- 契约 20 条消息已登记,AttackHit 的 state_affecting=true(调 apply_hurt 改状态)
+- EntityInfo 加 ai_state 字段 + AiStateChanged 消息(tag=20):AI 状态切换即广播,客户端据此切换敌人视锥形态(详见 tools/视锥渲染方案.md)
 - 编译流程正常

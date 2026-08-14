@@ -62,7 +62,8 @@ ID 格式统一带类型前缀:`player:uuid-xxx` / `entity:stake_1`。
 
 ### 内部结构
 - `_entities: Dict[entity_id, EntityInfo]` — 实体表,dict 而非 list(O(1) 查找+天然 entity_id 唯一)
-- `EntityInfo` dataclass 字段:entity_id/entity_type/x/y/facing/state/player_name/account_id/moving(后三个是 player 特有)
+- `EntityInfo` dataclass 字段:entity_id/entity_type/x/y/facing/state/ai_state/player_name/account_id/moving
+  - `ai_state` — AI 状态(patrol/chase/attack/look_around,只有敌人填,玩家/木桩留空)。和 `state`(动画状态)是两个独立维度,由 EnemyAIMachine 状态切换钩子同步进 EntityInfo(供 GameState 快照带初始值),客户端据此切换视锥形态
   - `account_id` — 客户端本地存档生成的账号ID(跨会话稳定),PlayerJoin 时从消息读入;web_server 优先用它作 player_id
 - **注**:原 `radius` 字段已删除——碰撞形状改由 entity_type 查 entity_config 决定(形状是类型属性,所有同类型实体形状相同)
 
@@ -295,6 +296,12 @@ EnemyAIMachine 持有 states dict,EnemyMgr.add_enemy_ai_state 注册四个状态
 - 寻人:ai_state_helper.find_nearest_entity_in_sight(room, entity_id, entity_type, vision_mode) 先视锥过滤,再 find_path 可达性过滤,取最近目标
 - 用途:patrol/look_around 用 normal 视野寻人;chase 用 chase 视野判定「目标是否脱离视野」,脱离即放弃追击回 patrol
 
+### AI 状态切换广播(视锥渲染的数据源)
+AI 状态要同步给客户端渲染视锥形态(normal/chase),切换不能等低频快照:
+- **钩子链**:`EnemyMgr.set_ai_state_change_hook(cb)`(GameServer 初始化时注册)→ 注入每个 `EnemyAIMachine` → `change_state` 状态**真正切换**(old != new)时调钩子 → `GameServer._on_ai_state_changed` 同步 `EntityInfo.ai_state`(供 GameState 快照带初始值)+ `_queue_broadcast("AiStateChanged", ...)`
+- 重入不广播:change_state 目标=当前状态时(重入)不触发,避免重复广播
+- 创建敌人时 `change_state("patrol")` 也会触发一次(此时客户端可能还没有该实体,StateMirror 会忽略,等全量快照带初始 ai_state)
+
 ## collision.py — 纯几何碰撞判定
 
 ### 为什么单独一个文件
@@ -400,3 +407,4 @@ hurt 定时器到期
 - collision.py 已实现:Circle/Sector 形状 + 相交判定函数,冒烟测试通过
 - 冒烟测试通过:A 攻击命中 entity:stake_1;apply_hurt 设 stake state='hurt';木桩 apply_move_dir 被能力配置拒绝
 - **敌人视锥视野已实现**:vision_config.json 新增 normal(30°/750px)/chase(22.5°/1000px) 两套视野;config_loader.get_vision(mode) 读取为 VisionParams(half_angle 弧度/radius);ai_state_helper.is_in_sight 纯几何判定(距离+角度,遮挡由 find_path 可达性承担);find_nearest_entity_in_sight 先视锥过滤再寻路;patrol/look_around 用常态视野寻人,chase 用追逐视野判「目标脱离视野即放弃追击」;enemy_mgr 补注册 look_around 状态
+- **AI 状态同步已实现**:EntityInfo 加 ai_state 字段(proto 同步加,GameState 快照带初始值);EnemyAIMachine.change_state 状态真正切换(old != new)时触发钩子(重入不广播);EnemyMgr.set_ai_state_change_hook 注入所有状态机;GameServer._on_ai_state_changed 同步 EntityInfo.ai_state + 广播 AiStateChanged(客户端据此切换视锥形态 normal/chase,详见 tools/视锥渲染方案.md)

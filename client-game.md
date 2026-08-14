@@ -49,8 +49,8 @@ shared_config/                  ← 单数据源(只在这里改)
 ## ConfigLoader.gd — 配置访问层
 
 ### 和服务端 config_loader.py 对称
-- 数据结构镜像:ShapeType / ShapeParams / SectorParams / CircleParams / RectParams / AttackShape / AttackConfig / EntityCapability / CombatStats
-- API 镜像:`get_attack_config` / `get_capability` / `get_combat_stats` / `get_constant` / `get_hurt_duration_ms`
+- 数据结构镜像:ShapeType / ShapeParams / SectorParams / CircleParams / RectParams / AttackShape / AttackConfig / EntityCapability / CombatStats / VisionInfo
+- API 镜像:`get_attack_config` / `get_capability` / `get_combat_stats` / `get_constant` / `get_hurt_duration_ms` / `get_vision`
 - 数据来源:`res://config/*.json`(sync_config.py 从 shared_config/ 复制)
 
 ### inner class 数据结构
@@ -63,6 +63,7 @@ shared_config/                  ← 单数据源(只在这里改)
 | `AttackShape` | 单个攻击形状(shape / shape_params / duration / hit_time / damage_multiplier)。原 hit_mask 字段已移除,命中层级改由实体 attack_mask 决定。JSON 里的 `knockback_distance`(击退距离)是服务端专用,客户端 ConfigLoader 不读忽略 |
 | `AttackConfig` | 攻击配置(shape_list 数组) |
 | `EntityCapability` | 实体能力 + 碰撞形状 + 基础战斗属性(can_move/can_attack/can_be_hurt/can_disconnect + body_shape/body_params + hit_layer/attack_mask + combat_stats) |
+| `VisionInfo` | 敌人视野(视锥)配置(half_angle 弧度 / radius 像素)。JSON 里 half_angle_deg 用角度存,构造时转弧度(和服务端 config_loader.VisionParams 对称)。VisionFan 渲染视锥用 |
 | `CombatStats` | 类型级基础战斗属性(max_hp/attack_power/defense);EntityInfo 初始化时拷贝一份作实例运行时状态 |
 ### const 常量
 | 常量 | 值 |
@@ -86,6 +87,7 @@ shared_config/                  ← 单数据源(只在这里改)
 | `get_combat_stats(entity_type) -> CombatStats` | 取实体基础战斗属性;未知返回零值(max_hp=0 → 直接死,bug 早暴露) |
 | `get_constant(name, default) -> Variant` | 取全局常量 |
 | `get_hurt_duration_ms() -> int` | 取 hurt 硬直时长(语法糖) |
+| `get_vision(mode) -> VisionInfo` | 取敌人视野(视锥)配置:mode="normal"/"chase",未知回退 normal(安全默认)。normal=半角 30°/半径 750px,chase=半角 22.5°/半径 1000px(和服务端 config_loader.get_vision 对称)。VisionFan 按 AI 状态选 mode |
 
 ## collision.gd
 

@@ -127,6 +127,7 @@ handler 接收 `data: Dictionary`(godobuf 反序列化的原始 dict),内部调 
 - `_on_attack_hit(data)` — 攻击命中广播:遍历 `hit_list` 逐个取出被命中者 ClientEntityInfo,设 `entity.state = "hurt"`,emit entity_updated。**只处理 hit_list,不处理 attacker_id**(攻击者 state 由 AttackStart 设为 attacking)。消息带 `hurt_duration` 字段但客户端当前不读(路径X:纯等服务端 HurtEnd 信号切 idle)
 - `_on_hurt_end(data)` — 受击硬直到期广播:读 `hurt_id` 取出 ClientEntityInfo,设 `entity.state = "idle"`,emit entity_updated。客户端不主动计时,完全等服务端信号(纯服务端权威恢复)。连击场景下服务端 hurt timer 被 cancel+restart,不会发 HurtEnd
 - `_on_entity_dead(data)` — 实体死亡广播:读 `entity_id` 取出 ClientEntityInfo,设 `entity.state = "dead"` + emit entity_updated。**只改 state,不移除实体**——实体还在场景里播死亡动画,等 EntityRemove 消息来才 erase + emit entity_removed。客户端不主动计时,死亡动画时长由服务端 DeadTimer 控制
+- `_on_ai_state_changed(data)` — AI 状态变更广播:读 `entity_id` 取出 ClientEntityInfo,设 `entity.ai_state` + emit entity_updated。**只改 ai_state,不动坐标/朝向**(和 _on_player_facing 平行)。AI 状态(patrol/chase/attack/look_around)是独立维度,由服务端 EnemyAIMachine 状态切换时实时广播,渲染层据此切换敌人视锥形态 normal/chase。镜像里没该实体时忽略(等全量快照修正,和 _on_player_facing 一致)
 - `_on_entity_remove(data)` — 实体移除广播(DeadTimer 到期后服务端发):读 `entity_id`,从 `_entities` 和 `_combats` 表 erase,emit entity_removed。渲染层收到信号后 queue_free 对应 Role 节点。和 `_on_player_leave` 的区别:PlayerLeave 是断连,EntityRemove 是死亡播完动画后移除
 
 > 注:`_on_player_move` 里从 moving 推断 state 只是**字段映射**(服务端广播的 PlayerMove S2C 只有 x/y/moving,没有 state,state 存在服务端 EntityInfo 里),不是状态逻辑重复。真正的状态权威在服务端——GameState 快照会带服务端的 state 字段,可对账。
@@ -168,6 +169,7 @@ enum EntityType { PLAYER, STAKE, UNKNOWN }
 - `x, y: float` — 坐标
 - `facing: float` — 朝向(弧度)
 - `state: String` — 动画状态(idle/run/attacking/hurt)
+- `ai_state: String` — AI 状态(patrol/chase/attack/look_around,只有敌人有;和 state 动画状态是两个独立维度——动画状态里没有 chase,视锥形态靠 ai_state 切换)。GameState 快照带初始值 + AiStateChanged 增量更新
 - `player_name: String` — 玩家名字(只有 player 类型有)
 - `account_id: String` — 账号ID(本地存档生成,登录时随 PlayerJoin 发给服务端作 player_id;只有 player 类型有)
 - `atk_id: int` — 攻击ID(非 EntityInfo proto 字段,攻击消息携带,客户端临时存)
@@ -204,5 +206,6 @@ WebScoketMgr 需要 _process 轮询,用 Node + autoload。
 - 功能完整:连接、消息收发、状态镜像、契约校验都已实现
 - 玩家同步闭环已跑通
 - **hurt 硬直已实现**:StateMirror 处理 AttackHit(设 hurt)和 HurtEnd(恢复 idle),客户端纯被动接收服务端权威信号,不主动计时
+- **AI 状态同步已实现**:StateMirror 注册 `_on_ai_state_changed`(设 ai_state + emit entity_updated,只改 ai_state 不动坐标/朝向);EntityInfo.gd 加 ai_state 字段 + from_dict 转换;渲染层(Role.VisionFan)据此切换敌人视锥形态(详见 tools/视锥渲染方案.md)
 - AttackHit 消息带 hurt_duration 字段,客户端当前不读(留作未来预演/调试)
 - 注意:WebScoketMgr/WebScoketClient 是原拼写(Scoket),已遍布代码,暂不改

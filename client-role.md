@@ -9,6 +9,7 @@
 |------|------|
 | [role/Role.gd](file:///d:/work2/godot_demo/client/Script/role/Role.gd) | 通用实体容器(Node2D),按 entity_type 分发挂载不同组件 |
 | [role/PlayerVisual.gd](file:///d:/work2/godot_demo/client/Script/role/PlayerVisual.gd) | 视觉组件(Node2D),预制体脚本,运行时切换贴图+设名字+转朝向箭头+按四方向拼动画 |
+| [role/VisionFan.gd](file:///d:/work2/godot_demo/client/Script/role/VisionFan.gd) | 敌人视锥渲染组件(Polygon2D),读 vision_config + 按 ai_state 切 normal/chase + 按 facing 旋转,半透明扇形(纯显示,敌人专属) |
 | [role/LocalPlayerController.gd](file:///d:/work2/godot_demo/client/Script/role/LocalPlayerController.gd) | 本地玩家控制组件(Node),读 InputIntentProvider 意图发 PlayerMove+PlayerFacing+AttackStart |
 | [role/CameraFollow.gd](file:///d:/work2/godot_demo/client/Script/role/CameraFollow.gd) | 相机平滑跟随组件(Camera2D),跟随本地玩家坐标 lerp |
 | [role/input/InputIntent.gd](file:///d:/work2/godot_demo/client/Script/role/input/InputIntent.gd) | 意图数据结构(RefCounted),move_dir + look_target + attack_pressed |
@@ -55,6 +56,7 @@ Role 本身只是"位置容器":有坐标、能挂子节点。它不知道自己
 | PLAYER(本地) | PlayerVisual | ✓ | LocalPlayerController | 本地额外挂 Controller |
 | PLAYER(远程) | PlayerVisual | ✓ | — | 只显示,坐标由 StateMirror 驱动 |
 | STAKE | PlayerVisual(占位) | — | — | 未来可换 StakeVisual |
+| ENEMY(史莱姆/骷髅) | PlayerVisual + VisionFan | ✓ | — | _setup_enemy:复用玩家显示 + 挂视锥(ai_state 驱动 normal/chase 形态) |
 
 未知 `entity_type`(UNKNOWN)按 PLAYER 处理(兼容兜底,push_warning 告警)。
 
@@ -78,10 +80,25 @@ Role 本身只是"位置容器":有坐标、能挂子节点。它不知道自己
 - 未来木桩的 hurt 状态由 StateMirror 的 `entity_updated` 信号直接改 state 字段驱动(无动画状态机介入)
 - 后续替换为 StakeVisual 时只改本方法,不影响其他 entity_type
 
+### _setup_enemy(info)
+复用玩家组件(`_setup_player`:PlayerVisual + AnimStateMachine + 血条),再额外挂 **VisionFan**(视锥渲染组件):
+- `preload("res://Script/role/VisionFan.gd").new()` + add_child,和 PlayerVisual 一样脚本挂载
+- `setup(info.ai_state)` 按初始 AI 状态生成视锥形态(chase → 窄而远,其余 → normal 宽而近)
+- `set_facing(info.facing)` 初始朝向;`z_index = 1` 显示在角色/地形之上(半透明)
+
+### VisionFan.gd — 敌人视锥渲染组件
+`extends Polygon2D`, `class_name VisionFan`。纯显示组件,不做障碍物遮挡(后续可扩展射线遮挡)。
+- 数据来源:视锥参数(半角/半径)读 `ConfigLoader.get_vision(mode)`(vision_config.json);ai_state/facing 由 Role.on_entity_updated 转发 StateMirror 信号驱动
+- 形态切换:`set_ai_state(ai_state)` 按 `"chase" if ai_state == "chase" else "normal"` 选视野 + 换颜色(normal 半透明红 / chase 半透明橙)
+- 朝向:`set_facing(facing)` 设节点 rotation(facing=0 朝右,Godot 标准)——顶点按朝右生成一次,之后只转节点,不重算顶点
+- 顶点生成:圆心 Vector2.ZERO + 弧上 SEGMENTS=32 段,从 `-half_angle` 扫到 `+half_angle`,`Vector2.RIGHT.rotated(a) * radius`
+- 为什么是组件:Role 是通用容器,视锥是"敌人"类型专属显示,抽成组件只有敌人挂
+
 ### on_entity_updated(info: ClientEntityInfo)
 收到 StateMirror 的 `entity_updated` 信号时调(Role 自己不改状态——永远由 StateMirror 信号驱动,这是服务器权威在客户端的最终体现):
 - 坐标:调 `_update_position(info)` — **只更新 target_pos,不直接改 position**(见下方"位置同步")
-- 朝向:转发 `info.facing` 给 `PlayerVisual.update_facing`
+- 朝向:转发 `info.facing` 给 `PlayerVisual.update_facing` + `VisionFan.set_facing`(有视锥时)
+- AI 状态:`info.ai_state` 转发给 `VisionFan.set_ai_state`(只有敌人挂了视锥;由 StateMirror._on_ai_state_changed 增量更新,切换即广播)
 - 动画状态:`info.state` 非空则转发给 `AnimStateMachine.update_state`(木桩没挂状态机时跳过)
 
 ### 位置同步(服务端权威,本地预测+软对账 / 远程 lerp)
@@ -388,3 +405,4 @@ DeadManScene.tscn 里有个 E_Back 按钮用于返回 MainScene。Role 实例用
 - 键盘方向移动(WASD)+ 鼠标朝向已实现
 - 自定义键位支持(InputBinding 模块,改键 UI 暂未做)
 - 手柄输入未实现(InputDevice 抽象已就位,加 GamepadDevice 即可)
+- **敌人视锥渲染已实现**:Role._setup_enemy 挂 VisionFan(Polygon2D 半透明扇形,纯显示);VisionFan 按 ai_state 切 normal/chase(读 ConfigLoader.get_vision)+ rotation 跟随 facing;数据由 StateMirror._on_ai_state_changed(AiStateChanged 增量广播)→ entity_updated → on_entity_updated 转发(详见 tools/视锥渲染方案.md)
