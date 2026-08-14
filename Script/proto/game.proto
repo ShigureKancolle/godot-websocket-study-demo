@@ -22,6 +22,8 @@ message EntityInfo {
   // player 特有字段(其他类型不填)
   string player_name = 8;    // 玩家名称
   bool moving = 9;           // 是否正在移动(客户端发,服务端据此设 state=idle/run)
+  string account_id = 10;    // 账号ID(客户端本地存档生成,跨会话稳定;服务端优先用它作 player_id)
+  string ai_state = 11;      // AI 状态:patrol/chase/attack/look_around(只有敌人填,玩家/木桩留空)
 }
 
 // 聊天消息
@@ -191,6 +193,15 @@ message MapInfo {
   int32 seed = 1;            // 地图种子(服务端启动时生成,当前硬编码 12345)
 }
 
+// AI 状态变更(S2C 增量,只改 ai_state 不改坐标/朝向)
+// 和 PlayerFacing 平行:AI 状态是独立维度(区别于 EntityInfo.state 动画状态),
+// 状态切换时实时广播——客户端据此切换敌人视锥形态(normal/chase),不能等低频快照。
+// 由服务端 EnemyAIMachine.change_state 状态真正切换(old != new)时触发广播。
+message AiStateChanged {
+  string entity_id = 1;      // 实体ID
+  string ai_state = 2;       // 新的 AI 状态:patrol/chase/attack/look_around(只有敌人有)
+}
+
 // 通用消息包装器
 message GameMessage {
   oneof message_type {
@@ -213,5 +224,6 @@ message GameMessage {
     Ping ping = 17;       // 延迟探测请求(C2S)
     Pong pong = 18;       // 延迟探测响应(S2C)
     MapInfo map_info = 19;            // 地图信息(S2C 单播,新玩家加入时发)
+    AiStateChanged ai_state_changed = 20; // AI 状态变更(S2C 广播,敌人状态切换时发)
   }
 }

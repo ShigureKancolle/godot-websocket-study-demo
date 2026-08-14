@@ -251,6 +251,7 @@ func register_handlers() -> void:
 	mb.onproto("game.EntityRemove", _on_entity_remove)
 	mb.onproto("game.EntityDead", _on_entity_dead)
 	mb.onproto("game.MapInfo", _on_map_info)
+	mb.onproto("game.AiStateChanged", _on_ai_state_changed)
 
 
 ## 收到 GameState 快照:整体替换本地镜像
@@ -596,6 +597,31 @@ func _on_entity_dead(data: Dictionary) -> void:
 	if entity == null:
 		return
 	entity.state = "dead"
+	entity_updated.emit(entity)
+
+
+## 收到 AiStateChanged:增量更新某实体 AI 状态
+##
+## 和 _on_player_facing 平行,但只改 ai_state 不改坐标/朝向。
+## AI 状态(patrol/chase/attack/look_around)是独立维度,由服务端 EnemyAIMachine
+## 状态切换时实时广播——客户端据此切换敌人视锥形态(normal/chase),不能等低频快照。
+##
+## 复用 entity_updated 信号通知渲染层(和 facing 同一信号链路):
+##   - Role.on_entity_updated 里转发 ai_state 给 VisionFan
+func _on_ai_state_changed(data: Dictionary) -> void:
+	var eid: String = data.get("entity_id", "")
+	if eid == "":
+		return
+
+	var entity: ClientEntityInfo = _entities.get(eid)
+	if entity == null:
+		# 镜像里没这个实体:忽略,等全量快照修正(和 _on_player_facing 一致的容错)
+		return
+
+	# 更新 AI 状态(只改 ai_state,不动 x/y/facing)
+	entity.ai_state = data.get("ai_state", "idle")
+
+	# 通知渲染层:这个实体变了(复用 entity_updated 信号)
 	entity_updated.emit(entity)
 
 

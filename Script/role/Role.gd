@@ -154,6 +154,7 @@ func setup(info: ClientEntityInfo) -> void:
 	_remove_component("AnimStateMachine")
 	_remove_component("HpProgressBar")
 	_remove_component("MpProgressBar")
+	_remove_component("VisionFan")
 
 	# 按 entity_type 分发挂载组件
 	# 当前实现:
@@ -249,6 +250,18 @@ func _setup_enemy(info: ClientEntityInfo) -> void:
 	if visual != null:
 		visual.set_entity_name(info.enum_type_string())
 
+	# 挂载视锥渲染组件(敌人专属:玩家可见的半透明扇形警戒范围,潜行玩法)
+	# 和 PlayerVisual 一样脚本 new() + add_child。初始形态从 info.ai_state 带:
+	#   - chase → chase 视野(窄而远)
+	#   - 其余(patrol/look_around/attack) → normal 视野(宽而近)
+	# 之后由 on_entity_updated 转发 AiStateChanged 增量消息实时切换。
+	var vision_fan = preload("res://Script/role/VisionFan.gd").new()
+	vision_fan.name = "VisionFan"
+	add_child(vision_fan)
+	vision_fan.setup(info.ai_state)
+	vision_fan.set_facing(info.facing)
+	vision_fan.z_index = 1  # 显示在角色/地形之上(半透明,不遮挡操作)
+
 func on_hp_changed(cur_hp: int, damage: int, attacker_id: String, atk_id: int, atk_shape_idx: int) -> void:
 	# damage为0时是初始化 不跳字
 	var hp_bar = get_node_or_null("HpProgressBar")
@@ -276,6 +289,13 @@ func on_entity_updated(info: ClientEntityInfo) -> void:
 	var visual = get_node_or_null("PlayerVisual")
 	if visual != null:
 		visual.update_facing(info.facing)
+	# 视锥朝向 + AI 状态更新:转发给 VisionFan(如果已挂载,只有敌人有)
+	# ai_state 由 StateMirror._on_ai_state_changed 增量更新(切换即广播),
+	# 视锥形态(normal/chase)必须实时跟随,不能等低频快照
+	var vision_fan = get_node_or_null("VisionFan")
+	if vision_fan != null:
+		vision_fan.set_facing(info.facing)
+		vision_fan.set_ai_state(info.ai_state)
 	# 动画状态更新:转发给 AnimStateMachine(如果已挂载)
 	# state 字段由 StateMirror 从 moving 推断(或 GameState 快照带),服务端权威
 	# 木桩没挂 AnimStateMachine,跳过(木桩的 state 变化目前不影响显示)

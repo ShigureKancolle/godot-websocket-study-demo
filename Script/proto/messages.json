@@ -141,6 +141,12 @@
             "category": "meta",
             "state_affecting": true,
             "comment": "实体移除(DeadTimer 到期后服务端调 remove_entity + 广播)。字段:entity_id。客户端收到后 queue_free 对应 Role 节点。和 PlayerLeave 的区别:PlayerLeave 是断连(实体直接消失),EntityRemove 是死亡(播完死亡动画后才移除)。木桩不会触发(不会死),玩家不会触发(can_die=False)"
+        },
+        "AiStateChanged": {
+            "direction": "S2C",
+            "category": "event",
+            "state_affecting": false,
+            "comment": "AI 状态变更(服务端广播,敌人 AI 状态切换时实时发,和 PlayerFacing 平行的独立维度)。字段:entity_id(实体ID)/ai_state(新的 AI 状态:patrol/chase/attack/look_around,只有敌人有,玩家/木桩不填)。触发时机:EnemyAIMachine.change_state 状态真正切换(old != new)时,由 GameServer 注册的钩子广播(低频事件,切换即广播,不走 tick dirty 集合)。客户端 StateMirror 收到后只改镜像里的 ai_state 字段,不动坐标/朝向,渲染层据此切换视锥形态(normal/chase)。state_affecting=false:广播本身不改 GameRoom 状态(AI 状态在 EnemyMgr 里已切换,广播只是通知客户端)"
         }
     }
 }

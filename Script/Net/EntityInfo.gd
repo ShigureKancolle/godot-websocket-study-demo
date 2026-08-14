@@ -84,6 +84,12 @@ var facing: float = 0.0
 # 和服务端 EntityInfo.state 严格对齐:服务端 apply_xxx 设什么,客户端就存什么
 var state: String = "idle"
 
+# AI 状态(patrol/chase/attack/look_around,只有敌人有,玩家/木桩为空)
+# 和服务端 EntityInfo.ai_state 对齐。注意:和 state(动画状态)是两个独立维度——
+# 动画状态里没有 chase,视锥形态(normal/chase)必须靠 ai_state 切换。
+# 由 GameState 快照带初始值 + AiStateChanged 增量消息实时更新。
+var ai_state: String = "idle"
+
 # 玩家名字(只有 player 类型有,其他类型为空)
 var player_name: String = ""
 
@@ -116,6 +122,7 @@ static func from_dict(d: Dictionary) -> ClientEntityInfo:
 	info.y = float(d.get("y", 0.0))
 	info.facing = float(d.get("facing", 0.0))
 	info.state = d.get("state", "idle")
+	info.ai_state = d.get("ai_state", "idle")
 	info.player_name = d.get("player_name", "")
 	info.account_id = d.get("account_id", "")
 	info.atk_id = int(d.get("atk_id", 0))

@@ -152,6 +152,17 @@ class TerrainCapability:
 
 
 # ===========================================================================
+# 视野(视锥)配置 inner class(和服务端 config_loader.VisionParams 对称)
+# ===========================================================================
+# 敌人视锥渲染用:半角 + 半径,按 AI 状态选 normal/chase 两套。
+# JSON 里 half_angle_deg 用角度存(人读直观),构造时转弧度(代码计算用),
+# 和服务端 config_loader 一致。
+class VisionInfo:
+	var half_angle: float = 0.0   # 视野半角(弧度,朝向左右各多少)
+	var radius: float = 0.0       # 视野半径(像素)
+
+
+# ===========================================================================
 # 实体能力+碰撞形状 inner class
 # ===========================================================================
 class EntityCapability:
@@ -291,6 +302,7 @@ static func _load_json(filename: String) -> Dictionary:
 static var _attack_config_cache: Dictionary = {}     # {atk_id: AttackConfig}
 static var _entity_capability_cache: Dictionary = {} # {entity_type: EntityCapability}
 static var _terrain_capability_cache: Dictionary = {} # {terrain_name: TerrainCapability}
+static var _vision_cache: Dictionary = {}            # {mode: VisionInfo}(normal/chase)
 static var _constants_cache: Dictionary = {}
 static var _cache_loaded: bool = false
 
@@ -326,6 +338,18 @@ static func _ensure_cache() -> void:
 		if _is_comment_key(key):
 			continue
 		_terrain_capability_cache[key] = _build_terrain_capability(terrains_dict[key])
+
+	# 视野配置(敌人视锥)
+	# vision_config.json 顶层是 normal/chase 两个数据段(其余是 _comment 等注释)
+	# JSON 里 half_angle_deg 用角度存,这里转弧度(和服务端 config_loader 一致)
+	var vision_raw: Dictionary = _load_json("vision_config.json")
+	for key in vision_raw.keys():
+		if _is_comment_key(key):
+			continue
+		var vision = VisionInfo.new()
+		vision.half_angle = deg_to_rad(float(vision_raw[key].get("half_angle_deg", 30.0)))
+		vision.radius = float(vision_raw[key].get("radius", 750.0))
+		_vision_cache[key] = vision
 
 	# 常量
 	var constants_raw: Dictionary = _load_json("constants.json")
@@ -418,3 +442,21 @@ static func is_walkable(terrain_id: int) -> bool:
 	if cap == null:
 		return true  # 未配置的地形默认可通行
 	return cap.walkable
+
+
+# ===========================================================================
+# 视野(视锥)API(和服务端 config_loader.get_vision 对称)
+# ===========================================================================
+
+## 取敌人视野(视锥)配置。
+## mode: "normal"(常态:除 chase 外的所有 AI 状态,如 patrol/look_around/attack)/
+##        "chase"(追逐态,窄而远)。未知 mode 回退 normal(安全默认)。
+## 返回 VisionInfo(half_angle 弧度 / radius 像素)。VisionFan 渲染视锥用。
+static func get_vision(mode: String = "normal") -> VisionInfo:
+	_ensure_cache()
+	var vision: Variant = _vision_cache.get(mode)
+	if vision == null:
+		vision = _vision_cache.get("normal")
+	if vision == null:
+		return VisionInfo.new()
+	return vision
