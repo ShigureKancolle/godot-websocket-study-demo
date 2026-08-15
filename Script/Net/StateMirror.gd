@@ -40,7 +40,7 @@ IDE 补全、字段集合显式。
  架构位置
 ============================================================================
     服务端 GameRoom(权威)
-        ↓ bus.send 广播 GameState / PlayerJoin / PlayerMove / PlayerLeave
+        ↓ bus.send 广播 GameState / EnterRoom / PlayerMove / LeaveRoom
     网络(WebSocket bytes)
         ↓ MyWebSocketClient._dispatch_packet
     MessageBus.dispatch(反序列化 + 路由)
@@ -176,7 +176,7 @@ var _entities: Dictionary = {}
 # 和 _entities 平级,通过 entity_id 关联
 var _combats: Dictionary[String, ClientCombatStats] = {}
 
-# 本地玩家的 entity_id(服务端在 PlayerJoin 响应里回传的)
+# 本地玩家的 entity_id(服务端在 EnterRoom 响应里回传的)
 # 渲染层用它区分「自己」和「别人」(比如自己的角色高亮显示)
 # 为什么放这里而不是放某个场景脚本:entity_id 是跨场景的状态,放镜像里最合适
 var _local_entity_id: String = ""
@@ -236,10 +236,10 @@ func register_handlers() -> void:
 	# ChatMessage 和 Heartbeat 不影响状态,不在这里注册——
 	# 它们由各自的 UI(如 chat_main)单独处理。
 	mb.onproto("game.GameState", _on_game_state)
-	mb.onproto("game.PlayerJoin", _on_player_join)
+	mb.onproto("game.EnterRoom", _on_enter_room)
 	mb.onproto("game.PlayerMove", _on_player_move)
 	mb.onproto("game.PlayerFacing", _on_player_facing)
-	mb.onproto("game.PlayerLeave", _on_player_leave)
+	mb.onproto("game.LeaveRoom", _on_leave_room)
 	mb.onproto("game.Heartbeat", _on_heartbeat)
 	mb.onproto("game.AttackStart", _on_attack_start)
 	mb.onproto("game.AttackEnd", _on_attack_end)
@@ -285,29 +285,29 @@ func _on_game_state(data: Dictionary) -> void:
 	state_replaced.emit(_entities.values())
 
 
-## 收到 PlayerJoin:增量添加一个实体(通常是玩家)
+## 收到 EnterRoom:增量添加一个实体(通常是玩家进入房间)
 ##
-## 注意:服务端在 on_player_join 里对「新玩家自己」发的是 GameState(全量),
-##       对「其他已在线实体」发的是 PlayerJoin(增量)。
+## 注意:服务端在 on_enter_room 里对「新玩家自己」发的是 GameState(全量),
+##       对「其他已在线实体」发的是 EnterRoom(增量)。
 ## 所以这个 handler 主要处理「别人加入」的情况。
 ##
-## 但有个细节:本地玩家的 entity_id 是从 PlayerJoin 里提取的(见 MessageBus._on_player_join)。
-## 这里也兼容——如果本地 _local_entity_id 还没设置,且收到 PlayerJoin,尝试提取。
-func _on_player_join(data: Dictionary) -> void:
+## 但有个细节:本地玩家的 entity_id 是从 EnterRoom 里提取的(见 MessageBus._on_enter_room)。
+## 这里也兼容——如果本地 _local_entity_id 还没设置,且收到 EnterRoom,尝试提取。
+func _on_enter_room(data: Dictionary) -> void:
 	var entity_info: Dictionary = data.get("entity_info", {})
 	var eid: String = entity_info.get("entity_id", "")
 	if eid == "":
 		return
 
 	# 增量更新:直接覆盖该实体条目
-	# 为什么覆盖而非报错「已存在」:服务端可能重发 PlayerJoin(如断线重连),
+	# 为什么覆盖而非报错「已存在」:服务端可能重发 EnterRoom(如断线重连),
 	# 客户端镜像应宽容处理——以最新信息为准。这与服务端 GameRoom.add_entity
 	# 的「重复加入报错」相反:服务端要防 bug,客户端要容错。
 	# dict→强类型转换:from_dict 集中处理字段名/类型
 	var info := ClientEntityInfo.from_dict(entity_info)
 	_entities[eid] = info
 
-	# 兼容本地 entity_id 提取(见 MessageBus._on_player_join 的逻辑)
+	# 兼容本地 entity_id 提取(见 MessageBus._on_enter_room 的逻辑)
 	# 这里不重复设置,只是兜底——正常情况下 MessageBus 已经设过了
 	if _local_entity_id == "":
 		_local_entity_id = eid
@@ -332,7 +332,7 @@ func _on_player_move(data: Dictionary) -> void:
 
 	var entity: ClientEntityInfo = _entities.get(eid)
 	if entity == null:
-		# 镜像里没这个实体:可能是 PlayerJoin 丢了或乱序。
+		# 镜像里没这个实体:可能是 EnterRoom 丢了或乱序。
 		# 客户端容错策略:忽略这次移动,等全量快照来时自动修正。
 		# 不主动请求服务端重发——保持客户端「无脑服从」的简单性。
 		return
@@ -391,8 +391,8 @@ func _on_player_facing(data: Dictionary) -> void:
 	entity_updated.emit(entity)
 
 
-## 收到 PlayerLeave:移除某实体
-func _on_player_leave(data: Dictionary) -> void:
+## 收到 LeaveRoom:移除某实体
+func _on_leave_room(data: Dictionary) -> void:
 	var eid: String = data.get("entity_id", "")
 	if eid == "":
 		return

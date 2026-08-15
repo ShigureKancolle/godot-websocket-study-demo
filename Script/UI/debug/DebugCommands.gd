@@ -69,7 +69,7 @@ func cmd_me(_args: PackedStringArray) -> void:
 	var mirror = ClientStateMirror.instance()
 	var eid := mirror.local_entity_id()
 	if eid == "":
-		console.print_line("[color=#ff7f7f]本地玩家 entity_id 未设置(可能还没收到 PlayerJoin 响应)[/color]")
+		console.print_line("[color=#ff7f7f]本地玩家 entity_id 未设置(可能还没收到 EnterRoom 响应)[/color]")
 		return
 	console.print_line("本地玩家 entity_id: %s" % eid)
 	var e = mirror.get_entity(eid)

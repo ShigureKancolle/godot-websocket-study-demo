@@ -31,15 +31,15 @@ func _on_chat_msg(msg: Dictionary) -> void:
 func _send_chat_message() -> void:
 	var text: String = $Control/Input.text
 	var mb = MessageBus.instance()
-	# ChatMessage 消息体的 player_id 字段名保留(proto 里就是 player_id,指代发送者ID)
-	# 值用 ClientStateMirror.local_entity_id() 取(统一 Entity 模型后这是单一真相源)
-	# MessageBus._player_id 仍保留作为兼容别名,但推荐用 mirror API
+	# 大厅/房间聊天统一用当前登录账号作为发送者信息。
+	# 房间内也可以继续用 local_entity_id 作为 player_id，但大厅没有实体，所以这里用账号 id。
+	var acc: Dictionary = AccountManager.instance().current_account()
 	mb.send("game.ChatMessage",
 	{
 		"content": text,
-		"player_name": "测试名字",
-		"player_id": ClientStateMirror.instance().local_entity_id(),
-		"time": Time.get_unix_time_from_system()
+		"player_name": acc.get("name", "未知"),
+		"player_id": acc.get("id", ""),
+		"timestamp": Time.get_unix_time_from_system()
 	})
 
 func _on_click_back() -> void:

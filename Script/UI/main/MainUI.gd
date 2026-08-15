@@ -63,7 +63,7 @@ func _on_click_chat():
 
 func _on_click_game():
 	# 进入木桩测试场景
-	# 先发 PlayerJoin 让服务端创建实体,再切场景
+	# 先发 EnterRoom 让服务端创建实体,再切场景
 	# 切场景前发消息:WebSocket 是异步的,消息会在切场景期间被服务端处理,
 	# 切到 DeadManScene 时 _ready 会主动拉取 StateMirror 已有的镜像数据
 	# 登录在 LoginScene 前置完成,这里做防御校验(正常流程必然已登录)
@@ -71,7 +71,7 @@ func _on_click_game():
 	if acc.is_empty():
 		push_warning("未登录，无法进入游戏（应先进登录场景）")
 		return
-	MessageBus.instance().send("game.PlayerJoin", {
+	MessageBus.instance().send("game.EnterRoom", {
 		"entity_info": {
 			"player_name": acc.get("name", ""),
 			"account_id": acc.get("id", ""),
@@ -87,14 +87,14 @@ func _on_click_game():
 
 func _on_click_game_real():
 	# 进入正式游戏场景(接入无限地图)
-	# 和木桩场景一样:先发 PlayerJoin,再切场景
+	# 和木桩场景一样:先发 EnterRoom,再切场景
 	# GameScene 继承自 dead_man_scene,复用全部实体/战斗逻辑,额外接入 InfiniteTileMap
 	# 登录在 LoginScene 前置完成,这里做防御校验(正常流程必然已登录)
 	var acc: Dictionary = AccountManager.instance().current_account()
 	if acc.is_empty():
 		push_warning("未登录，无法进入游戏（应先进登录场景）")
 		return
-	MessageBus.instance().send("game.PlayerJoin", {
+	MessageBus.instance().send("game.EnterRoom", {
 		"entity_info": {
 			"player_name": acc.get("name", ""),
 			"account_id": acc.get("id", ""),

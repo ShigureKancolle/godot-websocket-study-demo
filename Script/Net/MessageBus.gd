@@ -49,9 +49,9 @@ func _init():
 	if not MessageBus._initialized:
 		MessageBus._initialized = true
 		_auto_register()
-		onproto("game.PlayerJoin", _on_player_join)
+		onproto("game.EnterRoom", _on_enter_room)
 
-# 收到 PlayerJoin 广播时,把服务端分配的 entity_id 提取出来,存到 ClientStateMirror
+# 收到 EnterRoom 广播时,把服务端分配的 entity_id 提取出来,存到 ClientStateMirror
 # 的 _local_entity_id(渲染层用这个区分本地玩家 vs 远程玩家)
 #
 # 字段从 entity_info.entity_id 取(统一 Entity 模型后,proto 用 EntityInfo 替代 PlayerInfo):
@@ -60,7 +60,7 @@ func _init():
 #
 # _player_id 静态变量保留作为兼容别名(部分老代码如 chat_main 仍引用),
 # 但推荐用 ClientStateMirror.local_entity_id() 访问——那里是「单一真相源」
-static func _on_player_join(msg: Dictionary):
+static func _on_enter_room(msg: Dictionary):
 	var entity_info: Dictionary = msg.get("entity_info", {})
 	var eid: String = entity_info.get("entity_id", "")
 	if eid == "":
@@ -68,7 +68,7 @@ static func _on_player_join(msg: Dictionary):
 	MessageBus._player_id = eid
 	ClientStateMirror.instance()._local_entity_id = eid
 
-# snake_case -> PascalCase（player_join -> PlayerJoin）
+# snake_case -> PascalCase（enter_room -> EnterRoom）
 static func _snake_to_pascal(s: String) -> String:
 	var result := ""
 	var cap := true

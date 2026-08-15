@@ -1209,7 +1209,71 @@ class PlayerFacing:
 			return PB_ERR.PARSE_INCOMPLETE
 		return result
 	
-class PlayerJoin:
+class Login:
+	extends RefCounted
+	func _init():
+		var service
+		
+		__account_id = PBField.new("account_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
+		service = PBServiceField.new()
+		service.field = __account_id
+		data[__account_id.tag] = service
+		
+		__player_name = PBField.new("player_name", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 2, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
+		service = PBServiceField.new()
+		service.field = __player_name
+		data[__player_name.tag] = service
+		
+	var data = {}
+	
+	var __account_id: PBField
+	func has_account_id() -> bool:
+		if __account_id.value != null:
+			return true
+		return false
+	func get_account_id() -> String:
+		return __account_id.value
+	func clear_account_id() -> void:
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__account_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
+	func set_account_id(value : String) -> void:
+		__account_id.value = value
+	
+	var __player_name: PBField
+	func has_player_name() -> bool:
+		if __player_name.value != null:
+			return true
+		return false
+	func get_player_name() -> String:
+		return __player_name.value
+	func clear_player_name() -> void:
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__player_name.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
+	func set_player_name(value : String) -> void:
+		__player_name.value = value
+	
+	func _to_string() -> String:
+		return PBPacker.message_to_string(data)
+		
+	func to_bytes() -> PackedByteArray:
+		return PBPacker.pack_message(data)
+		
+	func from_bytes(bytes : PackedByteArray, offset : int = 0, limit : int = -1) -> int:
+		var cur_limit = bytes.size()
+		if limit != -1:
+			cur_limit = limit
+		var result = PBPacker.unpack_message(data, bytes, offset, cur_limit)
+		if result == cur_limit:
+			if PBPacker.check_required(data):
+				if limit == -1:
+					return PB_ERR.NO_ERRORS
+			else:
+				return PB_ERR.REQUIRED_FIELDS
+		elif limit == -1 && result > 0:
+			return PB_ERR.PARSE_INCOMPLETE
+		return result
+	
+class EnterRoom:
 	extends RefCounted
 	func _init():
 		var service
@@ -1257,7 +1321,7 @@ class PlayerJoin:
 			return PB_ERR.PARSE_INCOMPLETE
 		return result
 	
-class PlayerLeave:
+class LeaveRoom:
 	extends RefCounted
 	func _init():
 		var service
@@ -2473,17 +2537,23 @@ class GameMessage:
 	func _init():
 		var service
 		
-		__player_join = PBField.new("player_join", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		__login = PBField.new("login", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 21, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
 		service = PBServiceField.new()
-		service.field = __player_join
-		service.func_ref = Callable(self, "new_player_join")
-		data[__player_join.tag] = service
+		service.field = __login
+		service.func_ref = Callable(self, "new_login")
+		data[__login.tag] = service
 		
-		__player_leave = PBField.new("player_leave", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 2, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		__enter_room = PBField.new("enter_room", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
 		service = PBServiceField.new()
-		service.field = __player_leave
-		service.func_ref = Callable(self, "new_player_leave")
-		data[__player_leave.tag] = service
+		service.field = __enter_room
+		service.func_ref = Callable(self, "new_enter_room")
+		data[__enter_room.tag] = service
+		
+		__leave_room = PBField.new("leave_room", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 2, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		service = PBServiceField.new()
+		service.field = __leave_room
+		service.func_ref = Callable(self, "new_leave_room")
+		data[__leave_room.tag] = service
 		
 		__player_move = PBField.new("player_move", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 3, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
 		service = PBServiceField.new()
@@ -2597,8 +2667,9 @@ class GameMessage:
 	
 	enum MessageTypeCase {
 		MESSAGE_TYPE_NOT_SET = 0,
-		PLAYER_JOIN = 1,
-		PLAYER_LEAVE = 2,
+		LOGIN = 21,
+		ENTER_ROOM = 1,
+		LEAVE_ROOM = 2,
 		PLAYER_MOVE = 3,
 		CHAT_MESSAGE = 4,
 		GAME_STATE = 5,
@@ -2620,18 +2691,20 @@ class GameMessage:
 	}
 	var _message_type_case: int = 0
 
-	var __player_join: PBField
-	func has_player_join() -> bool:
-		return data[1].state == PB_SERVICE_STATE.FILLED
-	func get_player_join() -> PlayerJoin:
-		return __player_join.value
-	func clear_player_join() -> void:
+	var __login: PBField
+	func has_login() -> bool:
+		return data[21].state == PB_SERVICE_STATE.FILLED
+	func get_login() -> Login:
+		return __login.value
+	func clear_login() -> void:
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_login() -> Login:
+		data[21].state = PB_SERVICE_STATE.FILLED
+		_message_type_case = 21
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-	func new_player_join() -> PlayerJoin:
-		data[1].state = PB_SERVICE_STATE.FILLED
-		_message_type_case = 1
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[3].state = PB_SERVICE_STATE.UNFILLED
@@ -2669,19 +2742,75 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
-		__player_join.value = PlayerJoin.new()
-		return __player_join.value
+		__login.value = Login.new()
+		return __login.value
 	
-	var __player_leave: PBField
-	func has_player_leave() -> bool:
-		return data[2].state == PB_SERVICE_STATE.FILLED
-	func get_player_leave() -> PlayerLeave:
-		return __player_leave.value
-	func clear_player_leave() -> void:
+	var __enter_room: PBField
+	func has_enter_room() -> bool:
+		return data[1].state == PB_SERVICE_STATE.FILLED
+	func get_enter_room() -> EnterRoom:
+		return __enter_room.value
+	func clear_enter_room() -> void:
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_enter_room() -> EnterRoom:
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		data[1].state = PB_SERVICE_STATE.FILLED
+		_message_type_case = 1
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
-	func new_player_leave() -> PlayerLeave:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__chat_message.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__game_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[5].state = PB_SERVICE_STATE.UNFILLED
+		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
+		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[8].state = PB_SERVICE_STATE.UNFILLED
+		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[9].state = PB_SERVICE_STATE.UNFILLED
+		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
+		__stats_init.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[12].state = PB_SERVICE_STATE.UNFILLED
+		__stats_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[13].state = PB_SERVICE_STATE.UNFILLED
+		__hp_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[14].state = PB_SERVICE_STATE.UNFILLED
+		__entity_dead.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[15].state = PB_SERVICE_STATE.UNFILLED
+		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
+		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = EnterRoom.new()
+		return __enter_room.value
+	
+	var __leave_room: PBField
+	func has_leave_room() -> bool:
+		return data[2].state == PB_SERVICE_STATE.FILLED
+	func get_leave_room() -> LeaveRoom:
+		return __leave_room.value
+	func clear_leave_room() -> void:
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_leave_room() -> LeaveRoom:
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
 		data[2].state = PB_SERVICE_STATE.FILLED
 		_message_type_case = 2
@@ -2721,8 +2850,8 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = PlayerLeave.new()
-		return __player_leave.value
+		__leave_room.value = LeaveRoom.new()
+		return __leave_room.value
 	
 	var __player_move: PBField
 	func has_player_move() -> bool:
@@ -2733,9 +2862,11 @@ class GameMessage:
 		data[3].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 	func new_player_move() -> PlayerMove:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		data[3].state = PB_SERVICE_STATE.FILLED
 		_message_type_case = 3
@@ -2785,9 +2916,11 @@ class GameMessage:
 		data[4].state = PB_SERVICE_STATE.UNFILLED
 		__chat_message.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 	func new_chat_message() -> ChatMessage:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[3].state = PB_SERVICE_STATE.UNFILLED
@@ -2837,9 +2970,11 @@ class GameMessage:
 		data[5].state = PB_SERVICE_STATE.UNFILLED
 		__game_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 	func new_game_state() -> GameState:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[3].state = PB_SERVICE_STATE.UNFILLED
@@ -2889,9 +3024,11 @@ class GameMessage:
 		data[6].state = PB_SERVICE_STATE.UNFILLED
 		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 	func new_heartbeat() -> Heartbeat:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[3].state = PB_SERVICE_STATE.UNFILLED
@@ -2941,9 +3078,11 @@ class GameMessage:
 		data[7].state = PB_SERVICE_STATE.UNFILLED
 		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 	func new_player_facing() -> PlayerFacing:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[3].state = PB_SERVICE_STATE.UNFILLED
@@ -2993,9 +3132,11 @@ class GameMessage:
 		data[8].state = PB_SERVICE_STATE.UNFILLED
 		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 	func new_attack_start() -> AttackStart:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[3].state = PB_SERVICE_STATE.UNFILLED
@@ -3045,9 +3186,11 @@ class GameMessage:
 		data[9].state = PB_SERVICE_STATE.UNFILLED
 		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 	func new_attack_hit() -> AttackHit:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[3].state = PB_SERVICE_STATE.UNFILLED
@@ -3097,9 +3240,11 @@ class GameMessage:
 		data[10].state = PB_SERVICE_STATE.UNFILLED
 		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 	func new_attack_end() -> AttackEnd:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[3].state = PB_SERVICE_STATE.UNFILLED
@@ -3149,9 +3294,11 @@ class GameMessage:
 		data[11].state = PB_SERVICE_STATE.UNFILLED
 		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 	func new_hurt_end() -> HurtEnd:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[3].state = PB_SERVICE_STATE.UNFILLED
@@ -3201,9 +3348,11 @@ class GameMessage:
 		data[12].state = PB_SERVICE_STATE.UNFILLED
 		__stats_init.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 	func new_stats_init() -> StatsInit:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[3].state = PB_SERVICE_STATE.UNFILLED
@@ -3253,9 +3402,11 @@ class GameMessage:
 		data[13].state = PB_SERVICE_STATE.UNFILLED
 		__stats_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 	func new_stats_changed() -> StatsChanged:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[3].state = PB_SERVICE_STATE.UNFILLED
@@ -3305,9 +3456,11 @@ class GameMessage:
 		data[14].state = PB_SERVICE_STATE.UNFILLED
 		__hp_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 	func new_hp_changed() -> HpChanged:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[3].state = PB_SERVICE_STATE.UNFILLED
@@ -3357,9 +3510,11 @@ class GameMessage:
 		data[15].state = PB_SERVICE_STATE.UNFILLED
 		__entity_dead.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 	func new_entity_dead() -> EntityDead:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[3].state = PB_SERVICE_STATE.UNFILLED
@@ -3409,9 +3564,11 @@ class GameMessage:
 		data[16].state = PB_SERVICE_STATE.UNFILLED
 		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 	func new_entity_remove() -> EntityRemove:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[3].state = PB_SERVICE_STATE.UNFILLED
@@ -3461,9 +3618,11 @@ class GameMessage:
 		data[17].state = PB_SERVICE_STATE.UNFILLED
 		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 	func new_ping() -> Ping:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[3].state = PB_SERVICE_STATE.UNFILLED
@@ -3513,9 +3672,11 @@ class GameMessage:
 		data[18].state = PB_SERVICE_STATE.UNFILLED
 		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 	func new_pong() -> Pong:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[3].state = PB_SERVICE_STATE.UNFILLED
@@ -3565,9 +3726,11 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 	func new_map_info() -> MapInfo:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[3].state = PB_SERVICE_STATE.UNFILLED
@@ -3617,9 +3780,11 @@ class GameMessage:
 		data[20].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 	func new_ai_state_changed() -> AiStateChanged:
-		__player_join.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[1].state = PB_SERVICE_STATE.UNFILLED
-		__player_leave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[2].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[3].state = PB_SERVICE_STATE.UNFILLED

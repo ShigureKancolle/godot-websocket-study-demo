@@ -6,6 +6,9 @@ extends Node
 
 var ws_path = "ws://127.0.0.1:8765"
 
+# 是否已发送 Login（连接后/登录后自动补发）
+var _login_sent: bool = false
+
 # ---------------------------------------------------------------------------
 # 网络延迟测量(Ping/Pong)
 # ---------------------------------------------------------------------------
@@ -23,7 +26,7 @@ const RTT_SMOOTH_ALPHA: float = 0.2
 var _rtt_ms: float = 50.0
 # 上次发 Ping 的时刻(ms),用于按 PING_INTERVAL_MS 节流
 var _last_ping_ms: int = 0
-# 是否开始 RTT 测量。默认关闭——服务端要求第一条消息必须是 PlayerJoin,
+# 是否开始 RTT 测量。默认关闭——服务端要求第一条消息必须是 Login,
 # 一连接就发 Ping 会抢首消息被踢;玩家进入游戏场景后由 start_rtt_measurement 开启
 var _rtt_active: bool = false
 
@@ -38,8 +41,14 @@ func _register_gd_script_constants():
 func _process(_delta):
 	# 网络延迟探测:每 PING_INTERVAL_MS 发一次 Ping
 	# 只在 WebSocket 已连接(STATE_OPEN)时发——未连接时 WebSocketPeer.send 会返回 FAILED 并刷错误日志
-	# _rtt_active 控制:进入游戏场景前不发(避免抢 PlayerJoin 首消息被服务端踢,见 start_rtt_measurement)
+	# _rtt_active 控制:进入游戏场景前不发(避免抢 Login 首消息被服务端踢,见 start_rtt_measurement)
 	var now: int = Time.get_ticks_msec()
+	# 连接已建立但还没发过 Login 时，等登录完成后自动补发（启动时可能还没选账号）
+	if not _login_sent and MyWebSocketClient.instance().is_connected_to_server():
+		var acc: Dictionary = AccountManager.instance().current_account()
+		if not acc.is_empty():
+			_send_login(acc)
+
 	if _rtt_active and now - _last_ping_ms >= PING_INTERVAL_MS:
 		_last_ping_ms = now
 		if MyWebSocketClient.instance().is_connected_to_server():
@@ -73,7 +82,25 @@ func _init_websocket():
 	# 注册 Pong 处理器(测量网络延迟)
 	# 必须在 _register_gd_script_constants 之后——onproto 需要消息类型已注册才能解析
 	MessageBus.instance().onproto("game.Pong", _on_pong)
+	# 连接建立后自动发 Login，让客户端进入大厅（之后才能聊天/进房）
+	SignalMgr.register_handler("websocket_connected", Callable(self, "_on_websocket_connected"))
 	print("MessageBus initialized: %s" % mb)
+
+
+## WebSocket 连上后自动发送 Login（建立服务器会话/进入大厅）
+func _on_websocket_connected(_data: Dictionary) -> void:
+	_login_sent = false
+	var acc: Dictionary = AccountManager.instance().current_account()
+	if not acc.is_empty():
+		_send_login(acc)
+
+
+func _send_login(acc: Dictionary) -> void:
+	MessageBus.instance().send("game.Login", {
+		"account_id": acc.get("id", ""),
+		"player_name": acc.get("name", ""),
+	})
+	_login_sent = true
 
 
 ## 收到服务端回传的 Pong:算一次 RTT 并做 EMA 平滑
@@ -93,8 +120,8 @@ func get_rtt_ms() -> float:
 
 
 ## 开始 RTT 测量(进入游戏场景后由场景 _ready 调用)
-## 为什么不在连接成功时就开始:服务端校验「第一条消息必须是 PlayerJoin」,
-## 一连接就发 Ping 会抢首消息被踢;进游戏时 PlayerJoin 已发出,此时再测 RTT 安全,
+## 为什么不在连接成功时就开始:服务端校验「第一条消息必须是 Login」,
+## 一连接就发 Ping 会抢首消息被踢;进游戏时 EnterRoom 已发出,此时再测 RTT 安全,
 ## 且 RTT 也只在本地玩家移动对账时才真正需要。
 func start_rtt_measurement() -> void:
 	_rtt_active = true
