@@ -6,7 +6,6 @@ import game.helper.ai_state_helper as ai_state_helper
 import game.ai.ai_state_base as ai_state_base
 import game.game_room as game_room
 
-fact_speed = 1.0  # 角速度 1弧度1秒
 class LookAroundState(ai_state_base.AIStateBase):
     def __init__(self, entity_id: str):
         super().__init__(entity_id)
@@ -28,7 +27,7 @@ class LookAroundState(ai_state_base.AIStateBase):
 
         # 朝向转转
         cur_facing = room.get_entity(self.entity_id).facing
-        
+        fact_speed = room.get_combat(self.entity_id).look_around_fact_speed
         if self.left_facing is not None: 
             next_facing = (cur_facing - fact_speed * dt) % (2 * math.pi)
             room.apply_facing(self.entity_id, next_facing)
@@ -50,7 +49,6 @@ class LookAroundState(ai_state_base.AIStateBase):
             # 左右都转完了,回到巡逻状态
             ai_state_helper.change_ai_state(room, self.entity_id, "patrol")
             
-           
 
     def init_enter(self, room: game_room.GameRoom):
         room.apply_move_dir(self.entity_id, 0, 0, False, 0)  # 停止移动

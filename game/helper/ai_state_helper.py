@@ -91,10 +91,11 @@ def change_ai_state(room: "GameRoom", entity_id: str, state: str, target_entity_
     if ai_machine:
         ai_machine.change_state(state, target_entity_id)
 
-def get_facing_by_vector2(vec: tuple[float, float] | list[float, float], zero: tuple[float, float] | list[float, float] = (1, 0)) -> int:
-    """把向量转化为弧度方向（向右为0）"""
+def get_facing_by_vector2(vec: tuple[float, float] | list[float, float], zero: tuple[float, float] | list[float, float] = (1, 0)) -> float:
+    """把向量转化为弧度方向(向右为0),归一化到 [0, 2π),与 apply_facing 的存储区间一致"""
     import game.collision as collision
-    return collision.Vector2(*vec).angle(collision.Vector2(*zero))
+    angle = collision.Vector2(*vec).angle(collision.Vector2(*zero))
+    return angle % (2 * math.pi)
 
 def find_path(room: "GameRoom", start_pos: tuple[float, float], end_pos: tuple[float, float]) -> Optional[list[tuple[float, float]]]:
     """

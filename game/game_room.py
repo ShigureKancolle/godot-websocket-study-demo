@@ -147,6 +147,7 @@ class CombatComponent:
     max_hp: int = 0
     attack_power: int = 0
     defense: int = 0
+    look_around_fact_speed: float = 0.5  # 朝向转转转速(弧度/秒)
 
 
 @dataclass

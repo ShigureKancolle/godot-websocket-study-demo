@@ -115,6 +115,7 @@ class CombatStats:
     max_hp: int = 0           # 最大血量
     attack_power: int = 0     # 攻击力基础值(乘以攻击配置的 damage_percent 得最终伤害)
     defense: int = 0          # 防御力(参与伤害减免公式)
+    look_around_fact_speed: float = 0.5  # 朝向转转转速(弧度/秒)
 
 
 # ===========================================================================
@@ -286,6 +287,7 @@ def _build_combat_stats(stats_dict: dict) -> CombatStats:
         max_hp=int(stats_dict.get("max_hp", 0)),
         attack_power=int(stats_dict.get("attack_power", 0)),
         defense=int(stats_dict.get("defense", 0)),
+        look_around_fact_speed=float(stats_dict.get("look_around_fact_speed", 0.5)),
     )
 
 

@@ -71,6 +71,14 @@ class Vector2:
     x: float = 0.0
     y: float = 0.0
 
+    def __init__(self, x: float | tuple[float, float] | List[float] = 0.0, y: float = 0.0):
+        if isinstance(x, (tuple, list)) and len(x) == 2:
+            self.x = x[0]
+            self.y = x[1]
+        else:
+            self.x = x
+            self.y = y
+
     def normalized(self) -> "Vector2":
         """归一化向量"""
         return self / math.hypot(self.x, self.y)
@@ -79,12 +87,22 @@ class Vector2:
         """向量点积"""
         return self.x * other.x + self.y * other.y
 
-    def inner_product(self, other: "Vector2") -> float:
-        """向量内积"""
-        return self.x * other.x + self.y * other.y
+    def cross(self, other: "Vector2") -> float:
+        """向量叉积(z 分量):0 平行/共线,>0 表示 other 在 self 左边(逆时针),<0 在右边(顺时针)"""
+        return self.x * other.y - self.y * other.x
 
+    @staticmethod
+    def dot_static(v1: "Vector2", v2: "Vector2") -> float:
+        """向量点积  点乘 判断是否垂直 0 垂直 >0 v2在v1的方向 夹角是锐角  <0 v2在v1的反方向 夹角是钝角"""
+        return v1.x * v2.x + v1.y * v2.y
+
+    @staticmethod
+    def cross_static(v1: "Vector2", v2: "Vector2") -> float:
+        """向量叉积(z 分量):0 平行/共线,>0 表示 v2 在 v1 左边(逆时针),<0 在右边(顺时针)"""
+        return v1.x * v2.y - v1.y * v2.x
+    
     def angle(self, zero: "tuple[float, float] | Vector2 | List[float]" = (1.0, 0.0)) -> float:
-        """返回以zero为零的向量角度"""
+        """返回以zero为零的向量角度,区间 [-π, π]"""
         if self == Vector2(0.0, 0.0):
             raise ValueError("向量为零,无法计算角度") 
         if isinstance(zero, (tuple, list)) and len(zero) == 2:

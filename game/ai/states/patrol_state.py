@@ -54,17 +54,34 @@ class PatrolState(ai_state_base.AIStateBase):
             target_x, target_y = self.cur_target_x, self.cur_target_y
             if (cur_x - target_x) ** 2 + (cur_y - target_y) ** 2 < 10 ** 2:
                 # 到达目标点后重新选择一个随机点
-                room.apply_move_dir(self.entity_id, 0, 0, False, dt)
-                ai_state_helper.change_ai_state(room, self.entity_id, "look_around", target_entity_id)
+                self.cur_target_x, self.cur_target_y = self._get_random_patrol_pos()
+                # ai_state_helper.change_ai_state(room, self.entity_id, "look_around", target_entity_id)
                 return
             
             dir_x = self.cur_target_x - cur_x
             dir_y = self.cur_target_y - cur_y
-            room.apply_move_dir(self.entity_id, dir_x, dir_y, True, dt)
             # 移动过程中朝向始终跟着移动方向,避免出生点朝向和实际走向不一致
             facing = ai_state_helper.get_facing_by_vector2((dir_x, dir_y))
-            room.apply_facing(self.entity_id, facing)
-        
+            cur_facing = room.get_entity(self.entity_id).facing
+            # facing 是 [-π, π],而 apply_facing 里把朝向存成了 [0, 2π),
+            # 直接相减会在 ±π 附近得到接近 2π 的假差值。先归一到最短角差再判断。
+            angle_diff = (facing - cur_facing + math.pi) % (2 * math.pi) - math.pi
+            if abs(angle_diff) > 0.1:
+                fact_speed = room.get_combat(self.entity_id).look_around_fact_speed
+                # 用最短角差的符号决定转向,等价于原叉乘判断,但不受 wrap 影响
+                turn_dir = 1 if angle_diff > 0 else -1
+                step = fact_speed * dt * turn_dir
+                # 防止一步跨过目标角导致来回震荡
+                if abs(step) > abs(angle_diff):
+                    next_facing = facing
+                else:
+                    next_facing = cur_facing + step
+                room.apply_facing(self.entity_id, next_facing)
+                room.apply_move_dir(self.entity_id, 0, 0, False, dt)
+            else:
+                room.apply_facing(self.entity_id, facing)
+                room.apply_move_dir(self.entity_id, dir_x, dir_y, True, dt)
+            
 
     def _find_player_in_sight(self, room: game_room.GameRoom):
         """查找最近的玩家"""
