@@ -27,16 +27,19 @@ function Write-Err($msg)   { Write-Host $msg -ForegroundColor Red }
 # 确保当前分支有 upstream(没有则自动配置到第一个 remote), 返回是否就绪
 # ---------------------------------------------------------------------------
 function Ensure-Upstream($repoPath) {
-    git -C $repoPath rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null | Out-Null
+    # 注意: 所有 git 命令走 cmd /c 包装(cmd 层 2>&1 合并输出流)。
+    # PS 5.1 中 git 的 stderr(错误/进度/警告)即使 2>$null 重定向,
+    # 在 $ErrorActionPreference='Stop' 下也会抛 NativeCommandError 终止脚本。
+    cmd /c "git -C `"$repoPath`" rev-parse --abbrev-ref --symbolic-full-name @{u} >nul 2>&1"
     if ($LASTEXITCODE -eq 0) { return $true }
-    $branch = (git -C $repoPath rev-parse --abbrev-ref HEAD).Trim()
-    $remote = (git -C $repoPath remote | Select-Object -First 1)
+    $branch = (cmd /c "git -C `"$repoPath`" rev-parse --abbrev-ref HEAD").Trim()
+    $remote = (cmd /c "git -C `"$repoPath`" remote" | Select-Object -First 1)
     if ([string]::IsNullOrWhiteSpace($remote)) {
         Write-Err "  [SKIP] $($repoPath) 没有任何 remote, 跳过"
         return $false
     }
     Write-Warn "  $repoPath 分支 '$branch' 没有 upstream, 自动配置 -> $remote/$branch"
-    git -C $repoPath branch --set-upstream-to="$remote/$branch" $branch | Out-Null
+    cmd /c "git -C `"$repoPath`" branch --set-upstream-to=$remote/$branch $branch >nul 2>&1"
     return ($LASTEXITCODE -eq 0)
 }
 
@@ -67,7 +70,7 @@ function Invoke-PullAll {
         if (-not (Test-Path (Join-Path $repoPath '.git'))) { continue }
         Write-Info "  [$repo] pull --rebase ..."
         if (-not (Ensure-Upstream $repoPath)) { $failed += $repo; continue }
-        git -C $repoPath pull --rebase 2>&1 | ForEach-Object { Write-Host "    $_" }
+        cmd /c "git -C `"$repoPath`" pull --rebase 2>&1" | ForEach-Object { Write-Host "    $_" }
         if ($LASTEXITCODE -ne 0) {
             Write-Err "  [$repo] 拉取失败(可能有冲突), 请手动处理: cd $repoPath && git status"
             $failed += $repo
@@ -116,7 +119,11 @@ function Invoke-CommitPush {
             continue
         }
         git -c core.quotepath=false -C $repoPath add -A
-        git -C $repoPath commit -m $msg 2>&1 | ForEach-Object { Write-Host "    $_" }
+        # 提交信息走临时文件(-F):cmd /c 会把中文按系统 ANSI 传给 git 导致乱码,UTF-8 文件最稳
+        $msgFile = Join-Path $env:TEMP "dsh_commit_msg_$repo.txt"
+        [System.IO.File]::WriteAllText($msgFile, $msg, (New-Object System.Text.UTF8Encoding($false)))
+        cmd /c "git -C `"$repoPath`" commit -F `"$msgFile`" 2>&1" | ForEach-Object { Write-Host "    $_" }
+        Remove-Item $msgFile -Force -ErrorAction SilentlyContinue
         if ($LASTEXITCODE -ne 0) {
             Write-Err "  [$repo] 提交失败, 停止"
             exit 1
@@ -139,13 +146,13 @@ function Invoke-CommitPush {
         $repoPath = Join-Path $root $repo
         Write-Info "  [$repo] 推送前同步 (pull --rebase) ..."
         if (-not (Ensure-Upstream $repoPath)) { $failed += $repo; continue }
-        git -C $repoPath pull --rebase 2>&1 | ForEach-Object { Write-Host "    $_" }
+        cmd /c "git -C `"$repoPath`" pull --rebase 2>&1" | ForEach-Object { Write-Host "    $_" }
         if ($LASTEXITCODE -ne 0) {
             Write-Err "  [$repo] 推送前同步失败(冲突?), 停止推送, 请手动处理"
             $failed += $repo
             continue
         }
-        git -C $repoPath push 2>&1 | ForEach-Object { Write-Host "    $_" }
+        cmd /c "git -C `"$repoPath`" push 2>&1" | ForEach-Object { Write-Host "    $_" }
         if ($LASTEXITCODE -ne 0) {
             Write-Err "  [$repo] 推送失败"
             $failed += $repo
@@ -158,6 +165,52 @@ function Invoke-CommitPush {
         exit 1
     }
     Write-Ok '全部推送完成'
+}
+
+# ---------------------------------------------------------------------------
+# 3) 仅推送: 把各仓库已提交未推送的 commit 推上去(不提交新东西)
+# ---------------------------------------------------------------------------
+function Invoke-PushOnly {
+    Write-Info '==> 仅推送(未推送的提交)...'
+    $pushed = @()
+    $failed = @()
+    foreach ($repo in $repos) {
+        $repoPath = Join-Path $root $repo
+        if (-not (Test-Path (Join-Path $repoPath '.git'))) { continue }
+        # 计算 ahead(本地未推送提交数); 无 upstream 时先配置
+        $aheadOut = cmd /c "git -C `"$repoPath`" rev-list --count @{u}..HEAD 2>&1"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "  [$repo] 无 upstream, 自动配置..."
+            if (-not (Ensure-Upstream $repoPath)) { $failed += $repo; continue }
+            $aheadOut = cmd /c "git -C `"$repoPath`" rev-list --count @{u}..HEAD 2>&1"
+        }
+        $ahead = [int](($aheadOut | Select-Object -Last 1).Trim())
+        if ($ahead -le 0) {
+            Write-Info "  [$repo] 无待推送提交"
+            continue
+        }
+        Write-Info "  [$repo] 有 $ahead 个提交待推送, 先同步再推送..."
+        cmd /c "git -C `"$repoPath`" pull --rebase 2>&1" | ForEach-Object { Write-Host "    $_" }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "  [$repo] 推送前同步失败(冲突?), 请手动处理"
+            $failed += $repo
+            continue
+        }
+        cmd /c "git -C `"$repoPath`" push 2>&1" | ForEach-Object { Write-Host "    $_" }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "  [$repo] 推送失败"
+            $failed += $repo
+        } else {
+            Write-Ok "  [$repo] 已推送"
+            $pushed += $repo
+        }
+    }
+    if ($pushed.Count -eq 0 -and $failed.Count -eq 0) { Write-Warn '所有仓库都没有待推送的提交' }
+    if ($failed.Count -gt 0) {
+        Write-Err "完成, 但以下仓库失败: $($failed -join ', ')"
+        exit 1
+    }
+    Write-Ok '推送完成'
 }
 
 # ---------------------------------------------------------------------------
@@ -176,6 +229,7 @@ if ($args.Count -gt 0) {
         }
         'review' { Invoke-ReviewDiff; exit 0 }
         'pull'   { Invoke-PullAll; exit 0 }
+        'push'   { Invoke-PushOnly; exit 0 }
         default  { Write-Err "未知命令: $($args[0])"; exit 1 }
     }
 }
@@ -187,14 +241,16 @@ while ($true) {
     Write-Host '  0) 生成 diff 对比 review (改完代码必做)'
     Write-Host '  1) 一键拉取 (pull --rebase, 5 仓库)'
     Write-Host '  2) 一键提交并推送'
-    Write-Host '  3) 退出'
+    Write-Host '  3) 仅推送 (把已提交未推送的 commit 推上去)'
+    Write-Host '  4) 退出'
     Write-Info '==============================================='
     $choice = Read-Host '请选择'
     switch ($choice) {
         '0' { Invoke-ReviewDiff }
         '1' { Invoke-PullAll }
         '2' { Invoke-CommitPush }
-        '3' { Write-Ok '再见'; break }
+        '3' { Invoke-PushOnly }
+        '4' { Write-Ok '再见'; break }
         default { Write-Warn '无效选择' }
     }
 }

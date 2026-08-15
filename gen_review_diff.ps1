@@ -47,8 +47,9 @@ foreach ($repo in $repos) {
         $p = $p.Trim()
         $target = Join-Path $baseDir "$repo\$p"
         New-Item -ItemType Directory -Force (Split-Path $target -Parent) | Out-Null
-        # cmd 重定向保持字节级, 避免 PowerShell 管道改编码
-        cmd /c "git -c core.quotepath=false -C `"$repoPath`" show `"HEAD:$p`" > `"$target`"" 2>$null
+        # cmd 重定向保持字节级, 避免 PowerShell 管道改编码; 2>nul 在 cmd 层吞 stderr
+        # (PS 5.1 中外部命令 stderr 即使 2>$null 在 EAP=Stop 下也会抛 NativeCommandError)
+        cmd /c "git -c core.quotepath=false -C `"$repoPath`" show `"HEAD:$p`" > `"$target`" 2>nul"
         if (Test-Path $target) {
             $changed += , @{ repo = $repo; path = $p }
         }
