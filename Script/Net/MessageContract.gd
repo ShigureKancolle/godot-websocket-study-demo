@@ -139,6 +139,11 @@ func is_valid_outbound(full_name: String) -> bool:
 		return true
 
 	var direction: String = contract.get("direction", "")
+	# PlayerLeave 支持客户端主动退出房间(C2S),也支持断连广播(S2C),
+	# 这里显式放行,避免契约方向字段未及时同步时误拦主动退出。
+	if short_name == "PlayerLeave":
+		return true
+
 	if direction == DIR_S2C:
 		push_warning("拒绝出站消息 %s：方向是 S2C（服务端→客户端），客户端不该发送此消息" % short_name)
 		return false

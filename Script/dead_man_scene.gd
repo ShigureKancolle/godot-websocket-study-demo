@@ -149,8 +149,15 @@ func _create_role(info: ClientEntityInfo) -> void:
 
 
 func _on_back_pressed() -> void:
+	# 先通知服务端真正退出房间:移除服务端实体并广播 PlayerLeave,
+	# 否则服务端房间仍保留这个玩家,AI 会继续把他当目标。
+	var mirror: ClientStateMirror = ClientStateMirror.instance()
+	var local_id: String = mirror.local_entity_id()
+	if local_id != "":
+		MessageBus.instance().send("game.PlayerLeave", {"entity_id": local_id})
+
 	# 清空 StateMirror 镜像数据,避免跨场景脏数据
 	# (木桩场景和正式地图场景共享同一个 StateMirror 单例,不清空会残留旧实体)
-	ClientStateMirror.instance().clear()
+	mirror.clear()
 	# 返回大厅
 	get_tree().change_scene_to_file.call_deferred("res://prefab/main/MainScene.tscn")
