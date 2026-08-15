@@ -192,7 +192,7 @@ _GENERATED_DIR = os.path.join(_SERVER_ROOT, "proto", "generated")
 单例。加载 `server/proto/messages.json` 做方向校验。
 
 - `load(path=None)` — 默认从 `server/proto/messages.json` 加载(路径用 `__file__` 定位)
-- `is_valid_inbound(full_name)` — 服务端 dispatch 时调,S2C 消息拒绝(客户端不该发),C2S/both 放行,未登记放行但告警
+- `is_valid_inbound(full_name)` — 服务端 dispatch 时调,S2C 消息拒绝(客户端不该发),C2S/both 放行,未登记放行但告警;PlayerLeave 显式放行(支持客户端主动退出房间)
 - 契约缺失时不阻断运行(只告警),设计为"增强而非必需"
 
 ## 依赖关系

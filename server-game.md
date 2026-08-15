@@ -18,7 +18,7 @@
 | [game/ai/states/](file:///d:/work2/godot_demo/server/game/ai/states) | 具体 AI 状态:patrol/chase/attack/look_around |
 | [game/helper/ai_state_helper.py](file:///d:/work2/godot_demo/server/game/helper/ai_state_helper.py) | AI 状态帮助:视锥寻人(is_in_sight/find_nearest_entity_in_sight)+ 寻路 + 状态切换 |
 | [game/handlers/__init__.py](file:///d:/work2/godot_demo/server/game/handlers/__init__.py) | handlers 统一入口:register_all(server) 遍历子模块注册 |
-| [game/handlers/player_handlers.py](file:///d:/work2/godot_demo/server/game/handlers/player_handlers.py) | 玩家 handler:PlayerJoin/PlayerMove/PlayerFacing/AttackStart |
+| [game/handlers/player_handlers.py](file:///d:/work2/godot_demo/server/game/handlers/player_handlers.py) | 玩家 handler:PlayerJoin/PlayerMove/PlayerFacing/PlayerLeave/AttackStart |
 | [game/handlers/chat_handlers.py](file:///d:/work2/godot_demo/server/game/handlers/chat_handlers.py) | 聊天 handler:ChatMessage/Heartbeat |
 
 ## GameRoom — 唯一状态持有者
@@ -211,12 +211,12 @@ ID 格式统一带类型前缀:`player:uuid-xxx` / `entity:stake_1`。
 在 main.py 创建 GameServer 实例后调用一次。热更时 `reload_all` 也会重新调此函数覆盖旧 handler。
 
 内部遍历所有子模块,调各自的 `register(server)`:
-- `player_handlers.register(server)` — PlayerJoin/PlayerMove/PlayerFacing/AttackStart
+- `player_handlers.register(server)` — PlayerJoin/PlayerMove/PlayerFacing/PlayerLeave/AttackStart
 - `chat_handlers.register(server)` — ChatMessage/Heartbeat
 
 ### handler 的 tick 分流
 高频输入(PlayerMove/PlayerFacing/AttackStart)走 tick,存入 `server._pending_inputs`,等 tick 统一处理+广播。
-低频事件(PlayerJoin/ChatMessage)立即处理,不走 tick。
+低频事件(PlayerJoin/PlayerLeave/ChatMessage)立即处理,不走 tick。
 详见 [server-net.md](file:///d:/work2/godot_demo/docs/server-net.md) 的 tick 机制章节。
 
 ### handler 通过闭包捕获 server
@@ -295,6 +295,7 @@ EnemyAIMachine 持有 states dict,EnemyMgr.add_enemy_ai_state 注册四个状态
 - 判定:ai_state_helper.is_in_sight(finder, target, vision) 纯几何判「距离 + 角度」(目标方向与 facing 夹角 ≤ 半角);遮挡不在此判,由 find_path 可达性承担(墙后目标即使可见也追不到)
 - 寻人:ai_state_helper.find_nearest_entity_in_sight(room, entity_id, entity_type, vision_mode) 先视锥过滤,再 find_path 可达性过滤,取最近目标
 - 用途:patrol/look_around 用 normal 视野寻人;chase 用 chase 视野判定「目标是否脱离视野」,脱离即放弃追击回 patrol
+- **AI 激活距离**:敌人只在附近 `AI_ACTIVATE_DISTANCE`(shared_config/constants.json,默认 1500px)内有玩家时才执行 AI 逻辑;没有玩家靠近时 AI 不跑,并停止 AI 驱动的移动。防止玩家还没进地图/已经退出房间时敌人自己巡逻或攻击。
 
 ### AI 状态切换广播(视锥渲染的数据源)
 AI 状态要同步给客户端渲染视锥形态(normal/chase),切换不能等低频快照:
@@ -407,4 +408,5 @@ hurt 定时器到期
 - collision.py 已实现:Circle/Sector 形状 + 相交判定函数,冒烟测试通过
 - 冒烟测试通过:A 攻击命中 entity:stake_1;apply_hurt 设 stake state='hurt';木桩 apply_move_dir 被能力配置拒绝
 - **敌人视锥视野已实现**:vision_config.json 新增 normal(30°/750px)/chase(22.5°/1000px) 两套视野;config_loader.get_vision(mode) 读取为 VisionParams(half_angle 弧度/radius);ai_state_helper.is_in_sight 纯几何判定(距离+角度,遮挡由 find_path 可达性承担);find_nearest_entity_in_sight 先视锥过滤再寻路;patrol/look_around 用常态视野寻人,chase 用追逐视野判「目标脱离视野即放弃追击」;enemy_mgr 补注册 look_around 状态
+- **AI 激活距离已实现**:shared_config/constants.json 新增 AI_ACTIVATE_DISTANCE=1500px;EnemyMgr.update 在附近无玩家时跳过 AI 并停止 AI 移动,玩家靠近后再恢复
 - **AI 状态同步已实现**:EntityInfo 加 ai_state 字段(proto 同步加,GameState 快照带初始值);EnemyAIMachine.change_state 状态真正切换(old != new)时触发钩子(重入不广播);EnemyMgr.set_ai_state_change_hook 注入所有状态机;GameServer._on_ai_state_changed 同步 EntityInfo.ai_state + 广播 AiStateChanged(客户端据此切换视锥形态 normal/chase,详见 tools/视锥渲染方案.md)

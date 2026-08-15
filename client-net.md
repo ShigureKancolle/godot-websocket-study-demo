@@ -128,7 +128,7 @@ handler 接收 `data: Dictionary`(godobuf 反序列化的原始 dict),内部调 
 - `_on_hurt_end(data)` — 受击硬直到期广播:读 `hurt_id` 取出 ClientEntityInfo,设 `entity.state = "idle"`,emit entity_updated。客户端不主动计时,完全等服务端信号(纯服务端权威恢复)。连击场景下服务端 hurt timer 被 cancel+restart,不会发 HurtEnd
 - `_on_entity_dead(data)` — 实体死亡广播:读 `entity_id` 取出 ClientEntityInfo,设 `entity.state = "dead"` + emit entity_updated。**只改 state,不移除实体**——实体还在场景里播死亡动画,等 EntityRemove 消息来才 erase + emit entity_removed。客户端不主动计时,死亡动画时长由服务端 DeadTimer 控制
 - `_on_ai_state_changed(data)` — AI 状态变更广播:读 `entity_id` 取出 ClientEntityInfo,设 `entity.ai_state` + emit entity_updated。**只改 ai_state,不动坐标/朝向**(和 _on_player_facing 平行)。AI 状态(patrol/chase/attack/look_around)是独立维度,由服务端 EnemyAIMachine 状态切换时实时广播,渲染层据此切换敌人视锥形态 normal/chase。镜像里没该实体时忽略(等全量快照修正,和 _on_player_facing 一致)
-- `_on_entity_remove(data)` — 实体移除广播(DeadTimer 到期后服务端发):读 `entity_id`,从 `_entities` 和 `_combats` 表 erase,emit entity_removed。渲染层收到信号后 queue_free 对应 Role 节点。和 `_on_player_leave` 的区别:PlayerLeave 是断连,EntityRemove 是死亡播完动画后移除
+- `_on_entity_remove(data)` — 实体移除广播(DeadTimer 到期后服务端发):读 `entity_id`,从 `_entities` 和 `_combats` 表 erase,emit entity_removed。渲染层收到信号后 queue_free 对应 Role 节点。和 `_on_player_leave` 的区别:PlayerLeave 是主动退出/断连,EntityRemove 是死亡播完动画后移除
 
 > 注:`_on_player_move` 里从 moving 推断 state 只是**字段映射**(服务端广播的 PlayerMove S2C 只有 x/y/moving,没有 state,state 存在服务端 EntityInfo 里),不是状态逻辑重复。真正的状态权威在服务端——GameState 快照会带服务端的 state 字段,可对账。
 >
@@ -185,7 +185,7 @@ enum EntityType { PLAYER, STAKE, UNKNOWN }
 `extends RefCounted`, `class_name MessageContract`,static var 单例。和服务端 message_contract.py 对称。
 
 - `load(path="")` — 默认从 `client/Script/proto/messages.json` 加载
-- `is_valid_outbound(full_name)` — send 时调,S2C 消息拒绝(客户端不该发),C2S/both 放行
+- `is_valid_outbound(full_name)` — send 时调,S2C 消息拒绝(客户端不该发),C2S/both 放行;PlayerLeave 显式放行(客户端主动退出房间)
 - `is_valid_inbound_handler(full_name)` — onproto 注册时调,C2S 消息告警"可能永远不会被触发"(只告警不阻止)
 - `is_state_affecting(short_name)` — 查询是否影响状态
 

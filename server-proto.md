@@ -24,7 +24,7 @@
 |------|------|------|
 | `EntityInfo` | entity_id, entity_type, x, y, facing, state, ai_state, player_name, moving, account_id | 实体状态(统一模型,player_name/moving/account_id 是 player 特有字段,其他类型不填)。ai_state 是 AI 状态(patrol/chase/attack/look_around,只有敌人填),和 state 动画状态是两个独立维度 |
 | `PlayerJoin` | entity_info: EntityInfo | 加入请求/通知 |
-| `PlayerLeave` | entity_id | 离开通知 |
+| `PlayerLeave` | entity_id | 主动退出/断连通知 |
 | `PlayerMove` | entity_id, x, y, speed, moving, dir_x, dir_y | 移动消息(双向语义,见下方说明) |
 | `PlayerFacing` | entity_id, facing | 朝向事件(瞬时动作,和 PlayerMove 平行) |
 | `AiStateChanged` | entity_id, ai_state | AI 状态变更(S2C 广播,敌人 AI 状态切换时实时发,和 PlayerFacing 平行;客户端据此切换视锥形态 normal/chase) |
@@ -75,7 +75,7 @@
 
 为什么拆两条:让客户端有时间播死亡动画。服务端"立即判定死亡"但"延迟移除实体",和 hurt 的"立即设 state + 定时器到期恢复"是同一模式。
 
-和 PlayerLeave 的区别:PlayerLeave 是断连(实体消失,无死亡动画),EntityRemove 是死亡(播完动画后移除)。
+和 PlayerLeave 的区别:PlayerLeave 是主动退出/断连(实体消失,无死亡动画),EntityRemove 是死亡(播完动画后移除)。
 
 ### ID 格式约定
 所有 entity_id 统一带类型前缀:
@@ -102,7 +102,7 @@ proto 只描述消息"长什么样",契约描述消息"怎么用":
 | 消息 | direction | category | state_affecting | 说明 |
 |------|-----------|----------|-----------------|------|
 | PlayerJoin | C2S | meta | true | 客户端发起,服务端处理后广播 |
-| PlayerLeave | S2C | meta | true | 服务端广播,客户端不主动发 |
+| PlayerLeave | both | meta | true | 客户端主动退出房间时发 C2S,服务端移除实体后广播 S2C;断连时服务端也会广播 |
 | PlayerMove | C2S | input | true | 客户端发请求,服务端 apply_move_dir 记住方向 + tick_movement 推进后转发 |
 | PlayerFacing | C2S | input | true | 客户端发朝向请求,服务端 apply_facing 后转发。和 PlayerMove 平行 |
 | AiStateChanged | S2C | event | false | 服务端广播敌人 AI 状态切换(EnemyAIMachine.change_state 真正切换时,由 GameServer 钩子广播)。客户端只改镜像 ai_state,渲染层切视锥形态 |
