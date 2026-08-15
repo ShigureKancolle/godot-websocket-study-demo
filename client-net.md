@@ -45,10 +45,10 @@ _init_websocket():
   - STATE_CLOSED: 打印关闭信息
 - `_dispatch_packet(packet)` — `MessageBus.instance().dispatch(packet)`
 
-### PlayerJoin 不再由 WebSocket 层自动发
-PlayerJoin 改为**用户在主界面登录后点击进游戏时发**(见 client-ui.md 的 MainUI 章节),WebSocket 层只负责连接。发 PlayerJoin 时带上登录账号的真实名字 + 账号 id:
+### Login 由 WebSocket 层自动发，EnterRoom 由用户点击进游戏时发
+WebSocket 连上后 WebScoketMgr 会自动发 `game.Login` 建立会话/进入大厅。`EnterRoom` 改为**用户在主界面登录后点击进游戏时发**(见 client-ui.md 的 MainUI 章节)。发 EnterRoom 时带上登录账号的真实名字 + 账号 id:
 ```gdscript
-MessageBus.instance().send("game.PlayerJoin", {
+MessageBus.instance().send("game.EnterRoom", {
     "entity_info": {
         "player_name": acc.get("name", ""),
         "account_id": acc.get("id", ""),  # 本地存档生成的账号ID,服务端优先用它作 player_id
@@ -72,8 +72,8 @@ MessageBus.instance().send("game.PlayerJoin", {
 - `onproto(protoname, handler)` — 注册 handler,register() 之前调用会暂存到 `_pending_handlers`,register() 后自动绑定
 
 ### _local_entity_id 的提取
-MessageBus 在 `_init` 里自己注册了 `game.PlayerJoin` 的 handler `_on_player_join`,从消息里提取 entity_id:
-- 字段从 `entity_info.entity_id` 取(统一 Entity 模型后,PlayerJoin 消息体是 EntityInfo 而非 PlayerInfo)
+MessageBus 在 `_init` 里自己注册了 `game.EnterRoom` 的 handler `_on_enter_room`,从消息里提取 entity_id:
+- 字段从 `entity_info.entity_id` 取(统一 Entity 模型后,EnterRoom 消息体是 EntityInfo 而非 PlayerInfo)
 - 提取后写入 `ClientStateMirror._local_entity_id`(渲染层用它区分本地/远程玩家)
 - `MessageBus._player_id` 仍保留作为兼容别名(部分老代码引用),推荐用 `ClientStateMirror.local_entity_id()`
 

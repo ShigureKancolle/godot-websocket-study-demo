@@ -104,8 +104,8 @@ d:\work2\godot_demo\
 - **状态收口**:服务端 GameRoom 是唯一能改状态的地方;客户端 ClientStateMirror 只能镜像不能算
 
 ### 消息流向
-- C2S: PlayerJoin(带 player_name + account_id,服务端优先用 account_id 作 player_id), PlayerMove, ChatMessage, Heartbeat
-- S2C: PlayerLeave, GameState, AiStateChanged(敌人 AI 状态切换即广播,客户端切视锥形态), (PlayerJoin/PlayerMove/ChatMessage/Heartbeat 的广播回传)
+- C2S: Login(连接后进入大厅), EnterRoom(进入游戏房间), PlayerMove, ChatMessage, Heartbeat
+- S2C: LeaveRoom, GameState, AiStateChanged(敌人 AI 状态切换即广播,客户端切视锥形态), (EnterRoom/PlayerMove/ChatMessage/Heartbeat 的广播回传)
 - 方向校验:双端都加载 messages.json 契约,服务端校验入站方向,客户端校验出站方向
 
 ## 关键设计决策

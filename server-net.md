@@ -34,26 +34,27 @@
 ## web_server.py
 
 ### GameServer 类
-- `players: Dict[entity_id, websocket]` — 传输层连接表(谁连着,entity_id 带 `player:` 前缀)
+- `sessions: Dict[entity_id, dict]` — 所有已 Login 的客户端会话(大厅 + 房间内)
+- `players: Dict[entity_id, websocket]` — 房间内玩家连接表(谁在房间里,entity_id 带 `player:` 前缀)
 - `room: GameRoom` — 游戏状态持有者(唯一能改状态的地方,详见 server-game.md)
 - `timer_mgr: TimerManager` — 攻击定时器管理器(详见 server-game.md 的 timer_mgr 章节)
 - `_pending_inputs: Dict[entity_id, Dict[action, data]]` — tick 待处理输入(move/facing/attackstart 高频输入先存这里)
 - `_send_queue: asyncio.Queue` — 发送队列(逻辑层塞消息,传输层独立协程发,见下方"发送队列"章节)
 - `TICK_HZ = 30` / `TICK_INTERVAL = 0.033s` — tick 频率常量
-- `handle_client(websocket)` — 处理单个连接:先收首条消息(必须是 PlayerJoin)并从中取客户端本地账号 id(`entity_info.account_id`,带 `player:` 前缀则优先用作 player_id,跨会话稳定识别同一账号)→ 无账号 id 才回退随机 `player:uuid` → 构造 ctx → 进主循环分发消息
+- `handle_client(websocket)` — 处理单个连接:先收首条消息(必须是 Login)并从中取客户端本地账号 id(`account_id`,带 `player:` 前缀则优先用作 player_id,跨会话稳定识别同一账号)→ 无账号 id 才回退随机 `player:uuid` → 构造 ctx → 进主循环分发消息
 - `_loop: asyncio.AbstractEventLoop | None` — 事件循环引用(start 时 get_running_loop 填充)。GM 控制台在独立线程调 room.create_enemy,实体创建回调 `_on_entity_spawned` 用它把广播投递回事件循环线程
 - `TICK_INTERVAL_MS = 33` — tick 周期(整数毫秒,约 30.3Hz,只用于控频 sleep);`MAX_TICK_DT = 0.1` — 实测 dt 钳制上限(秒)
-- `handle_client(websocket)` — 处理单个连接:分配 `player:uuid` 作为 entity_id → 等首条消息(必须是 PlayerJoin)→ 进主循环分发消息
+- `handle_client(websocket)` — 处理单个连接:分配 `player:uuid` 作为 entity_id → 等首条消息(必须是 Login)→ 进主循环分发消息
 - `broadcast(protoname, params, exclude_player=None)` — 真正的广播(遍历玩家 await ws.send)。**只被 _sender_loop 调用**,业务代码不直接调
 - `_queue_broadcast(protoname, params)` — 塞队列(不阻塞)。**业务代码(tick/timer 回调/cleanup)用这个替代 await broadcast**
 - `_on_entity_spawned(entity_info)` — 实体创建钩子(注册给 GameRoom 的 `entity_spawn_hook`,由 `room.create_enemy` 回调)。GM 控制台在独立线程调 create_enemy,本方法会从该线程进入,所以用 `loop.call_soon_threadsafe` 投递回事件循环线程执行真正广播(start 前 loop 未建立时直接同步广播,此时无并发安全)
-- `_broadcast_entity_spawn(entity_info)` — 在事件循环线程内执行:先 `_queue_broadcast("StatsInit", ...)` 再 `_queue_broadcast("GameState", ...)`(全量快照)。**先 StatsInit 再 GameState**:客户端 _create_role 创建 Role 时会查 mirror.get_combat() 初始化血条,先发 StatsInit 让新敌人战斗属性先进 _combats,再发 GameState 触发 state_replaced 重建 Role,创建时就能取到 combat、血条当前值正确。用全量快照而非复用 PlayerJoin:PlayerJoin 语义是玩家加入,复用会把客户端 _local_entity_id 覆盖成敌人 id,破坏本地玩家识别
+- `_broadcast_entity_spawn(entity_info)` — 在事件循环线程内执行:先 `_queue_broadcast("StatsInit", ...)` 再 `_queue_broadcast("GameState", ...)`(全量快照)。**先 StatsInit 再 GameState**:客户端 _create_role 创建 Role 时会查 mirror.get_combat() 初始化血条,先发 StatsInit 让新敌人战斗属性先进 _combats,再发 GameState 触发 state_replaced 重建 Role,创建时就能取到 combat、血条当前值正确。用全量快照而非复用 EnterRoom:EnterRoom 语义是进入房间,复用会把客户端 _local_entity_id 覆盖成敌人 id,破坏本地玩家识别
 - `_sender_loop()` — 独立协程,从 _send_queue 取消息调 broadcast 发出。和 _tick_loop 并行
 - `add_pending_input(entity_id, action, data)` — 存入 pending,等 tick 处理(同一 tick 内同动作覆盖=节流)
 - `_tick_loop()` — asyncio task,启动 _sender_loop + 每 TICK_INTERVAL_MS 毫秒调 _process_tick(dt),退出时 cancel sender。**dt 用 time.monotonic() 实测两次 tick 的真实间隔(钳制到 [0, MAX_TICK_DT])**——sleep 实际唤醒间隔受系统定时粒度影响(Windows 默认 15.6ms 粒度下 33ms 请求约 47ms 才醒),用固定值当 dt 积分会让服务端移速系统性偏慢,客户端预测对账累积超阈值 → 周期性回拉(拉扯根因)
 - `_process_tick(dt)` — 取出 pending → apply_move_dir(只记方向)/apply_facing/room.trigger_attack(attackstart) → 木桩回血 → 敌人 AI tick(dt) → **tick_movement(dt) 持续推进所有 moving=True 实体位移** → 收集广播 → _queue_broadcast 塞队列
 - `_trigger_attack(attacker_id, atk_id)` — 完整攻击发动流程(注册给 GameRoom 作为 `attack_trigger` 钩子,由 `room.trigger_attack` 转调)。apply_attack_start 改状态 → 广播 AttackStart → 遍历 shape_list 注册 AttackTimer(hit_cb/end_cb)。**玩家(经 pending)和敌人(AI 直接调)走同一条路**,避免敌人 AI 直接调 apply_attack_start 导致"只改状态不发动"
-- `cleanup_player(player_id)` — 断连清理:删连接表 + timer_mgr.cancel + room.remove_entity + _queue_broadcast(PlayerLeave)
+- `cleanup_player(player_id)` — 断连清理:删会话/连接表 + timer_mgr.cancel + room.remove_entity + _queue_broadcast(LeaveRoom)
 - `start()` — _enable_high_timer_resolution(win32 提频) + 记录 self._loop(asyncio.get_running_loop,供实体创建回调线程安全投递) + create_task(_tick_loop) + websockets.serve 启动
 - `stop()` — 取消 tick_task(tick 的 finally 会连带 cancel sender_task) + _restore_timer_resolution(对称恢复)
 - `_enable_high_timer_resolution()` / `_restore_timer_resolution()` — **Windows 定时器提频**:ctypes 调 winmm.timeBeginPeriod(1) 把系统定时粒度从 15.6ms 提到 1ms,asyncio.sleep 精度接近 1ms,tick 真正跑在 33ms 周期(否则 Windows 下实际约 47ms)。pending 输入排队延迟和 tick 间隔抖动随之减小。仅 win32 生效,失败静默降级(实测 dt 已保证移速正确,提频是"又快又稳"的补充);stop 时对称 timeEndPeriod
