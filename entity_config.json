@@ -28,7 +28,8 @@
         "combat_stats": {
             "max_hp": 100,
             "attack_power": 20,
-            "defense": 5
+            "defense": 5,
+            "look_around_fact_speed": 0
         }
     },
 
@@ -51,7 +52,8 @@
         "combat_stats": {
             "max_hp": 9999,
             "attack_power": 0,
-            "defense": 0
+            "defense": 0,
+            "look_around_fact_speed": 0
         }
     },
 
@@ -74,7 +76,8 @@
         "combat_stats": {
             "max_hp": 50,
             "attack_power": 10,
-            "defense": 2
+            "defense": 2,
+            "look_around_fact_speed": 0.5
         }
     },
 
@@ -97,7 +100,8 @@
         "combat_stats": {
             "max_hp": 50,
             "attack_power": 10,
-            "defense": 2
+            "defense": 2,
+            "look_around_fact_speed": 1
         }
     }
 }
