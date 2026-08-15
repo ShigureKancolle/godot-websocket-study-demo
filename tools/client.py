@@ -44,17 +44,20 @@ class GameClient:
         print(f"已连接到服务器: {self.uri}")
 
     async def send_join(self):
-        """发送玩家加入消息（只需传字典，不用碰 protobuf）"""
-        await bus.send("PlayerJoin", {
-            "player_info": {
+        """先登录建立会话，再进入游戏房间（只需传字典，不用碰 protobuf）"""
+        await bus.send("Login", {
+            "account_id": f"player:tool-{self.player_name}",
+            "player_name": self.player_name,
+        })
+        await bus.send("EnterRoom", {
+            "entity_info": {
                 "player_name": self.player_name,
-                "level": 1,
-                "score": 0,
+                "account_id": f"player:tool-{self.player_name}",
                 "x": 0.0,
                 "y": 0.0
             }
         })
-        print(f"发送加入消息，玩家名称: {self.player_name}")
+        print(f"发送登录+进房消息，玩家名称: {self.player_name}")
 
     async def receive_loop(self):
         """持续接收服务器消息，全部交给 bus 分发"""
@@ -114,25 +117,25 @@ class GameClient:
 # 使用 @bus.onproto 装饰器注册，函数参数是字典，完全屏蔽 protobuf
 # 客户端的 handler 只接收一个参数（data 字典），不需要 ctx
 
-@bus.onproto("PlayerJoin")
-async def on_player_join(data: dict):
-    """处理玩家加入消息"""
-    player_info = data.get("player_info", {})
-    name = player_info.get("player_name", "未知")
-    pid = player_info.get("player_id", "")
-    print(f"[系统] 玩家 {name} (ID: {pid}) 加入游戏")
+@bus.onproto("EnterRoom")
+async def on_enter_room(data: dict):
+    """处理玩家进入房间消息"""
+    entity_info = data.get("entity_info", {})
+    name = entity_info.get("player_name", "未知")
+    pid = entity_info.get("entity_id", "")
+    print(f"[系统] 玩家 {name} (ID: {pid}) 进入房间")
 
-    # 服务器会把自己分配的 player_id 回传，保存下来
+    # 服务器会把自己分配的 entity_id 回传，保存下来
     global client
     if client.player_id is None:
         client.player_id = pid
         print(f"[系统] 你的玩家ID是: {pid}")
 
 
-@bus.onproto("PlayerLeave")
-async def on_player_leave(data: dict):
-    """处理玩家离开消息"""
-    print(f"[系统] 玩家 {data.get('player_id', '')} 离开游戏")
+@bus.onproto("LeaveRoom")
+async def on_leave_room(data: dict):
+    """处理玩家离开房间消息"""
+    print(f"[系统] 玩家 {data.get('entity_id', '')} 离开房间")
 
 
 @bus.onproto("PlayerMove")

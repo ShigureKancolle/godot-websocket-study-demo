@@ -38,6 +38,17 @@ def register(server) -> None:
     """
     bus = server.bus
 
+
+    @bus.onproto("Login")
+    async def on_login(data: dict, ctx):
+        """处理客户端登录/进入大厅——建立会话，不创建游戏实体"""
+        server.sessions[ctx.player_id] = {
+            "websocket": ctx.websocket,
+            "player_name": data.get("player_name", "未命名"),
+            "account_id": ctx.player_id,
+        }
+        logger.info(f"客户端登录: {data.get('player_name', '未命名')} (ID: {ctx.player_id})")
+
     @bus.onproto("Ping")
     async def on_ping(data: dict, ctx):
         """处理 Ping 延迟探测——把 t 原样填进 Pong,单播回给请求者本人"""

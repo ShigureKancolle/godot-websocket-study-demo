@@ -34,11 +34,11 @@ def register(server) -> None:
     @bus.onproto("ChatMessage")
     async def on_chat_message(data: dict, ctx):
         """处理聊天消息——事件型,不改游戏状态,不走 tick"""
-        info = server.room.get_player(ctx.player_id)
-        if info is None:
+        session = server.sessions.get(ctx.player_id)
+        if session is None:
             return
 
-        player_name = info.get("player_name", "未知")
+        player_name = session.get("player_name", "未知")
         chat_data = {
             "player_id": ctx.player_id,
             "player_name": player_name,
@@ -47,8 +47,8 @@ def register(server) -> None:
         }
         logger.info(f"玩家 {player_name} 发送消息: {data.get('content')}")
 
-        # 广播聊天消息给所有玩家(包括发送者,让发送者也能看到自己发的消息回显)
-        await server.broadcast("ChatMessage", chat_data)
+        # 广播聊天消息给所有已登录客户端(包括发送者,让发送者也能看到自己发的消息回显)
+        await server.broadcast_to_clients("ChatMessage", chat_data)
 
     @bus.onproto("Heartbeat")
     async def on_heartbeat(data: dict, ctx):

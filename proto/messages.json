@@ -24,22 +24,28 @@
             "当前：客户端 proto 是独立目录，需手动复制本文件到 client/Script/proto/messages.json",
             "漂移风险后续可用「编译 proto 时自动同步 json」脚本消除，当前靠纪律保证"
         ],
-        "naming": "消息名用短名（不含 package 前缀），当前只有一个 package game。未来多 package 时改用 game.PlayerJoin 全名"
+        "naming": "消息名用短名（不含 package 前缀），当前只有一个 package game。未来多 package 时改用 game.EnterRoom 全名"
     },
 
     "messages": {
-        "PlayerJoin": {
+        "Login": {
+            "direction": "C2S",
+            "category": "meta",
+            "state_affecting": false,
+            "comment": "客户端连接后立即发送，建立服务器会话并进入大厅。携带 account_id / player_name，服务端用它确定 player_id，但不创建游戏实体。"
+        },
+        "EnterRoom": {
             "direction": "C2S",
             "category": "meta",
             "state_affecting": true,
-            "comment": "客户端连接后发送，请求加入游戏。entity_info.player_name 是玩家输入的名字；entity_info.account_id 是客户端本地存档生成的账号ID(跨会话稳定)，服务端优先用它作为 player_id(web_server.handle_client 取)，没有则回退随机 uuid。服务端处理后广播 PlayerJoin 给其他人，并回 GameState 给新玩家。严格说方向是 C2S+广播，这里标 C2S 指「原始触发方向——由客户端发起」"
+            "comment": "客户端点击开始游戏时发送，进入游戏房间。entity_info.player_name 是玩家输入的名字；entity_info.account_id 是客户端本地存档生成的账号ID(跨会话稳定)，服务端优先用它作为 player_id，没有则回退随机 uuid。服务端处理后广播 EnterRoom 给其他房间内玩家，并回 GameState 给新玩家。严格说方向是 C2S+广播，这里标 C2S 指「原始触发方向——由客户端发起」"
         },
-        "PlayerLeave": {
+        "LeaveRoom": {
             "direction": "S2C",
             "direction": "both",
             "category": "meta",
             "state_affecting": true,
-            "comment": "双向：客户端主动退出房间时发 C2S PlayerLeave，服务端移除实体后广播 PlayerLeave 给其他玩家；断连时服务端也会广播 PlayerLeave。返回大厅后连接仍保留，可再次 PlayerJoin 进房"
+            "comment": "双向：客户端主动退出房间时发 C2S LeaveRoom，服务端移除实体后广播 LeaveRoom 给其他房间内玩家；断连时服务端也会广播 LeaveRoom。返回大厅后连接仍保留，可再次 EnterRoom 进房，且仍可在大厅聊天"
         },
         "PlayerMove": {
             "direction": "C2S",
@@ -123,7 +129,7 @@
             "direction": "S2C",
             "category": "meta",
             "state_affecting": true,
-            "comment": "实体移除(DeadTimer 到期后服务端调 remove_entity + 广播)。字段:entity_id。客户端收到后 queue_free 对应 Role 节点。和 PlayerLeave 的区别:PlayerLeave 是断连(实体直接消失),EntityRemove 是死亡(播完死亡动画后才移除)。木桩不会触发(不会死),玩家不会触发(can_die=False)"
+            "comment": "实体移除(DeadTimer 到期后服务端调 remove_entity + 广播)。字段:entity_id。客户端收到后 queue_free 对应 Role 节点。和 LeaveRoom 的区别:LeaveRoom 是断连(实体直接消失),EntityRemove 是死亡(播完死亡动画后才移除)。木桩不会触发(不会死),玩家不会触发(can_die=False)"
         },
         "Ping": {
             "direction": "C2S",

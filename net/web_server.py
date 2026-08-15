@@ -81,6 +81,13 @@ class GameServer:
         # 与游戏状态（玩家坐标/等级）分开存放，因为它们的变更时机不同：
         #   - 连接在 handle_client 开始/结束时变更
         #   - 游戏状态在收到 PlayerMove 等消息时变更
+        # 会话表：所有已 Login 的客户端（大厅 + 房间内）
+        # 拆出 Login 后，连接一建立就进 sessions，但不一定进 players。
+        # 大厅聊天/后续大厅功能都通过 sessions 找连接和玩家信息。
+        self.sessions: Dict[str, dict] = {}
+
+        # 房间内玩家连接表：player_id -> websocket
+        # 只有点击“开始游戏”进入房间后才加入，用于游戏状态广播。
         self.players: Dict[str, websockets.WebSocketServerProtocol] = {}
 
         # 游戏状态持有者：所有玩家信息（坐标、等级、分数）都由它管理。
@@ -158,26 +165,27 @@ class GameServer:
         注意：websockets 13.0+ 版本不再传 path 参数，如需路径可从 websocket.request.path 获取
         """
         async with websocket:
-            # 先收客户端第一条消息(应该是 PlayerJoin),从中取客户端本地账号 id(account_id)
-            # 顺序调整原因:账号 id 是随 PlayerJoin 传来的,服务端要先用它确定 player_id,
+            # 先收客户端第一条消息(应该是 Login),从中取客户端本地账号 id(account_id)
+            # 顺序调整原因:账号 id 是随 Login 传来的,服务端要先用它确定 player_id,
             # 再构造 ctx / 存连接 / 分发——所以 recv 提前到 player_id 分配之前。
             try:
                 first_message = await websocket.recv()
 
-                # 注意:第一条消息需要特殊处理,先解析判断是否是 PlayerJoin
+                # 注意:第一条消息需要特殊处理,先解析判断是否是 Login
                 game_msg = game_pb2.GameMessage()
                 game_msg.ParseFromString(first_message)
 
-                if not game_msg.HasField('player_join'):
-                    logger.warning("第一条消息不是加入消息，断开连接")
+                if not game_msg.HasField('login'):
+                    logger.warning("第一条消息不是 Login，断开连接")
                     return
             except websockets.exceptions.ConnectionClosed:
-                logger.info("客户端在发送加入消息前断开连接")
+                logger.info("客户端在发送 Login 前断开连接")
                 return
 
             # 优先用客户端本地账号 id 作为 player_id(跨会话/跨重启稳定识别同一账号)
             # 老客户端/测试工具不带 account_id(proto3 未设置返回 "")，回退随机 uuid
-            account_id = game_msg.player_join.entity_info.account_id
+            account_id = game_msg.login.account_id
+            player_name = game_msg.login.player_name or "未命名"
             if account_id.startswith("player:"):
                 player_id = account_id
                 logger.info(f"新客户端连接，使用账号ID作为玩家ID: {player_id}")
@@ -190,10 +198,14 @@ class GameServer:
             ctx = message_bus.MessageContext(websocket=websocket, player_id=player_id, is_server=True)
 
             try:
-                # 保存连接信息（在 handler 之前，因为 handler 里要用）
-                self.players[player_id] = websocket
+                # 保存会话信息（在 handler 之前，因为 handler 里要用）
+                self.sessions[player_id] = {
+                    "websocket": websocket,
+                    "player_name": player_name,
+                    "account_id": account_id,
+                }
 
-                # 分发第一条消息（触发 on_player_join）
+                # 分发第一条消息（触发 on_login）
                 await self.bus.dispatch(first_message, ctx)
 
                 # 进入主循环，持续处理消息
@@ -244,6 +256,26 @@ class GameServer:
 
         for pid in disconnected:
             await self.cleanup_player(pid)
+
+    async def broadcast_to_clients(self, protoname: str, protoprama: dict, exclude_player: Optional[str] = None):
+        """广播消息给所有已 Login 的客户端（大厅 + 房间内）
+
+        聊天等大厅级消息用这个，游戏状态广播仍用 broadcast() 只发给房间内玩家。
+        """
+        disconnected = set()
+        for pid, session in self.sessions.items():
+            if exclude_player and pid == exclude_player:
+                continue
+            ws = session["websocket"]
+            try:
+                await self.bus.send(protoname, protoprama, websocket=ws)
+            except Exception as e:
+                logger.error(f"向客户端 {pid} 发送消息失败: {e}")
+                disconnected.add(pid)
+
+        for pid in disconnected:
+            await self.cleanup_player(pid)
+
 
     # ------------------------------------------------------------------
     # 发送队列:逻辑层与传输层解耦
@@ -302,7 +334,7 @@ class GameServer:
         广播新实体出现(在事件循环线程内执行)
 
         为什么广播 GameState + StatsInit 全量快照而非单条增量:
-            当前契约里没有通用的"EntitySpawn"消息(PlayerJoin 语义是玩家加入,复用会
+            当前契约里没有通用的"EntitySpawn"消息(EnterRoom 语义是进入房间,复用会
             把客户端 _local_entity_id 覆盖成敌人 id,破坏本地玩家识别),因此用已有的
             全量快照消息把新实体带到所有客户端。全量快照代价是渲染层重建所有 Role,
             对 GM 调试场景可接受;换来自洽性(实体和战斗属性都一次对齐)。
@@ -364,7 +396,7 @@ class GameServer:
     #
     # 哪些消息走 tick:
     #   - PlayerMove / PlayerFacing(高频输入)→ 走 tick
-    #   - PlayerJoin / PlayerLeave / ChatMessage(低频事件)→ 不走 tick,立即处理
+    #   - EnterRoom / LeaveRoom / ChatMessage(低频事件)→ 不走 tick,立即处理
     #     理由:加入/离开/聊天是即时事件,不该等 tick 增加延迟
 
     def add_pending_input(self, player_id: str, action: str, data: dict) -> None:
@@ -711,14 +743,16 @@ class GameServer:
         玩家断开连接时清理资源
 
         清理三步,对应三份状态:
-            1. 传输层状态(self.players 连接表):删 websocket 引用
+            1. 会话/传输层状态(self.sessions / self.players):删引用
             2. 攻击定时器(self.timer_mgr):取消该玩家所有未完成的攻击定时器
             3. 游戏状态(self.room):调 remove_entity
         三份状态必须同步清理,否则会出现:
             - 连接已断但状态还在 → 幽灵玩家
             - 定时器没取消 → 回调对已删除实体 apply_attack_end/broadcast 报错
         """
-        # 1. 传输层:删除连接引用
+        # 1. 会话/传输层:删除连接引用
+        if player_id in self.sessions:
+            del self.sessions[player_id]
         if player_id in self.players:
             del self.players[player_id]
 
@@ -736,11 +770,11 @@ class GameServer:
             player_name = removed.player_name or "未知"
             logger.info(f"玩家 {player_name} (ID: {player_id}) 离开游戏")
 
-            # 广播玩家离开消息给其他人
-            # 注意:这里广播的是"事件"(PlayerLeave),不是"快照"(GameState)。
+            # 广播玩家离开房间消息给其他房间内玩家
+            # 注意:这里广播的是"事件"(LeaveRoom),不是"快照"(GameState)。
             # 客户端收到后从本地镜像里删掉该实体。这是当前混合模型的体现。
             # 走发送队列,和 tick 广播一致(避免 cleanup_player 被一条慢消息阻塞)
-            self._queue_broadcast("PlayerLeave", {"entity_id": player_id})
+            self._queue_broadcast("LeaveRoom", {"entity_id": player_id})
 
     # ------------------------------------------------------------------
     # Windows 定时器提频
@@ -810,7 +844,7 @@ class GameServer:
 
 # handler 注册已移到 server/game/handlers/ 下:
 #   - game/handlers/__init__.py: register_all(server) 统一入口
-#   - game/handlers/player_handlers.py: PlayerJoin/PlayerMove/PlayerFacing
+#   - game/handlers/player_handlers.py: EnterRoom/PlayerMove/PlayerFacing/LeaveRoom
 #   - game/handlers/chat_handlers.py: ChatMessage/Heartbeat
 # main.py 调 handlers.register_all(server) 完成注册
 # 这样网络层(web_server.py)和业务逻辑层(handlers/)职责分离

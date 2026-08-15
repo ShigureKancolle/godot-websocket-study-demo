@@ -2,7 +2,7 @@
 
 """
 文件: server/game/handlers/player_handlers.py
-作用: 玩家相关消息处理器(PlayerJoin/PlayerMove/PlayerFacing/PlayerLeave/AttackStart)
+作用: 玩家相关消息处理器(EnterRoom/PlayerMove/PlayerFacing/LeaveRoom/AttackStart)
 
 ============================================================================
  架构位置
@@ -28,8 +28,8 @@ PlayerMove / PlayerFacing / AttackStart(高频输入):存 pending,等 tick 统�
     - 客户端 60Hz 发 → 服务端 30Hz 处理
     - handler 不调 apply_move_dir/apply_facing/apply_attack_start,也不调 broadcast
 
-PlayerJoin / PlayerLeave(低频事件):立即处理,不走 tick。
-    - 加入/离开是即时事件,不该等 tick 增加延迟
+EnterRoom / LeaveRoom(低频事件):立即处理,不走 tick。
+    - 进房/离房是即时事件,不该等 tick 增加延迟
     - handler 直接调 room.add_entity / remove_entity + broadcast
 
 ============================================================================
@@ -63,9 +63,9 @@ def register(server: "GameServer") -> None:
     """
     bus = server.bus
 
-    @bus.onproto("PlayerJoin")
-    async def on_player_join(data: dict, ctx):
-        """处理玩家加入——低频事件,立即处理,不走 tick"""
+    @bus.onproto("EnterRoom")
+    async def on_enter_room(data: dict, ctx):
+        """处理进入游戏房间——低频事件,立即处理,不走 tick"""
         # 客户端发来的 player_info 字典(只含 player_name 等可选字段)
         player_info = data.get("entity_info", {})
 
@@ -91,12 +91,12 @@ def register(server: "GameServer") -> None:
 
         logger.info(f"玩家 {stored.player_name} (ID: {ctx.player_id}) 加入游戏")
 
-        # 广播 PlayerJoin 给所有人(含新玩家自己)
-        # 为什么不 exclude 新玩家: 新玩家需要从 PlayerJoin 里提取自己被分配的 entity_id
-        #   (见客户端 StateMirror._on_player_join 和 MessageBus._on_player_join)。
-        # 和 PlayerMove 的对比: PlayerMove 是「转发」,PlayerJoin 是「通知」——两者语义不同。
+        # 广播 EnterRoom 给房间内所有人(含新玩家自己)
+        # 为什么不 exclude 新玩家: 新玩家需要从 EnterRoom 里提取自己被分配的 entity_id
+        #   (见客户端 StateMirror._on_enter_room 和 MessageBus._on_enter_room)。
+        # 和 PlayerMove 的对比: PlayerMove 是「转发」,EnterRoom 是「通知」——两者语义不同。
         # dataclass 转 dict 给 message_bus(用 asdict 一把梭,EntityInfo 全是扁平字段)
-        await server.broadcast("PlayerJoin", {
+        await server.broadcast("EnterRoom", {
             "entity_info": dataclasses.asdict(stored)
         })
 
@@ -179,17 +179,17 @@ def register(server: "GameServer") -> None:
             "facing": data.get("facing", 0.0),
         })
 
-    # PlayerLeave 现在支持客户端主动退出房间(返回大厅时发),同时仍保留断连清理广播
-    # 主动退出与断连清理共用同一条 PlayerLeave 消息广播
-    # (cleanup_player 仍在 web_server.py 里负责断连场景的 PlayerLeave 广播)
+    # LeaveRoom 现在支持客户端主动退出房间(返回大厅时发),同时仍保留断连清理广播
+    # 主动退出与断连清理共用同一条 LeaveRoom 消息广播
+    # (cleanup_player 仍在 web_server.py 里负责断连场景的 LeaveRoom 广播)
 
-    @bus.onproto("PlayerLeave")
-    async def on_player_leave(data: dict, ctx):
-        """处理玩家主动退出房间——低频事件,立即处理
+    @bus.onproto("LeaveRoom")
+    async def on_leave_room(data: dict, ctx):
+        """处理玩家主动离开房间——低频事件,立即处理
 
-        与 cleanup_player 的区别:cleanup_player 是断连清理(删除连接表 + 房间实体);
-        这里只把玩家从房间里移除,并从广播连接表移除;WebSocket 连接仍保留,回到大厅后不再收游戏广播,
-        再次 PlayerJoin 进房时 on_player_join 会重新加入 players 表。
+        与 cleanup_player 的区别:cleanup_player 是断连清理(删除会话 + 房间实体);
+        这里只把玩家从房间里移除,并从房间广播表移除;WebSocket 连接仍保留,回到大厅后仍可聊天,
+        再次 EnterRoom 进房时 on_enter_room 会重新加入 players 表。
         """
         player_id = ctx.player_id
         if not server.room.has_entity(player_id):
@@ -203,12 +203,12 @@ def register(server: "GameServer") -> None:
         # 从房间里移除实体,同时清理 AI 仇恨/击退等关联状态
         removed = server.room.remove_entity(player_id)
 
-        # 从广播连接表移除:回大厅后不再收游戏内广播;再次 PlayerJoin 时 on_player_join 会重新加入
+        # 从房间广播表移除:回大厅后不再收游戏内广播;再次 EnterRoom 时 on_enter_room 会重新加入
         server.players.pop(player_id, None)
 
         if removed is not None:
-            # 广播 PlayerLeave 给仍在房间的其他玩家(离开者已不在 players 表)
-            await server.broadcast("PlayerLeave", {"entity_id": player_id})
+            # 广播 LeaveRoom 给仍在房间的其他玩家(离开者已不在 players 表)
+            await server.broadcast("LeaveRoom", {"entity_id": player_id})
 
 
     @bus.onproto("AttackStart")
