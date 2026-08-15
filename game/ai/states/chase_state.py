@@ -153,4 +153,4 @@ class ChaseState(ai_state_base.AIStateBase):
 
         my_pos = (my_entity.x, my_entity.y)
         target_pos = (target_entity.x, target_entity.y)
-        return ai_state_helper.find_path(room, my_pos, target_pos)
+        return ai_state_helper.find_path(room, my_pos, target_pos, chase_vision.radius)

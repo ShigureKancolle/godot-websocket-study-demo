@@ -35,6 +35,7 @@ import net.message_contract as message_contract
 import game.game_room as game_room
 import game.timer_mgr as timer_mgr
 import config.config_loader as config_loader
+import game.helper.ai_state_helper as ai_state_helper
 # game_pb2 是生成代码，由 message_bus 内部加入 sys.path，这里直接 import
 import game_pb2
 
@@ -614,6 +615,12 @@ class GameServer:
                         result = self.room.apply_hurt(hurt_id, atk_id, _shape_idx, damage, attacker_id)
                         if result == game_room.HurtResult.HURT:
                             # 没死:启 hurt timer(硬直)
+                            # # 转向攻击者
+                            # attacker_entity = self.room.get_entity(attacker_id)
+                            # hurt_entity = self.room.get_entity(hurt_id)
+                            # dir_x, dir_y = hurt_entity.x - attacker_entity.x, hurt_entity.y - attacker_entity.y
+                            # facing = ai_state_helper.get_facing_by_vector2((dir_x, dir_y))
+                            # self.room.apply_facing(hurt_id, facing)
                             self.timer_mgr.start_hurt(hurt_id, _hurt_duration, self.get_hurt_end_callback(hurt_id, attacker_id, atk_id, _hurt_duration))
                             # 连段最后一段命中:应用击退(硬直期间被匀速推出)
                             # 死亡(DEAD)不击退——尸体不该滑走

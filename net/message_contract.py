@@ -179,6 +179,11 @@ class MessageContract:
             return True
 
         direction = contract.get("direction", "")
+        # PlayerLeave 支持客户端主动退出房间(C2S),也支持断连广播(S2C),
+        # 这里显式放行,避免契约方向字段未及时同步时误拦主动退出。
+        if short_name == "PlayerLeave":
+            return True
+
         if direction == DIR_S2C:
             # 严格拒绝：服务端收到了「本应由服务端发出」的消息，一定是客户端逻辑错了
             logger.warning(

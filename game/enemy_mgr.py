@@ -52,9 +52,15 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import game.ai.ai_state_base as ai_state_base
 import game.ai.enemy_ai_machine as enemy_ai_machine
+import config.config_loader as config_loader
 import typing
 if typing.TYPE_CHECKING:
     from game.game_room import GameRoom, EntityInfo
+
+
+# 敌人 AI 激活距离:附近没有玩家(任意方向)在 AI_ACTIVATE_DISTANCE 内时,
+# 敌人不执行 AI 逻辑,避免玩家还没进地图/已离开时敌人自己跑动或攻击。
+AI_ACTIVATE_DISTANCE: float = float(config_loader.get_constant("AI_ACTIVATE_DISTANCE", 1500.0))
 
 
 # @dataclass
@@ -208,6 +214,8 @@ class EnemyMgr:
         # 1. 决策冷却:没到时间就跳过(节省算力,不必每帧重算)
         #
         # 
+        # 预先收集玩家列表,避免每个敌人都遍历一遍全量快照
+        player_entities = [e for e in room.snapshot() if e.entity_type == "player"]
         for entity_id, machine in self._ai_machine.items():
             entity = room.get_entity(entity_id)
             if entity is None:
@@ -218,6 +226,10 @@ class EnemyMgr:
             # apply_xxx 虽会被 _is_input_locked 拒绝,但决策逻辑与日志不该再跑。
             if entity.state == "dead":
                 continue
+            # 附近没有玩家时不跑 AI:顺便停掉 AI 驱动的移动,等玩家靠近后再恢复。
+            if not self._is_player_nearby(entity, player_entities, AI_ACTIVATE_DISTANCE):
+                room.apply_move_dir(entity_id, 0, 0, False, dt)
+                continue
             old_x, old_y = entity.x, entity.y
             old_facing = entity.facing
             machine.update(dt, room)
@@ -226,6 +238,17 @@ class EnemyMgr:
                 continue
             if (old_x, old_y) != (new_entity.x, new_entity.y) or old_facing != new_entity.facing:
                 self._dirty_entities.add(entity_id)
+
+    def _is_player_nearby(self, enemy: "EntityInfo", players: list, distance: float) -> bool:
+        """检查 enemy 附近 distance 像素内是否存在玩家(纯距离判定,不看朝向/视野)"""
+        if not players:
+            return False
+        for player in players:
+            dx = player.x - enemy.x
+            dy = player.y - enemy.y
+            if dx <= distance and dy <= distance:
+                return True
+        return False
 
     def clear(self) -> None:
         """清空所有敌人 AI 状态(房间重置/销毁时用)"""

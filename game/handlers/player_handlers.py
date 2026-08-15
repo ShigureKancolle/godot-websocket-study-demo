@@ -86,6 +86,8 @@ def register(server: "GameServer") -> None:
 
         # add_entity 内部会强制覆盖 entity_id 为 ctx.player_id(不变式)
         stored = server.room.add_entity(ctx.player_id, entity_info)
+        # 显式退出房间后连接仍保留;重新进入时覆盖连接表,确保广播不会漏掉这个客户端。
+        server.players[ctx.player_id] = ctx.websocket
 
         logger.info(f"玩家 {stored.player_name} (ID: {ctx.player_id}) 加入游戏")
 
@@ -177,9 +179,37 @@ def register(server: "GameServer") -> None:
             "facing": data.get("facing", 0.0),
         })
 
-    # 注意: PlayerLeave 不是客户端主动发的,是 cleanup_player 触发的广播
-    # 所以这里不注册 PlayerLeave handler
-    # (cleanup_player 在 web_server.py 里直接调 broadcast("PlayerLeave", ...))
+    # PlayerLeave 现在支持客户端主动退出房间(返回大厅时发),同时仍保留断连清理广播
+    # 主动退出与断连清理共用同一条 PlayerLeave 消息广播
+    # (cleanup_player 仍在 web_server.py 里负责断连场景的 PlayerLeave 广播)
+
+    @bus.onproto("PlayerLeave")
+    async def on_player_leave(data: dict, ctx):
+        """处理玩家主动退出房间——低频事件,立即处理
+
+        与 cleanup_player 的区别:cleanup_player 是断连清理(删除连接表 + 房间实体);
+        这里只把玩家从房间里移除,并从广播连接表移除;WebSocket 连接仍保留,回到大厅后不再收游戏广播,
+        再次 PlayerJoin 进房时 on_player_join 会重新加入 players 表。
+        """
+        player_id = ctx.player_id
+        if not server.room.has_entity(player_id):
+            # 已经不在房间(重复退出 / 未加入),同时从广播连接表移除,避免残留游戏态
+            server.players.pop(player_id, None)
+            return
+
+        # 取消该玩家的攻击/受击/死亡定时器,避免对已移除实体触发回调
+        server.timer_mgr.cancel(player_id)
+
+        # 从房间里移除实体,同时清理 AI 仇恨/击退等关联状态
+        removed = server.room.remove_entity(player_id)
+
+        # 从广播连接表移除:回大厅后不再收游戏内广播;再次 PlayerJoin 时 on_player_join 会重新加入
+        server.players.pop(player_id, None)
+
+        if removed is not None:
+            # 广播 PlayerLeave 给仍在房间的其他玩家(离开者已不在 players 表)
+            await server.broadcast("PlayerLeave", {"entity_id": player_id})
+
 
     @bus.onproto("AttackStart")
     async def on_attack_start(data: dict, ctx):

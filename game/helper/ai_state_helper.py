@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from game.game_room import GameRoom, EntityInfo
     from game.enemy_mgr import enemy_ai_machine
 
-def find_nearest_entity_in_sight(room: "GameRoom", entity_id: str, entity_type: str = "", vision_mode: str = "normal"):
+def find_nearest_entity_in_sight(room: "GameRoom", entity_id: str, entity_type: str = "", vision_mode: str = "normal", search_radius: float = 500) -> str:
     """
     查找视野(视锥)内最近的目标实体。
 
@@ -37,7 +37,7 @@ def find_nearest_entity_in_sight(room: "GameRoom", entity_id: str, entity_type: 
             continue
 
         # 达不到的路径不算找到了(墙后/被包围的目标即使可见也追不到)
-        move_path = find_path(room, (finder_entity.x, finder_entity.y), (other_entity.x, other_entity.y))
+        move_path = find_path(room, (finder_entity.x, finder_entity.y), (other_entity.x, other_entity.y), search_radius)
         if move_path is None:
             continue
 
@@ -52,7 +52,7 @@ def find_nearest_entity_in_sight(room: "GameRoom", entity_id: str, entity_type: 
     return nearest_entity_id
 
 
-def is_in_sight(finder_entity: "EntityInfo", other_entity: "EntityInfo", vision) -> bool:
+def is_in_sight(finder_entity: "EntityInfo", other_entity: "EntityInfo", vision: config_loader.VisionParams) -> bool:
     """
     判断目标是否在发现者的视锥内(纯几何:距离 + 角度)。
 
@@ -97,7 +97,7 @@ def get_facing_by_vector2(vec: tuple[float, float] | list[float, float], zero: t
     angle = collision.Vector2(*vec).angle(collision.Vector2(*zero))
     return angle % (2 * math.pi)
 
-def find_path(room: "GameRoom", start_pos: tuple[float, float], end_pos: tuple[float, float]) -> Optional[list[tuple[float, float]]]:
+def find_path(room: "GameRoom", start_pos: tuple[float, float], end_pos: tuple[float, float], search_radius: float = 500) -> Optional[list[tuple[float, float]]]:
     """
     A* 寻路:返回从 start_pos 到 end_pos 的像素坐标路径点列表。
 
@@ -114,4 +114,4 @@ def find_path(room: "GameRoom", start_pos: tuple[float, float], end_pos: tuple[f
     if pf is None:
         # 寻路器未注入:降级为直线追击(不绕障,但 AI 不会卡死)
         return [end_pos]
-    return pf.find_path(start_pos, end_pos)
+    return pf.find_path(start_pos, end_pos, search_radius)

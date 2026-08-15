@@ -3,6 +3,7 @@
 
 import math
 import random
+import config.config_loader as config_loader
 import game.ai.ai_state_base as ai_state_base
 import game.game_room as game_room
 import game.helper.ai_state_helper as ai_state_helper
@@ -85,7 +86,8 @@ class PatrolState(ai_state_base.AIStateBase):
 
     def _find_player_in_sight(self, room: game_room.GameRoom):
         """查找最近的玩家"""
-        player_id = ai_state_helper.find_nearest_entity_in_sight(room, self.entity_id, "player")
+        chase_vision = config_loader.get_vision("normal")
+        player_id = ai_state_helper.find_nearest_entity_in_sight(room, self.entity_id, "player", search_radius=chase_vision.radius)
         return player_id
 
     def _get_random_patrol_pos(self):

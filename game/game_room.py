@@ -89,6 +89,7 @@ import typing
 if typing.TYPE_CHECKING:
     import game.enemy_mgr as enemy_mgr
     from config.config_loader import AttackShape
+    from game.pathfinder import Pathfinder
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +269,7 @@ class GameRoom:
         # GameRoom「纯状态层,不依赖外部配置来源」的边界。
         # 敌人 AI(ChaseState)通过 room.get_pathfinder() 取用,避免每次寻路
         # 都重新构造 ChunkGenerator(每次构造 = 重新算 seed 哈希,浪费)。
-        self._pathfinder = None
+        self._pathfinder: "Optional[Pathfinder]" = None
 
         # 穿墙白名单:集合内的 entity_type 在 tick_movement 推进时跳过地形阻挡。
         # 默认空集 = 所有人都受阻挡(符合「玩家+敌人都不穿墙」的常规预期)。
@@ -687,7 +688,7 @@ class GameRoom:
         """
         self._entity_spawn_hook = cb
 
-    def set_pathfinder(self, pf) -> None:
+    def set_pathfinder(self, pf: "Optional[Pathfinder]") -> None:
         """
         注入 A* 寻路器(由 GameServer 在初始化时调用)
 
@@ -696,7 +697,7 @@ class GameRoom:
         """
         self._pathfinder = pf
 
-    def get_pathfinder(self):
+    def get_pathfinder(self) -> "Optional[Pathfinder]":
         """取 A* 寻路器(敌人 AI 寻路用,可能为 None——未注入时降级为直线追击)"""
         return self._pathfinder
 

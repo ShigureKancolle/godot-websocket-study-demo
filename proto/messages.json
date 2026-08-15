@@ -36,9 +36,10 @@
         },
         "PlayerLeave": {
             "direction": "S2C",
+            "direction": "both",
             "category": "meta",
             "state_affecting": true,
-            "comment": "服务端在玩家断连时广播给其他人。客户端不会主动发 PlayerLeave（断连即离开，服务端靠 cleanup_player 检测）"
+            "comment": "双向：客户端主动退出房间时发 C2S PlayerLeave，服务端移除实体后广播 PlayerLeave 给其他玩家；断连时服务端也会广播 PlayerLeave。返回大厅后连接仍保留，可再次 PlayerJoin 进房"
         },
         "PlayerMove": {
             "direction": "C2S",
