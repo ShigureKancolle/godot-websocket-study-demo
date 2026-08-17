@@ -489,6 +489,17 @@ def get_vision(mode: str = "normal") -> VisionParams:
     return _VISION_MAP.get(mode, _VISION_MAP.get("normal", VisionParams()))
 
 
+def is_vision_enabled() -> bool:
+    """
+    敌人视锥功能总开关(shared_config/constants.json 的 VISION_ENABLED)。
+
+    默认 True(配置缺失时按开启处理,保持既有行为)。
+    关闭后:敌人无视视锥角度/半径限制与追击距离上限,追击最近的玩家
+    (AI_ACTIVATE_DISTANCE 激活距离仍生效)。调用方据此跳过 is_in_sight 判定。
+    """
+    return bool(_CONSTANTS.get("VISION_ENABLED", True))
+
+
 # ===========================================================================
 # 地形能力 API(寻路用)
 # ===========================================================================

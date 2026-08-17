@@ -10,7 +10,7 @@ import typing
 if typing.TYPE_CHECKING:
     from game.game_room import EntityInfo
 
-max_chase_distance = 1000.0  # 最大追击距离,超过这个距离就放弃追击
+max_chase_distance = 1000.0  # 最大追击距离,超过这个距离就放弃追击(只在视锥开启 VISION_ENABLED=true 时生效,关闭后无视距离)
 
 
 def _get_circle_radius(entity_type: str) -> float:
@@ -142,15 +142,22 @@ class ChaseState(ai_state_base.AIStateBase):
         if my_entity is None or target_entity is None:
             return None
 
-        # 检查距离 太远了不追了
-        if (target_entity.x - my_entity.x) ** 2 + (target_entity.y - my_entity.y) ** 2 > max_chase_distance ** 2:
-            return None
+        vision_enabled = config_loader.is_vision_enabled()
+        if vision_enabled:
+            # 检查距离 太远了不追了
+            if (target_entity.x - my_entity.x) ** 2 + (target_entity.y - my_entity.y) ** 2 > max_chase_distance ** 2:
+                return None
 
-        # 已经离开非常态(追逐)视野(22.5°/1000px) 也不追了 进入警戒
-        chase_vision = config_loader.get_vision("chase")
-        if not ai_state_helper.is_in_sight(my_entity, target_entity, chase_vision):
-            return None
+            # 已经离开非常态(追逐)视野(22.5°/1000px) 也不追了 进入警戒
+            chase_vision = config_loader.get_vision("chase")
+            if not ai_state_helper.is_in_sight(my_entity, target_entity, chase_vision):
+                return None
+            search_radius = chase_vision.radius
+        else:
+            # 视锥关闭(VISION_ENABLED=false):不因角度/距离放弃追击,
+            # 搜索范围放宽到 AI 激活距离(激活范围内「无论多远」都追)
+            search_radius = config_loader.get_constant("AI_ACTIVATE_DISTANCE", 1500.0)
 
         my_pos = (my_entity.x, my_entity.y)
         target_pos = (target_entity.x, target_entity.y)
-        return ai_state_helper.find_path(room, my_pos, target_pos, chase_vision.radius)
+        return ai_state_helper.find_path(room, my_pos, target_pos, search_radius)

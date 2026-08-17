@@ -15,13 +15,22 @@ def find_nearest_entity_in_sight(room: "GameRoom", entity_id: str, entity_type: 
     视野参数由 vision_mode 决定(常态 normal / 追逐 chase),判定维度:
         距离(视锥半径) + 角度(视锥半角)。
     遮挡判断不在此做(由 find_path 可达性承担:墙后目标即使可见,find_path 返回 None 也会被过滤)。
+
+    视锥关闭时(VISION_ENABLED=false,见 config_loader.is_vision_enabled):
+        跳过角度/半径过滤,搜索范围放宽到 AI_ACTIVATE_DISTANCE(激活距离),
+        即激活距离内「无论多远」都按最近目标算,与 chase 不因距离放弃追击一致。
     """
     finder_entity = room.get_entity(entity_id)
     if not finder_entity:
         return ""
 
-    # 取当前状态的视野参数(常态 30°/750px,追逐 22.5°/1000px)
-    vision = config_loader.get_vision(vision_mode)
+    vision_enabled = config_loader.is_vision_enabled()
+    if vision_enabled:
+        # 取当前状态的视野参数(常态 30°/750px,追逐 22.5°/1000px)
+        vision = config_loader.get_vision(vision_mode)
+    else:
+        # 视锥关闭:搜索半径放宽到 AI 激活距离,保证激活范围内的玩家都能被找到
+        search_radius = config_loader.get_constant("AI_ACTIVATE_DISTANCE", 1500.0)
 
     entities: list[EntityInfo] = room.snapshot()
     nearest_entity_id = ""
@@ -32,8 +41,8 @@ def find_nearest_entity_in_sight(room: "GameRoom", entity_id: str, entity_type: 
         if entity_type and other_entity.entity_type != entity_type:
             continue
 
-        # 视锥判定:距离 + 角度(目标必须在朝向的视锥内)
-        if not is_in_sight(finder_entity, other_entity, vision):
+        # 视锥判定:距离 + 角度(目标必须在朝向的视锥内)。视锥关闭时跳过
+        if vision_enabled and not is_in_sight(finder_entity, other_entity, vision):
             continue
 
         # 达不到的路径不算找到了(墙后/被包围的目标即使可见也追不到)

@@ -63,6 +63,17 @@ def register(server: "GameServer") -> None:
     """
     bus = server.bus
 
+    
+    # @bus.onproto("EnterGame")
+    # async def on_enter_game(data: dict, ctx):
+    #     """
+    #     玩家进入游戏房间准备阶段， 需要选择角色才能进入游戏场景
+    #     """
+
+    #     game_id = data.get("game_id", "")
+    #     player_id = ctx.player_id
+        
+
     @bus.onproto("EnterRoom")
     async def on_enter_room(data: dict, ctx):
         """处理进入游戏房间——低频事件,立即处理,不走 tick"""

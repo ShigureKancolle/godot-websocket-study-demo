@@ -209,11 +209,18 @@ message AiStateChanged {
   string ai_state = 2;       // 新的 AI 状态:patrol/chase/attack/look_around(只有敌人有)
 }
 
+// 进入游戏
+message EnterGame {
+  string player_id = 1;
+  string game_id = 2;
+}
+
 // 通用消息包装器
 message GameMessage {
   oneof message_type {
     Login login = 21;
-      EnterRoom enter_room = 1;       // 进入游戏房间
+    EnterGame enter_game = 22;
+    EnterRoom enter_room = 1;       // 进入游戏房间
     LeaveRoom leave_room = 2;     // 离开游戏房间
     PlayerMove player_move = 3;       // 玩家移动
     ChatMessage chat_message = 4;     // 聊天消息
