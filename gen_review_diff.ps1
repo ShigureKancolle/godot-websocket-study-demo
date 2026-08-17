@@ -15,6 +15,13 @@
 # ============================================================================
 $ErrorActionPreference = 'Stop'
 
+# --- 控制台编码锁定为 GBK(936) --------------------------------------------
+# .bat 入口已 chcp 936; 这里再锁 PS 的控制台编码, 保证传给 cmd 的命令行
+# (含中文文件名, 如 生成diff对比.bat / 开发指南.md) 编码一致, 否则 cmd 解析
+# 命令行会出现"文件名、目录名或卷标语法不正确"。
+try { [Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding(936) } catch { }
+try { [Console]::InputEncoding  = [System.Text.Encoding]::GetEncoding(936) } catch { }
+
 # --- 配置 ---------------------------------------------------------------
 $root = Split-Path $PSScriptRoot -Parent          # 项目根 D:\work2\godot_demo
 $repos = @('server', 'client', 'docs', 'shared_config', 'tools')
@@ -41,7 +48,14 @@ foreach ($repo in $repos) {
 
     # 修改文件(含已暂存+未暂存, 相对 HEAD)
     # core.quotepath=false: 中文文件名不做 \ooo 转义, 否则路径处理错乱
-    $modified = git -c core.quotepath=false -C $repoPath diff HEAD --name-only
+    $tmp = Join-Path $env:TEMP "gen_review_diff_$PID.txt"
+    cmd /c "git -c core.quotepath=false -C `"$repoPath`" diff HEAD --name-only > `"$tmp`" 2>nul"
+    $modified = @()
+    if (Test-Path $tmp) {
+        # git 输出的文件名固定是 UTF-8, 显式按 UTF-8 读取, 不受控制台代码页影响
+        $modified = [System.IO.File]::ReadAllLines($tmp, (New-Object System.Text.UTF8Encoding($false))) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    }
     foreach ($p in $modified) {
         if ([string]::IsNullOrWhiteSpace($p)) { continue }
         $p = $p.Trim()
@@ -56,16 +70,20 @@ foreach ($repo in $repos) {
     }
 
     # 全新文件(未跟踪, 无改前版本)
-    $untracked += git -c core.quotepath=false -C $repoPath status --porcelain |
-        Where-Object { $_.StartsWith('??') } |
-        ForEach-Object { @{ repo = $repo; path = $_.Substring(3) } }
+    $tmp = Join-Path $env:TEMP "gen_review_diff_$PID.txt"
+    cmd /c "git -c core.quotepath=false -C `"$repoPath`" status --porcelain > `"$tmp`" 2>nul"
+    if (Test-Path $tmp) {
+        $untracked += [System.IO.File]::ReadAllLines($tmp, (New-Object System.Text.UTF8Encoding($false))) |
+            Where-Object { $_.StartsWith('??') } |
+            ForEach-Object { @{ repo = $repo; path = $_.Substring(3) } }
+    }
 }
 
 # --- 生成对比 bat --------------------------------------------------------
 $n = $changed.Count
 $bat = New-Object System.Collections.Generic.List[string]
 $bat.Add('@echo off')
-$bat.Add('chcp 65001 >nul')
+$bat.Add('chcp 936 >nul')
 $bat.Add('set TM=' + $tm)
 $bat.Add('echo ================================================')
 $bat.Add('echo  本次改动 diff 对比 (左=改前HEAD, 右=当前工作区)')
@@ -97,9 +115,10 @@ if ($untracked.Count -gt 0) {
 $bat.Add('echo 全部对比完成!')
 $bat.Add('pause')
 
+Remove-Item (Join-Path $env:TEMP ("gen_review_diff_$PID.txt")) -Force -ErrorAction SilentlyContinue
 $batPath = Join-Path $outDir '对比.bat'
 New-Item -ItemType Directory -Force $outDir | Out-Null
-[System.IO.File]::WriteAllLines($batPath, $bat, (New-Object System.Text.UTF8Encoding($false)))
+[System.IO.File]::WriteAllLines($batPath, $bat, [System.Text.Encoding]::GetEncoding(936))
 
 # --- 汇总输出 -----------------------------------------------------------
 Write-Host ''

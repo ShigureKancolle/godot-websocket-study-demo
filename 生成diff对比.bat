@@ -1,15 +1,18 @@
 @echo off
-chcp 65001 >nul
-title ç”Ÿæˆ diff å¯¹æ¯”è„šæœ¬(TortoiseMerge)
+chcp 936 >nul
+title Éú³É diff ¶Ô±È½Å±¾(TortoiseMerge)
 echo ================================================
-echo  æ­£åœ¨æ‰«æå„ git ä»“åº“çš„æœªæäº¤æ”¹åŠ¨...
-echo  ç”Ÿæˆåè‡ªåŠ¨æ‰“å¼€å¯¹æ¯”çª—å£(å·¦=æ”¹å‰, å³=æ”¹å)
+echo  ÕıÔÚÉ¨Ãè¸÷ git ²Ö¿âµÄÎ´Ìá½»¸Ä¶¯...
+echo  Éú³Éºó×Ô¶¯´ò¿ª¶Ô±È´°¿Ú(×ó=¸ÄÇ°, ÓÒ=¸Äºó)
 echo ================================================
 echo.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0gen_review_diff.ps1"
 echo.
-echo å¯¹æ¯”è„šæœ¬å·²ç”Ÿæˆ: temp\review_diff\å¯¹æ¯”.bat
-echo ç°åœ¨è‡ªåŠ¨æ‰“å¼€å®ƒ, è¯·é€ä¸ª review(å…³æ‰ä¸€ä¸ªçª—å£è‡ªåŠ¨ä¸‹ä¸€ä¸ª)
+echo ¶Ô±È½Å±¾ÒÑÉú³É: temp\review_diff\¶Ô±È.bat
+echo ÏÖÔÚ×Ô¶¯´ò¿ªËü, ÇëÖğ¸ö review(¹ØµôÒ»¸ö´°¿Ú×Ô¶¯ÏÂÒ»¸ö)
 echo.
 pause
-start "" "%~dp0..\temp\review_diff\å¯¹æ¯”.bat"
+start "" "%~dp0..\temp\review_diff\¶Ô±È.bat"
+
+pause
+

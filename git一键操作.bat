@@ -1,5 +1,5 @@
 @echo off
-chcp 65001 >nul
-title Git ä¸€é”®æ“ä½œ(5 ä»“åº“)
+chcp 936 >nul
+title Git Ò»¼ü²Ù×÷(5 ²Ö¿â)
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0git_onekey.ps1"
 pause
