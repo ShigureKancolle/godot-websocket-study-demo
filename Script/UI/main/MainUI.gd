@@ -6,6 +6,8 @@ var connect_time = 0.0
 
 func _ready():
 	SignalMgr.register_handler("websocket_connected", Callable(self, "_on_websocket_connected"))
+	SignalMgr.register_handler("websocket_disconnected", Callable(self, "_on_websocket_disconnected"))
+	SignalMgr.register_handler("websocket_reconnecting", Callable(self, "_on_websocket_reconnecting"))
 	$Bg/E_Chat.pressed.connect(_on_click_chat)
 	# 进入木桩测试场景的按钮
 	$Bg/E_Game.pressed.connect(_on_click_game)
@@ -52,6 +54,22 @@ func _on_websocket_connected(data: Dictionary):
 	$Bg/E_Chat.visible = true
 	$Bg/E_Game.visible = true
 	$Bg/E_GameReal.visible = true
+
+func _on_websocket_disconnected(_data: Dictionary):
+	$Bg/E_WebScoketState.text = "连接断开"
+	ddd_idx = 3
+	$Bg/E_Chat.visible = false
+	$Bg/E_Game.visible = false
+	$Bg/E_GameReal.visible = false
+
+
+func _on_websocket_reconnecting(data: Dictionary):
+	$Bg/E_WebScoketState.text = "重连中..."
+	ddd_idx = 3
+	$Bg/E_Chat.visible = false
+	$Bg/E_Game.visible = false
+	$Bg/E_GameReal.visible = false
+
 
 
 func _on_click_chat():

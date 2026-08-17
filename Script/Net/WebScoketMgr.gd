@@ -10,6 +10,19 @@ var ws_path = "ws://127.0.0.1:8765"
 var _login_sent: bool = false
 
 # ---------------------------------------------------------------------------
+# 断线重连
+# ---------------------------------------------------------------------------
+const RECONNECT_BASE_INTERVAL_MS: int = 1000
+const RECONNECT_MAX_INTERVAL_MS: int = 5000
+const RECONNECT_MAX_ATTEMPTS: int = 0  # 0 = 无限重试
+
+var _reconnect_pending: bool = false
+var _next_reconnect_time_ms: int = 0
+var _reconnect_attempts: int = 0
+# 断线前是否在游戏房间里；重连成功后自动补发 EnterRoom
+var _need_rejoin: bool = false
+
+# ---------------------------------------------------------------------------
 # 网络延迟测量(Ping/Pong)
 # ---------------------------------------------------------------------------
 # 原理:客户端每 PING_INTERVAL_MS 发一次 game.Ping{t}(t=本地发送时刻ms),
@@ -57,11 +70,16 @@ func _process(_delta):
 
 	var state = MyWebSocketClient.instance().poll()
 	if state == WebSocketPeer.STATE_CLOSED:
-		# 不用 set_process(false) 停止轮询——
-		# 后续要做断线重连,需要持续 poll 触发重连逻辑
-		# 现在先只打印日志,重连功能留待后面实现
-		# (原代码 set_process(false) 会让 WebSocket 永远无法恢复)
-		pass
+		_schedule_reconnect()
+
+	# 重连定时到了就真正发起新连接
+	if _reconnect_pending and now >= _next_reconnect_time_ms:
+		_try_reconnect()
+
+	# 重连成功后自动补发 EnterRoom（如果断线前在房间里）
+	if _need_rejoin and _login_sent and MyWebSocketClient.instance().is_connected_to_server():
+		_need_rejoin = false
+		_send_enter_room()
 
 func _init_websocket():
 	var mb = MessageBus.instance()
@@ -89,6 +107,8 @@ func _init_websocket():
 
 ## WebSocket 连上后自动发送 Login（建立服务器会话/进入大厅）
 func _on_websocket_connected(_data: Dictionary) -> void:
+	_reconnect_pending = false
+	_reconnect_attempts = 0
 	_login_sent = false
 	var acc: Dictionary = AccountManager.instance().current_account()
 	if not acc.is_empty():
@@ -101,6 +121,55 @@ func _send_login(acc: Dictionary) -> void:
 		"player_name": acc.get("name", ""),
 	})
 	_login_sent = true
+
+
+## 断线后安排一次重连（带指数退避，避免服务端还没起来时疯狂重连）
+func _schedule_reconnect() -> void:
+	if _reconnect_pending:
+		return
+	if RECONNECT_MAX_ATTEMPTS > 0 and _reconnect_attempts >= RECONNECT_MAX_ATTEMPTS:
+		return
+
+	# 断线前如果在房间里，重连成功后要自动重新进房
+	if ClientStateMirror.instance().local_entity_id() != "":
+		_need_rejoin = true
+
+	_reconnect_pending = true
+	var delay: int = mini(
+		RECONNECT_BASE_INTERVAL_MS * int(pow(2, _reconnect_attempts)),
+		RECONNECT_MAX_INTERVAL_MS
+	)
+	_next_reconnect_time_ms = Time.get_ticks_msec() + delay
+	_reconnect_attempts += 1
+	_rtt_active = false  # 防止重连后还没 Login 就发 Ping
+	SignalMgr.fire_signal("websocket_reconnecting", {
+		"attempt": _reconnect_attempts,
+		"delay_ms": delay,
+	})
+
+
+func _try_reconnect() -> void:
+	_reconnect_pending = false
+	MyWebSocketClient.instance().connect_to_url(ws_path)
+
+
+## 重连成功后如果之前在房间，自动补发 EnterRoom 并清掉旧镜像
+func _send_enter_room() -> void:
+	var acc: Dictionary = AccountManager.instance().current_account()
+	if acc.is_empty():
+		push_warning("重连成功但未登录，无法自动进房")
+		return
+	ClientStateMirror.instance().clear()
+	MessageBus.instance().send("game.EnterRoom", {
+		"entity_info": {
+			"player_name": acc.get("name", ""),
+			"account_id": acc.get("id", ""),
+			"x": 0.0,
+			"y": 0.0
+		}
+	})
+	start_rtt_measurement()
+
 
 
 ## 收到服务端回传的 Pong:算一次 RTT 并做 EMA 平滑
