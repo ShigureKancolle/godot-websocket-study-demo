@@ -88,6 +88,7 @@ shared_config/                  ← 单数据源(只在这里改)
 | `get_constant(name, default) -> Variant` | 取全局常量 |
 | `get_hurt_duration_ms() -> int` | 取 hurt 硬直时长(语法糖) |
 | `get_vision(mode) -> VisionInfo` | 取敌人视野(视锥)配置:mode="normal"/"chase",未知回退 normal(安全默认)。normal=半角 30°/半径 750px,chase=半角 22.5°/半径 1000px(和服务端 config_loader.get_vision 对称)。VisionFan 按 AI 状态选 mode |
+| `is_vision_enabled() -> bool` | 视锥功能总开关(constants.json 的 VISION_ENABLED,默认 true)。false 时 Role._setup_enemy 不挂 VisionFan(服务端敌人已无视视锥,显示扇形会误导) |
 
 ## collision.gd
 
@@ -173,9 +174,9 @@ var hit_pos = AttackCalc.calc_hit_position(
 
 未来扩展:
 - 伤害飘字坐标(可复用 calc_hit_position,或加偏移)
-- 攻击范围调试可视化(用 angle 字段 + collision.Sector 画扇形辅助线)
 - 多种攻击形状的命中坐标计算(目前只支持扇形)
 - 攻击互碰判定(用 intersect_sector_sector,如弹反/格挡)
+- ~~攻击范围调试可视化~~ 已实现为 AttackFan 攻击弧光组件(见 client-role.md,用攻击形状配置渲染扇形范围+命中时刻)
 
 ## 同步约束
 **双端配置必须一致**:改配置只改 `shared_config/*.json`,然后跑 `python tools/sync_config.py`。

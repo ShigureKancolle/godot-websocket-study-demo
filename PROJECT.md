@@ -19,7 +19,7 @@ d:\work2\godot_demo\
 ├── shared_config/  # 双端共享配置单数据源(改完跑 tools/sync_config.py 同步)
 │   ├── attack_config.json     # 攻击配置表(shape_list + duration/hit_time)
 │   ├── entity_config.json     # 实体能力+碰撞形状表(can_xxx + body_shape/params)
-│   ├── constants.json         # 全局常量(HURT_DURATION_MS 等)
+│   ├── constants.json         # 全局常量(HURT_DURATION_MS/AI_ACTIVATE_DISTANCE/VISION_ENABLED 等)
 │   ├── terrain_config.json    # 地形能力表(walkable/move_cost)
 │   └── vision_config.json     # 敌人视锥视野表(normal/chase 两套角度+半径)
 ├── server/         # Python 服务端
@@ -35,7 +35,7 @@ d:\work2\godot_demo\
     ├── Script/
     │   ├── Account/        # 本地账号存档(AccountManager:名字→账号id 映射 + 最近登录排序)
     │   ├── Net/            # 网络层(WebSocket/MessageBus/StateMirror/MessageContract)
-    │   ├── role/           # 角色组件(Role/PlayerVisual/VisionFan/LocalPlayerController;VisionFan=敌人视锥渲染)
+    │   ├── role/           # 角色组件(Role/PlayerVisual/VisionFan/AttackFan/LocalPlayerController/CameraFollow;VisionFan=敌人视锥渲染,AttackFan=攻击弧光渲染)
     │   ├── game/           # 战斗层(ConfigLoader配置访问 + collision碰撞 + attack_config命中点)
     │   ├── UI/             # UI 层(UIManager/login/MainUI/chat_main + debug 调试控制台)
     │   ├── proto/          # 客户端 proto 副本+契约副本

@@ -10,8 +10,9 @@
 | [role/Role.gd](file:///d:/work2/godot_demo/client/Script/role/Role.gd) | 通用实体容器(Node2D),按 entity_type 分发挂载不同组件 |
 | [role/PlayerVisual.gd](file:///d:/work2/godot_demo/client/Script/role/PlayerVisual.gd) | 视觉组件(Node2D),预制体脚本,运行时切换贴图+设名字+转朝向箭头+按四方向拼动画 |
 | [role/VisionFan.gd](file:///d:/work2/godot_demo/client/Script/role/VisionFan.gd) | 敌人视锥渲染组件(Polygon2D),读 vision_config + 按 ai_state 切 normal/chase + 按 facing 旋转,半透明扇形(纯显示,敌人专属) |
+| [role/AttackFan.gd](file:///d:/work2/godot_demo/client/Script/role/AttackFan.gd) | 攻击扇形弧光组件(Polygon2D),按攻击形状配置(radius/angle/hit_time/duration)渲染攻击范围+命中时刻,顶点色渐变(圆心透明→弧上峰值),颜色按身份(本人蓝白/队友绿/敌人红),膨胀+淡出动画,命中时刻发 hit_moment 信号(纯显示,玩家敌人通用) |
 | [role/LocalPlayerController.gd](file:///d:/work2/godot_demo/client/Script/role/LocalPlayerController.gd) | 本地玩家控制组件(Node),读 InputIntentProvider 意图发 PlayerMove+PlayerFacing+AttackStart |
-| [role/CameraFollow.gd](file:///d:/work2/godot_demo/client/Script/role/CameraFollow.gd) | 相机平滑跟随组件(Camera2D),跟随本地玩家坐标 lerp |
+| [role/CameraFollow.gd](file:///d:/work2/godot_demo/client/Script/role/CameraFollow.gd) | 相机平滑跟随组件(Camera2D),跟随本地玩家坐标 lerp + 屏幕震动(shake:攻击命中时刻随机偏移 2~3px 衰减归零) |
 | [role/input/InputIntent.gd](file:///d:/work2/godot_demo/client/Script/role/input/InputIntent.gd) | 意图数据结构(RefCounted),move_dir + look_target + attack_pressed |
 | [role/input/InputBinding.gd](file:///d:/work2/godot_demo/client/Script/role/input/InputBinding.gd) | 自定义键位映射(RefCounted+static),类型化绑定(key/mouse)支持键盘+鼠标,rebind+持久化到 user://input_binding.cfg |
 | [role/input/InputDevice.gd](file:///d:/work2/godot_demo/client/Script/role/input/InputDevice.gd) | 输入设备抽象基类(Node),定义 poll(intent) 接口 |
@@ -53,10 +54,10 @@ Role 本身只是"位置容器":有坐标、能挂子节点。它不知道自己
 ### 按 entity_type 分发
 | entity_type | Visual | AnimStateMachine | Controller | 备注 |
 |-------------|--------|------------------|------------|------|
-| PLAYER(本地) | PlayerVisual | ✓ | LocalPlayerController | 本地额外挂 Controller |
-| PLAYER(远程) | PlayerVisual | ✓ | — | 只显示,坐标由 StateMirror 驱动 |
+| PLAYER(本地) | PlayerVisual + AttackFan | ✓ | LocalPlayerController | 本地额外挂 Controller |
+| PLAYER(远程) | PlayerVisual + AttackFan | ✓ | — | 只显示,坐标由 StateMirror 驱动 |
 | STAKE | PlayerVisual(占位) | — | — | 未来可换 StakeVisual |
-| ENEMY(史莱姆/骷髅) | PlayerVisual + VisionFan | ✓ | — | _setup_enemy:复用玩家显示 + 挂视锥(ai_state 驱动 normal/chase 形态) |
+| ENEMY(史莱姆/骷髅) | PlayerVisual + AttackFan + VisionFan | ✓ | — | _setup_enemy:复用玩家显示 + 挂视锥(ai_state 驱动 normal/chase 形态) |
 
 未知 `entity_type`(UNKNOWN)按 PLAYER 处理(兼容兜底,push_warning 告警)。
 
@@ -72,6 +73,8 @@ Role 本身只是"位置容器":有坐标、能挂子节点。它不知道自己
 2. 实例化 `AnimStateMachine.gd`(脚本 new,不是预制体),add_child 后调 `setup(info)`
    - 挂载顺序:先 PlayerVisual 后 AnimStateMachine——状态机 `_ready` 进入 idle 时要访问 visual 调 `play_anim`
 3. 判断是否本地玩家:`entity_id == ClientStateMirror.local_entity_id()`,是则额外挂 LocalPlayerController
+4. 挂 **AttackFan**(攻击扇形弧光,玩家/敌人都攻击所以统一挂,木桩不走本方法不挂):
+   - `hit_moment` 信号连到 `_on_attack_hit_moment`(本地玩家命中时刻震屏)
 
 ### _setup_stake(info)
 当前简化:只挂 PlayerVisual(占位,显示圆形角色贴图 + 名字标签 + 朝向箭头)。
@@ -85,6 +88,7 @@ Role 本身只是"位置容器":有坐标、能挂子节点。它不知道自己
 - `preload("res://Script/role/VisionFan.gd").new()` + add_child,和 PlayerVisual 一样脚本挂载
 - `setup(info.ai_state)` 按初始 AI 状态生成视锥形态(chase → 窄而远,其余 → normal 宽而近)
 - `set_facing(info.facing)` 初始朝向;`z_index = 1` 显示在角色/地形之上(半透明)
+- **视锥开关**:`ConfigLoader.is_vision_enabled()`(VISION_ENABLED)为 false 时不挂载——服务端敌人已无视视锥,显示扇形会误导玩家;未挂载时 `on_entity_updated` 的 `get_node_or_null("VisionFan")` 自然跳过转发
 
 ### VisionFan.gd — 敌人视锥渲染组件
 `extends Polygon2D`, `class_name VisionFan`。纯显示组件,不做障碍物遮挡(后续可扩展射线遮挡)。
@@ -94,11 +98,22 @@ Role 本身只是"位置容器":有坐标、能挂子节点。它不知道自己
 - 顶点生成:圆心 Vector2.ZERO + 弧上 SEGMENTS=32 段,从 `-half_angle` 扫到 `+half_angle`,`Vector2.RIGHT.rotated(a) * radius`
 - 为什么是组件:Role 是通用容器,视锥是"敌人"类型专属显示,抽成组件只有敌人挂
 
+### AttackFan.gd — 攻击扇形弧光组件
+`extends Polygon2D`, `class_name AttackFan`。纯显示组件,攻击触发时渲染攻击范围 + 命中时刻提示。
+- **数据来源(时间/角度/范围全部由攻击配置决定)**:`AttackCalc.get_shape(atk_id, shape_index)` 取 AttackShape(radius/angle/hit_time/duration),和攻击判定用同一份 shared_config/attack_config.json
+- **顶点色渐变(剑气外放)**:圆心 alpha=0(完全透明)→ 弧上 alpha=0.45(峰值),`vertex_colors` 按顶点插值
+- **颜色按攻击者身份**(Role._trigger_attack_fan 判断):本人 SELF 淡蓝白 / 队友 TEAM 绿 / 敌人 ENEMY 红(敌人攻击也显示红色威胁弧光)
+- **时间轴(零贴图)**:0.15s 膨胀(scale 0.3→1.0,圆心不动向外炸开)→ 保持到命中时刻(hit_time)最亮 → 命中时刻发 `hit_moment` 信号(本地玩家震屏锚点)→ 攻击结束(duration)淡出归零隐藏
+- **触发**:Role.on_entity_updated 检测 state 进入 "attacking" 瞬间调 `show_attack(atk_id, 0, facing, identity)`(AttackStart 广播带 atk_id;shape_index 固定 0=主挥砍段,AttackHit 带 atk_shape_idx 可后续扩展多段切换)
+- **层级**:z_index=1(和 VisionFan 同级,实体之上 UI 之下,半透明效果层)——不依赖场景树分层,俯视角遮挡靠 y-sort,弧光统一盖实体层且半透明不影响受击反馈可见
+- **后坐联动**:本地玩家攻击时 Role 设 `_recoil_offset`(朝向反方向 12px),`_process` 只偏移 PlayerVisual 子节点并指数衰减回零——Role.position(预测/权威)不动,不污染预测轨迹/软对账
+
 ### on_entity_updated(info: ClientEntityInfo)
 收到 StateMirror 的 `entity_updated` 信号时调(Role 自己不改状态——永远由 StateMirror 信号驱动,这是服务器权威在客户端的最终体现):
 - 坐标:调 `_update_position(info)` — **只更新 target_pos,不直接改 position**(见下方"位置同步")
 - 朝向:转发 `info.facing` 给 `PlayerVisual.update_facing` + `VisionFan.set_facing`(有视锥时)
 - AI 状态:`info.ai_state` 转发给 `VisionFan.set_ai_state`(只有敌人挂了视锥;由 StateMirror._on_ai_state_changed 增量更新,切换即广播)
+- 攻击弧光:**state 进入 "attacking" 瞬间**(was_attacking 判定防重复触发)调 `_trigger_attack_fan` → `AttackFan.show_attack(atk_id, 0, facing, identity)`
 - 动画状态:`info.state` 非空则转发给 `AnimStateMachine.update_state`(木桩没挂状态机时跳过)
 
 ### 位置同步(服务端权威,本地预测+软对账 / 远程 lerp)
@@ -406,3 +421,6 @@ DeadManScene.tscn 里有个 E_Back 按钮用于返回 MainScene。Role 实例用
 - 自定义键位支持(InputBinding 模块,改键 UI 暂未做)
 - 手柄输入未实现(InputDevice 抽象已就位,加 GamepadDevice 即可)
 - **敌人视锥渲染已实现**:Role._setup_enemy 挂 VisionFan(Polygon2D 半透明扇形,纯显示);VisionFan 按 ai_state 切 normal/chase(读 ConfigLoader.get_vision)+ rotation 跟随 facing;数据由 StateMirror._on_ai_state_changed(AiStateChanged 增量广播)→ entity_updated → on_entity_updated 转发(详见 tools/视锥渲染方案.md)
+- **视锥开关联动已实现**:ConfigLoader.is_vision_enabled() 读 constants.json 的 VISION_ENABLED(默认 true);false 时 _setup_enemy 不挂 VisionFan(服务端敌人无视视锥,显示扇形会误导),on_entity_updated 的 get_node_or_null 自然跳过
+- **攻击扇形弧光已实现**:新建 AttackFan.gd(Polygon2D,玩家/敌人都挂)——按攻击形状配置(radius/angle/hit_time/duration)渲染扇形范围,顶点色渐变(圆心透明→弧上峰值,"剑气外放"),颜色按身份(本人淡蓝白/队友绿/敌人红),0.15s 膨胀+保持到命中时刻最亮+淡出(零贴图);Role.on_entity_updated 检测 state 进入 attacking 瞬间触发(was_attacking 防重复);命中时刻发 hit_moment 信号
+- **屏幕震动 + 攻击后坐已实现**:CameraFollow.gd 加 shake()(攻击命中时刻随机偏移 3px 衰减归零,只震本机);本地玩家攻击时 Role 设 _recoil_offset(朝向反方向 12px)只偏移 PlayerVisual 子节点并衰减回零,Role.position(预测/权威)不动、不污染软对账

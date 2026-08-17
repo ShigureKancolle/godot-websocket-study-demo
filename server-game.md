@@ -295,6 +295,11 @@ EnemyAIMachine 持有 states dict,EnemyMgr.add_enemy_ai_state 注册四个状态
 - 判定:ai_state_helper.is_in_sight(finder, target, vision) 纯几何判「距离 + 角度」(目标方向与 facing 夹角 ≤ 半角);遮挡不在此判,由 find_path 可达性承担(墙后目标即使可见也追不到)
 - 寻人:ai_state_helper.find_nearest_entity_in_sight(room, entity_id, entity_type, vision_mode) 先视锥过滤,再 find_path 可达性过滤,取最近目标
 - 用途:patrol/look_around 用 normal 视野寻人;chase 用 chase 视野判定「目标是否脱离视野」,脱离即放弃追击回 patrol
+- **视锥总开关 `VISION_ENABLED`**(shared_config/constants.json,默认 true):false 时整个视锥系统关闭——
+  - 寻人(`find_nearest_entity_in_sight`)跳过角度/半径过滤,搜索范围放宽到 `AI_ACTIVATE_DISTANCE`,激活范围内「无论多远」都按最近目标算
+  - 追逐(`chase_state.find_move_path`)不再因 `max_chase_distance`(1000px)或脱离 chase 视野而放弃追击
+  - **`AI_ACTIVATE_DISTANCE` 激活距离仍生效**(性能保护):玩家在激活范围外 AI 不跑
+  - 客户端 `Role._setup_enemy` 同步不挂载 VisionFan(显示扇形会误导)
 - **AI 激活距离**:敌人只在附近 `AI_ACTIVATE_DISTANCE`(shared_config/constants.json,默认 1500px)内有玩家时才执行 AI 逻辑;没有玩家靠近时 AI 不跑,并停止 AI 驱动的移动。防止玩家还没进地图/已经退出房间时敌人自己巡逻或攻击。
 
 ### AI 状态切换广播(视锥渲染的数据源)
@@ -409,4 +414,5 @@ hurt 定时器到期
 - 冒烟测试通过:A 攻击命中 entity:stake_1;apply_hurt 设 stake state='hurt';木桩 apply_move_dir 被能力配置拒绝
 - **敌人视锥视野已实现**:vision_config.json 新增 normal(30°/750px)/chase(22.5°/1000px) 两套视野;config_loader.get_vision(mode) 读取为 VisionParams(half_angle 弧度/radius);ai_state_helper.is_in_sight 纯几何判定(距离+角度,遮挡由 find_path 可达性承担);find_nearest_entity_in_sight 先视锥过滤再寻路;patrol/look_around 用常态视野寻人,chase 用追逐视野判「目标脱离视野即放弃追击」;enemy_mgr 补注册 look_around 状态
 - **AI 激活距离已实现**:shared_config/constants.json 新增 AI_ACTIVATE_DISTANCE=1500px;EnemyMgr.update 在附近无玩家时跳过 AI 并停止 AI 移动,玩家靠近后再恢复
+- **视锥总开关已实现**:shared_config/constants.json 新增 VISION_ENABLED(默认 true);config_loader.is_vision_enabled() 读取;false 时 find_nearest_entity_in_sight 跳过角度/半径过滤(搜索半径放宽到 AI_ACTIVATE_DISTANCE)、chase 不再因 max_chase_distance/脱离追逐视野放弃追击;客户端 Role._setup_enemy 同步不挂载 VisionFan(AI_ACTIVATE_DISTANCE 激活距离仍生效)
 - **AI 状态同步已实现**:EntityInfo 加 ai_state 字段(proto 同步加,GameState 快照带初始值);EnemyAIMachine.change_state 状态真正切换(old != new)时触发钩子(重入不广播);EnemyMgr.set_ai_state_change_hook 注入所有状态机;GameServer._on_ai_state_changed 同步 EntityInfo.ai_state + 广播 AiStateChanged(客户端据此切换视锥形态 normal/chase,详见 tools/视锥渲染方案.md)
