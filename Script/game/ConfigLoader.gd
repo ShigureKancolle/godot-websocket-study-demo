@@ -460,3 +460,12 @@ static func get_vision(mode: String = "normal") -> VisionInfo:
 	if vision == null:
 		return VisionInfo.new()
 	return vision
+
+
+## 敌人视锥功能总开关(shared_config/constants.json 的 VISION_ENABLED)。
+## 默认 true(配置缺失时按开启处理,保持既有行为)。
+## 关闭后:服务端敌人无视视锥追击最近玩家,客户端不挂载/不渲染视锥扇形
+## (Role._setup_enemy 据此跳过 VisionFan 挂载,避免显示误导)。
+static func is_vision_enabled() -> bool:
+	_ensure_cache()
+	return bool(_constants_cache.get("VISION_ENABLED", true))

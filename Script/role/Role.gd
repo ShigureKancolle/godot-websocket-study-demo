@@ -118,6 +118,17 @@ const RECONCILE_THRESHOLD: float = 15.0
 # 回正插值系数:脱节时 position.lerp(target_pos, 0.35) 平滑回正,不硬跳(避免瞬移)
 const RECONCILE_LERP: float = 0.35
 
+# ---------------------------------------------------------------------------
+# 攻击后坐(纯视觉,不影响预测/对账)
+# ---------------------------------------------------------------------------
+# 攻击触发瞬间角色向后(朝向反方向)顿一下再回弹,配合大范围弧光形成"重击感"。
+# 实现:只偏移 PlayerVisual 子节点位置,Role.position(预测/权威)完全不动——
+# 不污染预测轨迹历史,不触发软对账,也不影响服务端判定。
+# 衰减系数:lerp 回零,~12/s 约 0.15s 内回弹完
+const RECOIL_PX: float = 12.0
+const RECOIL_DECAY: float = 12.0
+var _recoil_offset: Vector2 = Vector2.ZERO
+
 # 服务端 tick 周期(毫秒),和服务端 GameServer.TICK_INTERVAL_MS 对齐
 # 用于:对账回溯时刻修正(输入排队平均等半个 tick) + 变向宽限窗口计算
 const SERVER_TICK_MS: float = 33.0
@@ -155,6 +166,7 @@ func setup(info: ClientEntityInfo) -> void:
 	_remove_component("HpProgressBar")
 	_remove_component("MpProgressBar")
 	_remove_component("VisionFan")
+	_remove_component("AttackFan")
 
 	# 按 entity_type 分发挂载组件
 	# 当前实现:
@@ -215,6 +227,14 @@ func _setup_player(info: ClientEntityInfo) -> void:
 	hp_bar.set_auto_hide(false)
 	hp_bar.position = Vector2(0, -39)
 
+	# 攻击扇形弧光(玩家/敌人都攻击,统一挂;木桩不走 _setup_player 不挂)
+	# 攻击触发时按攻击形状配置渲染范围 + 命中时刻(颜色按身份:本人蓝白/队友绿/敌人红)
+	# 数据流:AttackStart 广播 → StateMirror 设 state="attacking" → on_entity_updated → show_attack
+	var attack_fan = preload("res://Script/role/AttackFan.gd").new()
+	attack_fan.name = "AttackFan"
+	add_child(attack_fan)
+	attack_fan.hit_moment.connect(_on_attack_hit_moment)
+
 
 ## 设置木桩类型实体: 当前简化为只挂 PlayerVisual(占位)
 ## 未来可换成专门的 StakeVisual(用木桩贴图,不挂 AnimatedSprite2D)
@@ -255,12 +275,14 @@ func _setup_enemy(info: ClientEntityInfo) -> void:
 	#   - chase → chase 视野(窄而远)
 	#   - 其余(patrol/look_around/attack) → normal 视野(宽而近)
 	# 之后由 on_entity_updated 转发 AiStateChanged 增量消息实时切换。
-	var vision_fan = preload("res://Script/role/VisionFan.gd").new()
-	vision_fan.name = "VisionFan"
-	add_child(vision_fan)
-	vision_fan.setup(info.ai_state)
-	vision_fan.set_facing(info.facing)
-	vision_fan.z_index = 1  # 显示在角色/地形之上(半透明,不遮挡操作)
+	# 视锥开关 VISION_ENABLED=false 时不挂载:服务端敌人已无视视锥,显示扇形会误导。
+	if ConfigLoader.is_vision_enabled():
+		var vision_fan = preload("res://Script/role/VisionFan.gd").new()
+		vision_fan.name = "VisionFan"
+		add_child(vision_fan)
+		vision_fan.setup(info.ai_state)
+		vision_fan.set_facing(info.facing)
+		vision_fan.z_index = 1  # 显示在角色/地形之上(半透明,不遮挡操作)
 
 func on_hp_changed(cur_hp: int, damage: int, attacker_id: String, atk_id: int, atk_shape_idx: int) -> void:
 	# damage为0时是初始化 不跳字
@@ -282,6 +304,9 @@ func on_stats_updated(combat: ClientStateMirror.ClientCombatStats) -> void:
 
 ## 收到 StateMirror 的 entity_updated 信号时调用,更新坐标、朝向、动画状态
 func on_entity_updated(info: ClientEntityInfo) -> void:
+	# 先记旧状态,再更新:攻击弧光只在「进入 attacking」瞬间触发一次
+	# (attacking 期间后续广播 state 不变,不能每次广播都重触发)
+	var was_attacking: bool = (_state == "attacking")
 	_state = info.state  # 缓存动画状态(hurt 硬直判断用,见 _process / _update_position)
 	_update_position(info)
 	# 朝向更新:转发给 PlayerVisual(如果已挂载)
@@ -296,12 +321,42 @@ func on_entity_updated(info: ClientEntityInfo) -> void:
 	if vision_fan != null:
 		vision_fan.set_facing(info.facing)
 		vision_fan.set_ai_state(info.ai_state)
+	# 攻击弧光:进入 attacking 瞬间按攻击配置渲染扇形范围(颜色按攻击者身份)
+	if info.state == "attacking" and not was_attacking:
+		_trigger_attack_fan(info)
 	# 动画状态更新:转发给 AnimStateMachine(如果已挂载)
 	# state 字段由 StateMirror 从 moving 推断(或 GameState 快照带),服务端权威
 	# 木桩没挂 AnimStateMachine,跳过(木桩的 state 变化目前不影响显示)
 	var anim_machine = get_node_or_null("AnimStateMachine")
 	if anim_machine != null and info.state != "":
 		anim_machine.update_state(info.state)
+
+
+## 攻击弧光触发:atk_id/朝向来自服务端广播,颜色按攻击者身份
+## 本人淡蓝白 / 队友绿 / 敌人红(敌人攻击也显示红色威胁弧光)
+func _trigger_attack_fan(info: ClientEntityInfo) -> void:
+	var attack_fan = get_node_or_null("AttackFan")
+	if attack_fan == null or info.atk_id <= 0:
+		return
+	var identity: int = AttackFan.Identity.ENEMY
+	if _is_local:
+		identity = AttackFan.Identity.SELF
+	elif info.entity_type == ClientEntityInfo.EntityType.PLAYER:
+		identity = AttackFan.Identity.TEAM
+	attack_fan.show_attack(info.atk_id, 0, info.facing, identity)
+	# 本地玩家攻击:角色后坐(朝向反方向顿一下再回弹,纯视觉偏移)
+	if _is_local:
+		_recoil_offset = -Vector2.RIGHT.rotated(info.facing) * RECOIL_PX
+
+
+## 攻击命中时刻(hit_time 判定帧)到达:本地玩家震屏(重击感,最廉价的"范围大"暗示)
+## 只震本机,不震远程攻击者的屏幕
+func _on_attack_hit_moment() -> void:
+	if not _is_local:
+		return
+	var cam = get_viewport().get_camera_2d()
+	if cam != null and cam.has_method("shake"):
+		cam.shake()
 
 
 ## 每帧更新:
@@ -328,6 +383,16 @@ func _process(delta: float) -> void:
 		# alpha = delta * LERP_FACTOR:60fps 时 ≈0.25,约 4 帧追上(66ms 延迟,视觉平滑)
 		# min 截断到 1.0:防止低帧率时 delta 过大导致 alpha>1(overshoot)
 		position = position.lerp(target_pos, min(delta * LERP_FACTOR, 1.0))
+
+	# 攻击后坐:只偏移 PlayerVisual 子节点(纯视觉),Role.position(预测/权威)不动,
+	# 不污染预测轨迹、不触发软对账;指数衰减回零(约 0.15s 内回弹完)
+	var visual = get_node_or_null("PlayerVisual")
+	if _recoil_offset.length() > 0.01:
+		if visual != null:
+			visual.position = _recoil_offset
+		_recoil_offset = _recoil_offset.lerp(Vector2.ZERO, min(delta * RECOIL_DECAY, 1.0))
+	elif visual != null and visual.position != Vector2.ZERO:
+		visual.position = Vector2.ZERO
 
 
 ## 更新坐标:从 entity_updated 信号拿到服务端权威位置,更新 target_pos
