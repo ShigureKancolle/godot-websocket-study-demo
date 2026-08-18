@@ -253,6 +253,31 @@ message SurvivalResult {
   int32 damage = 4;           // 服务端累计伤害值。
 }
 
+// 单实体出生（S2C）：创建敌人时发送，原子携带实体镜像和初始战斗属性。
+message EntitySpawn {
+  EntityInfo entity_info = 1;      // 新实体的完整初始状态，权威来源为 GameRoom。
+  CombatStatsEntry combat = 2;     // 创建 Role 前必须可用的初始战斗属性。
+}
+
+// 服务端每个 tick 的移动快照；一个批次承载所有移动/停止实体，避免逐实体消息积压。
+message MovementBatchEntry {
+  string entity_id = 1;
+  float x = 2;
+  float y = 3;
+  bool moving = 4;
+}
+
+message MovementBatch {
+  int64 tick = 1;
+  repeated MovementBatchEntry entries = 2;
+}
+
+message EntityRelocated {
+  string entity_id = 1;
+  float x = 2;
+  float y = 3;
+}
+
 // 通用消息包装器
 message GameMessage {
   oneof message_type {
@@ -283,5 +308,8 @@ message GameMessage {
     LevelUpChoices level_up_choices = 25;   // S2C 升级候选事件。
     ChooseReward choose_reward = 26;        // C2S 升级选择请求。
     SurvivalResult survival_result = 27;    // S2C 终局统计。
+    EntitySpawn entity_spawn = 28;          // S2C 单实体增量出生事件。
+    MovementBatch movement_batch = 29;     // S2C 每 tick 合并移动快照。
+    EntityRelocated entity_relocated = 30;
   }
 }

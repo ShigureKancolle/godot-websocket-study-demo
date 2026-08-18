@@ -27,13 +27,16 @@ class ChaseState(ai_state_base.AIStateBase):
     def __init__(self, entity_id: str):
         super().__init__(entity_id)
         self.target_entity_id = None  # 追击目标的 entity_id, 可能为 None
-        self.check_target_cooldown = 0.5  # 检查目标的冷却时间(秒)
+        self.check_target_cooldown = float(config_loader.get_constant("ENEMY_PATH_RECALC_COOLDOWN", 0.5))
         self.last_check_time = 0.0  # 上次检查目标的时间(秒)
         self.path = None  # 移动路径, 可能为 None
+        self.last_target_position = None
+        self.target_move_threshold = 48.0
         
     def enter(self, target_entity_id: str = None):
         self.target_entity_id = target_entity_id
         self.last_check_time = self.check_target_cooldown
+        self.last_target_position = None
         print(f"{self.entity_id} enters chase state {target_entity_id}")
 
     def exit(self):
@@ -123,11 +126,18 @@ class ChaseState(ai_state_base.AIStateBase):
         return (entity.x + dx / distance * step, entity.y + dy / distance * step)
 
     def check_target(self, dt: float, room: game_room.GameRoom) -> bool:
-        """是否需要检查目标"""
+        """目标移动超过阈值或路径失效时才重算，避免所有远敌固定频率 A*。"""
         self.last_check_time += dt
         if self.last_check_time >= self.check_target_cooldown:
             if self.target_entity_id and room.get_entity(self.target_entity_id):
-                return True
+                target = room.get_entity(self.target_entity_id)
+                current = (target.x, target.y)
+                if self.path is None or not self.path or self.last_target_position is None or (
+                        (current[0] - self.last_target_position[0]) ** 2
+                        + (current[1] - self.last_target_position[1]) ** 2
+                        >= self.target_move_threshold ** 2):
+                    self.last_target_position = current
+                    return True
         return False
 
     def find_move_path(self, my_entity: "EntityInfo", target_entity: "EntityInfo", room: game_room.GameRoom):
@@ -159,5 +169,14 @@ class ChaseState(ai_state_base.AIStateBase):
             search_radius = config_loader.get_constant("AI_ACTIVATE_DISTANCE", 1500.0)
 
         my_pos = (my_entity.x, my_entity.y)
+        # 寻路终点始终是玩家真实权威坐标；facing 仅用于视觉朝向和攻击。
         target_pos = (target_entity.x, target_entity.y)
-        return ai_state_helper.find_path(room, my_pos, target_pos, search_radius)
+        # 直线仅检查地形；受阻时才把任务交给 EnemyMgr 的全局 A* 预算队列。
+        if room.is_terrain_path_clear(my_pos, target_pos, my_entity.entity_type):
+            return [target_pos]
+        ready, path = room.get_enemy_manager().request_path(
+            self.entity_id, my_pos, target_pos, search_radius, room)
+        if not ready:
+            # 预算未轮到本敌人时保留旧路径；没有旧路径则由上层保持原地。
+            return self.path if self.path is not None else []
+        return path

@@ -107,6 +107,14 @@ class EnemyMgr:
         # AI 状态变更回调(由 GameServer 在 __init__ 时注册,注入给每个状态机)。
         # 状态机切换状态时回调,网络层据此广播 AiStateChanged(客户端切换视锥形态)。
         self._ai_state_change_hook = None
+        # A* 是全房间共享的昂贵操作；请求先入队，再由每个 tick 的预算统一消费。
+        self._path_tasks = {}
+        self._path_results = {}
+        self._path_last_request = {}
+        self._path_clock = 0.0
+        self._astar_count_this_tick = 0
+        self._path_result_drops = 0
+        self._path_invalidations = 0
 
     def set_ai_state_change_hook(self, cb) -> None:
         """
@@ -180,6 +188,65 @@ class EnemyMgr:
     def get_enemy_count(self) -> int:
         return len(self._ai_machine)
 
+    @property
+    def path_invalidations(self) -> int:
+        """累计因重定位丢弃的旧路径任务/结果数量。"""
+        return self._path_invalidations
+
+    @property
+    def astar_count_this_tick(self) -> int:
+        """最近一次 AI tick 实际执行的 A* 数量，供慢 tick 诊断读取。"""
+        return self._astar_count_this_tick
+
+    def mark_dirty(self, entity_id: str) -> None:
+        """标记服务端主动重定位的实体，确保下一次增量广播包含新位置。"""
+        self._dirty_entities.add(entity_id)
+
+    def invalidate_paths(self, entity_id: str) -> None:
+        """实体重定位后丢弃该实体所有旧 A* 任务/结果和 ChaseState 路径。"""
+        if entity_id in self._path_tasks or entity_id in self._path_results:
+            self._path_invalidations += 1
+        self._path_tasks.pop(entity_id, None)
+        self._path_results.pop(entity_id, None)
+        self._path_last_request.pop(entity_id, None)
+        machine = self._ai_machine.get(entity_id)
+        if machine is not None:
+            chase = machine.states.get("chase")
+            if chase is not None:
+                chase.path = None
+                chase.last_check_time = chase.check_target_cooldown
+
+    def request_path(self, entity_id: str, start, end, search_radius: float, room):
+        """提交或领取一个敌人的路径结果。
+
+        返回 ``(ready, path)``；未完成时不重复入队，ChaseState 会继续使用旧路径，
+        没有旧路径则停在原地。冷却和 pending 集合共同保证同一 tick 只排一次任务。
+        """
+        key = (round(end[0], 1), round(end[1], 1))
+        result = self._path_results.get(entity_id)
+        if result is not None:
+            self._path_results.pop(entity_id, None)
+            return True, result[1]
+        if entity_id in self._path_tasks:
+            return False, None
+        last = self._path_last_request.get(entity_id, -1e9)
+        cooldown = float(config_loader.get_constant("ENEMY_PATH_RECALC_COOLDOWN", 0.5))
+        if self._path_clock - last < cooldown:
+            return False, None
+        self._path_last_request[entity_id] = self._path_clock
+        self._path_tasks[entity_id] = (key, start, end, search_radius)
+        return False, None
+
+    def _process_path_tasks(self, room) -> None:
+        """在 AI 决策前按预算执行 A*，避免敌人数增加时单 tick 失控。"""
+        budget = max(0, int(config_loader.get_constant("ENEMY_MAX_PATH_TASKS_PER_TICK", 2)))
+        for entity_id in list(self._path_tasks.keys())[:budget]:
+            key, start, end, radius = self._path_tasks.pop(entity_id)
+            pathfinder = room.get_pathfinder()
+            path = pathfinder.find_path(start, end, radius) if pathfinder is not None else None
+            self._path_results[entity_id] = (key, path)
+            self._astar_count_this_tick += 1
+
     # ------------------------------------------------------------------
     # AI 主循环(由 GameServer._process_tick 每帧调用)
     # ------------------------------------------------------------------
@@ -210,6 +277,9 @@ class EnemyMgr:
                 # 3. 沿路径走一步
                 self._follow_path(entity_id, state, room)
         """
+        self._path_clock += max(0.0, dt)
+        self._astar_count_this_tick = 0
+        self._process_path_tasks(room)
         # TODO: 
         # 1. 决策冷却:没到时间就跳过(节省算力,不必每帧重算)
         #
@@ -254,13 +324,16 @@ class EnemyMgr:
         for player in players:
             dx = player.x - enemy.x
             dy = player.y - enemy.y
-            if dx <= distance and dy <= distance:
+            if dx * dx + dy * dy <= distance * distance:
                 return True
         return False
 
     def clear(self) -> None:
         """清空所有敌人 AI 状态(房间重置/销毁时用)"""
         self._ai_machine.clear()
+        self._path_tasks.clear()
+        self._path_results.clear()
+        self._path_last_request.clear()
 
     def pop_dirty_entities(self) -> set[str]:
         """取脏实体列表并清空(供 GameRoom._process_tick 用)"""

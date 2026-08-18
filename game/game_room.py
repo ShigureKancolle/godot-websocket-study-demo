@@ -252,6 +252,8 @@ class GameRoom:
         # SurvivalRun 与实体表同属 GameRoom；Run 只能通过本对象读写实体和战斗组件。
         self._survival_players: Dict[str, SurvivalPlayer] = {}
         self.survival_run = survival_run.SurvivalRun(self)
+        # 只有加入生存 Run 后才关闭生存单位的实体硬阻挡；普通木桩/测试流程仍走旧规则。
+        self._survival_mode = False
         # 每种敌人独立的下一个 ID 候选；生命周期绑定单个 GameRoom，一局内不复用。
         self._enemy_next_sequence: Dict[str, int] = {}
         # 击退状态表:entity_id -> KnockbackState(服务端瞬态,客户端不需要)
@@ -260,6 +262,9 @@ class GameRoom:
         # 重新赋一个空 set,覆盖类属性默认值——保证每个实例独立,不共享同一个 set
         # (类属性默认值只作为热更旧实例的兜底,见类属性上的注释)
         self._was_moving: set[str] = set()
+        # Run 重部署产生的权威位移在下一次 tick 统一进入 MovementBatch。
+        self._externally_moved: set[str] = set()
+        self._pending_relocations: list[dict] = []
         import game.enemy_mgr as enemy_mgr
         self._enemy_mgr = enemy_mgr.EnemyMgr()
 
@@ -356,6 +361,7 @@ class GameRoom:
 
     def add_survival_player(self, entity_id: str) -> SurvivalPlayer:
         """为进入房间的玩家建立本局进度；新一局进入时从初始值开始。"""
+        self._survival_mode = True
         state = SurvivalPlayer(entity_id)
         self._survival_players[entity_id] = state
         return state
@@ -550,6 +556,29 @@ class GameRoom:
 
         return True
 
+    def relocate_entity(self, entity_id: str, x: float, y: float) -> bool:
+        """权威重定位敌人并清理旧 AI 路径；位置进入下一条 MovementBatch。"""
+        info = self._entities.get(entity_id)
+        if info is None or not entity_config.get_capability(info.entity_type).can_move:
+            return False
+        if not self.is_position_walkable(x, y, info.entity_type):
+            return False
+        info.x = float(x)
+        info.y = float(y)
+        info.moving = False
+        info.move_dir_x = 0.0
+        info.move_dir_y = 0.0
+        self._externally_moved.add(entity_id)
+        self._pending_relocations.append({"entity_id": entity_id, "x": info.x, "y": info.y})
+        self._enemy_mgr.invalidate_paths(entity_id)
+        return True
+
+    def consume_relocations(self) -> list[dict]:
+        """一次性取出重定位事件，供网络层按 FIFO 广播。"""
+        events = self._pending_relocations
+        self._pending_relocations = []
+        return events
+
     def tick_movement(self, dt: float) -> list:
         """
         每 tick 持续推进所有 moving=True 的实体位移(服务端权威移动核心)
@@ -596,7 +625,8 @@ class GameRoom:
             本 tick 需要广播 PlayerMove 的 entity_id 列表
             (位移变化的 + 从移动→停止迁移的,供 web_server 收集广播用)
         """
-        moved_ids = []
+        moved_ids = list(self._externally_moved)
+        self._externally_moved.clear()
         # 本 tick 结束时「仍在移动 / 正在被推着动」的实体集合,
         # 存为 _was_moving 作为下一 tick 检测"停止迁移"(③)的基准。
         still_moving: set[str] = set()
@@ -752,6 +782,25 @@ class GameRoom:
         """取 A* 寻路器(敌人 AI 寻路用,可能为 None——未注入时降级为直线追击)"""
         return self._pathfinder
 
+    def is_survival_mode(self) -> bool:
+        """返回本房间是否启用生存单位重叠规则。"""
+        return self._survival_mode
+
+    def is_terrain_path_clear(self, start: Tuple[float, float], end: Tuple[float, float], entity_type: str) -> bool:
+        """仅采样地形直线可达性，供 ChaseState 决定是否需要排入 A*。"""
+        distance = math.hypot(end[0] - start[0], end[1] - start[1])
+        steps = max(1, int(distance / 16.0))
+        for index in range(1, steps + 1):
+            ratio = index / steps
+            if self._is_blocked_by_terrain(start[0] + (end[0] - start[0]) * ratio,
+                                           start[1] + (end[1] - start[1]) * ratio, entity_type):
+                return False
+        return True
+
+    def is_position_walkable(self, x: float, y: float, entity_type: str) -> bool:
+        """检查重定位候选点是否受地形阻挡；不考虑实体重叠。"""
+        return not self._is_blocked_by_terrain(x, y, entity_type)
+
     # ------------------------------------------------------------------
     # 穿墙权限(GM 调试用)
     # ------------------------------------------------------------------
@@ -872,6 +921,11 @@ class GameRoom:
                 continue
             # 跳过被击退中的实体(位置不受控,挡路会卡死别人)
             if other_id in self._knockbacks:
+                continue
+            # 生存模式允许玩家与敌人、敌人与敌人重叠，避免敌群互相卡死；地形阻挡仍由上层检查。
+            moving = self._entities.get(entity_id)
+            if self._survival_mode and moving is not None and (
+                    moving.entity_type.startswith("enemy") or other.entity_type.startswith("enemy")):
                 continue
             # 取对方能力配置,过滤非碰撞体 + 取半径
             other_cap = config_loader.get_capability(other.entity_type)

@@ -58,4 +58,5 @@ def register(server) -> None:
         # 单播回给发 Ping 的玩家(ctx.websocket 就是请求者的连接)
         # 不能广播——广播会让所有客户端按别人的 t 误算 RTT
         # 不走发送队列——延迟测量要最小化往返,直接立即发
-        await bus.send("Pong", {"t": t}, websocket=ctx.websocket)
+        # Pong 走网络层高优先级单播；网络层为同一 socket 串行化写入，避免与广播并发。
+        await server.send_control("Pong", {"t": t}, websocket=ctx.websocket)

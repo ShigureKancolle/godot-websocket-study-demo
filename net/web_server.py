@@ -105,7 +105,7 @@ class GameServer:
 
         # 把"新实体出现广播"注册给 GameRoom 作为钩子。
         # GM/控制台调 room.create_enemy 后,GameRoom 会回调这里,由网络层广播
-        # GameState + StatsInit,让所有在线客户端能看到新敌人。
+        # EntitySpawn 增量消息，让所有在线客户端原子接收新实体及其战斗属性。
         self.room.set_entity_spawn_hook(self._on_entity_spawned)
 
         # 把"AI 状态变更广播"注册给 EnemyMgr 作为钩子。
@@ -153,6 +153,17 @@ class GameServer:
         #   某个玩家网络慢只影响 sender,不影响 tick 节奏——30Hz 严格稳定
         # 顺序保证:asyncio.Queue 是 FIFO,tick 塞的消息顺序 = 发送顺序
         self._send_queue: asyncio.Queue = asyncio.Queue()
+        # 控制消息保持 FIFO；移动快照只保留最新一份，避免慢客户端拖住状态同步。
+        self._latest_movement: Optional[dict] = None
+        self._send_wakeup = asyncio.Event()
+        self._movement_overwrites = 0
+        self._movement_batches_sent = 0
+        self._movement_entries_sent = 0
+        self._movement_max_wait_ms = 0.0
+        self._control_burst = 0
+        self._max_control_burst = 8
+        self._tick_sequence = 0
+        self._socket_send_locks: Dict[object, asyncio.Lock] = {}
         self._sender_task = None
 
         # Windows 定时粒度是否已被本进程提升(timeBeginPeriod 成功才置 True)
@@ -249,7 +260,7 @@ class GameServer:
             if exclude_player and pid == exclude_player:
                 continue
             try:
-                await self.bus.send(protoname, protoprama, websocket=ws)
+                await self._send_serialized(protoname, protoprama, ws)
             except Exception as e:
                 logger.error(f"向玩家 {pid} 发送消息失败: {e}")
                 disconnected.add(pid)
@@ -268,13 +279,38 @@ class GameServer:
                 continue
             ws = session["websocket"]
             try:
-                await self.bus.send(protoname, protoprama, websocket=ws)
+                await self._send_serialized(protoname, protoprama, ws)
             except Exception as e:
                 logger.error(f"向客户端 {pid} 发送消息失败: {e}")
                 disconnected.add(pid)
 
         for pid in disconnected:
             await self.cleanup_player(pid)
+
+    async def _send_serialized(self, protoname: str, protodata: dict, websocket) -> None:
+        """串行化同一 websocket 的写入，防止 Pong 与广播并发调用底层 send。"""
+        lock = self._socket_send_locks.setdefault(websocket, asyncio.Lock())
+        async with lock:
+            await self.bus.send(protoname, protodata, websocket=websocket)
+
+    async def send_control(self, protoname: str, protodata: dict, websocket) -> None:
+        """发送高优先级控制消息；网络 handler 用此路径返回 Pong。"""
+        await self._send_serialized(protoname, protodata, websocket)
+
+    def get_send_diagnostics(self) -> dict:
+        """返回发送调度指标，供诊断面板或日志采样读取。"""
+        return {
+            "control_queue_depth": self._send_queue.qsize(),
+            "movement_pending": self._latest_movement is not None,
+            "movement_overwrites": self._movement_overwrites,
+            "movement_batches_sent": self._movement_batches_sent,
+            "movement_entries_sent": self._movement_entries_sent,
+            "movement_max_wait_ms": self._movement_max_wait_ms,
+            "control_burst": self._control_burst,
+            "astar_count_this_tick": self.room.get_enemy_manager().astar_count_this_tick,
+            "path_invalidations": self.room.get_enemy_manager().path_invalidations,
+            "reschedule_count": self.room.survival_run.reschedule_count,
+        }
 
 
     # ------------------------------------------------------------------
@@ -290,7 +326,14 @@ class GameServer:
         逻辑层(tick / timer 回调)用这个替代 await self.broadcast(...)。
         真正的发送在 _sender_loop 里进行,不影响 tick 节奏。
         """
-        self._send_queue.put_nowait((protoname, protodata))
+        if protoname == "MovementBatch":
+            if self._latest_movement is not None:
+                self._movement_overwrites += 1
+            self._latest_movement = protodata
+            protodata["_queued_at"] = time.monotonic()
+        else:
+            self._send_queue.put_nowait((protoname, protodata))
+        self._send_wakeup.set()
 
     def _on_entity_spawned(self, entity_info) -> None:
         """
@@ -333,23 +376,21 @@ class GameServer:
         """
         广播新实体出现(在事件循环线程内执行)
 
-        为什么广播 GameState + StatsInit 全量快照而非单条增量:
-            当前契约里没有通用的"EntitySpawn"消息(EnterRoom 语义是进入房间,复用会
-            把客户端 _local_entity_id 覆盖成敌人 id,破坏本地玩家识别),因此用已有的
-            全量快照消息把新实体带到所有客户端。全量快照代价是渲染层重建所有 Role,
-            对 GM 调试场景可接受;换来自洽性(实体和战斗属性都一次对齐)。
-
-        为什么先 StatsInit 再 GameState:
-            客户端 _create_role 创建 Role 时会查 mirror.get_combat() 决定是否初始化
-            血条。先发 StatsInit 让新敌人的战斗属性先进 _combats,再发 GameState 触发
-            state_replaced 重建 Role,创建时就能取到 combat,血条当前值正确显示。
+        GameRoom 先完成实体、战斗组件和 EnemyMgr AI 挂载，再回调本方法。
+        EntitySpawn 一条消息同时携带 EntityInfo 与 CombatStatsEntry，客户端可
+        原子写入两个镜像后创建 Role；新玩家进房/重连仍使用 GameState + StatsInit。
         """
-        combat_list = [dataclasses.asdict(c) for c in self.room.snapshot_combats()]
-        self._queue_broadcast("StatsInit", {"entries": combat_list})
-        entities_list = [dataclasses.asdict(e) for e in self.room.snapshot()]
-        self._queue_broadcast("GameState", {
-            "entities": entities_list,
-            "timestamp": int(time.time() * 1000)
+        # GameRoom 已先完成实体、战斗组件和 AI 挂载；一条 EntitySpawn 原子携带
+        # 实体与初始战斗属性，客户端无需触发全量 state_replaced 重建所有 Role。
+        combat = self.room.get_combat(entity_info.entity_id)
+        if combat is None:
+            # 无战斗组件的实体仍可出生，但不能伪造可战斗属性。
+            combat_data = {"entity_id": entity_info.entity_id}
+        else:
+            combat_data = dataclasses.asdict(combat)
+        self._queue_broadcast("EntitySpawn", {
+            "entity_info": dataclasses.asdict(entity_info),
+            "combat": combat_data,
         })
 
     async def _sender_loop(self) -> None:
@@ -361,9 +402,8 @@ class GameServer:
             某个玩家网络慢只影响本协程,不影响 tick 节奏。
 
         积压处理:
-            队列可能积压(tick 产生消息比 sender 发得快)。
-            这没关系——sender 会按 FIFO 顺序慢慢发,客户端最终收到最新状态。
-            如果积压严重,说明带宽不足或玩家太多,需要优化广播内容(如 delta 压缩)。
+            控制事件保留 FIFO，并限制连续控制发送 burst；移动状态只保留最新槽位，
+            到达公平点后发送，避免旧移动快照堆积或移动快照长期饥饿。
 
         错误处理:
             单条消息发送失败不退出循环,记日志继续发下一条。
@@ -372,8 +412,32 @@ class GameServer:
         logger.info("sender 协程启动")
         while self.is_running:
             try:
-                protoname, protodata = await self._send_queue.get()
+                if (not self._send_queue.empty() and
+                        (self._latest_movement is None or self._control_burst < self._max_control_burst)):
+                    protoname, protodata = self._send_queue.get_nowait()
+                elif self._latest_movement is not None:
+                    protoname, protodata = "MovementBatch", self._latest_movement
+                    self._latest_movement = None
+                else:
+                    # 先清除事件，再重新检查生产者写入；这样生产者在第一次空检查
+                    # 与 clear 之间 set 事件时，第二次检查会直接继续，不会丢唤醒。
+                    self._send_wakeup.clear()
+                    if not self._send_queue.empty() or self._latest_movement is not None:
+                        continue
+                    await self._send_wakeup.wait()
+                    continue
                 await self.broadcast(protoname, protodata)
+                if protoname == "MovementBatch":
+                    queued_at = protodata.pop("_queued_at", None)
+                    if queued_at is not None:
+                        self._movement_max_wait_ms = max(
+                            self._movement_max_wait_ms,
+                            (time.monotonic() - queued_at) * 1000.0)
+                    self._movement_batches_sent += 1
+                    self._movement_entries_sent += len(protodata.get("entries", []))
+                    self._control_burst = 0
+                else:
+                    self._control_burst += 1
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -487,6 +551,7 @@ class GameServer:
                 系统性偏慢,客户端预测对账累积超阈值 → 周期性回拉。
         """
         # 取出并清空(下一 tick 重新收集新的输入)
+        tick_start = time.perf_counter()
         pending = self._pending_inputs
         self._pending_inputs = {}
         # A solo level-up pauses the whole Run, including movement and attacks.
@@ -533,6 +598,9 @@ class GameServer:
         # It may spawn enemies and put distant enemies into returning state.
         self.room.survival_run.update(dt)
         run = self.room.survival_run
+        # 重定位是可靠控制事件，先入 FIFO，再发移动快照，客户端收到后直接 snap。
+        for relocation in self.room.consume_relocations():
+            self._queue_broadcast("EntityRelocated", relocation)
         # Run 先写入 GameRoom 权威状态，再由本层把快照/候选广播给客户端；
         # 客户端收到的 SurvivalState 和 LevelUpChoices 都不反向驱动服务器。
         for player in run.active_players():
@@ -581,17 +649,24 @@ class GameServer:
         # 解决了"丢 tick → 误差累积 → snap 拉回"的问题
         moved_ids = self.room.tick_movement(dt)
         moved_entities.update(moved_ids)
+        self._tick_sequence += 1
 
         # ⑤ 收集广播
         # PlayerMove: 所有需要同步移动状态的实体(改方向 + 被持续推进 + 停止迁移)
+        movement_entries = []
         for entity_id in moved_entities:
             info = self.room.get_entity(entity_id)
             if info is not None:
-                broadcasts.append(("PlayerMove", {
+                movement_entries.append({
                     "entity_id": entity_id,
                     "x": info.x, "y": info.y,
                     "moving": info.moving
-                }))
+                })
+        if movement_entries:
+            broadcasts.append(("MovementBatch", {
+                "tick": self._tick_sequence,
+                "entries": movement_entries,
+            }))
         # PlayerFacing: 朝向变化了的敌人
         for entity_id in dirty_enemies:
             info = self.room.get_entity(entity_id)
@@ -604,6 +679,12 @@ class GameServer:
         # ⑥ 统一广播
         for proto_name, proto_data in broadcasts:
             self._queue_broadcast(proto_name, proto_data)
+        elapsed_ms = (time.perf_counter() - tick_start) * 1000.0
+        warning_ms = float(config_loader.get_constant("SLOW_TICK_WARNING_MS", 50.0))
+        if elapsed_ms >= warning_ms:
+            enemy_mgr = self.room.get_enemy_manager()
+            logger.warning("生存 tick 超时: %.2fms, 活跃敌人数=%d, 本tick A*=%d",
+                           elapsed_ms, enemy_mgr.get_enemy_count(), enemy_mgr.astar_count_this_tick)
 
     def set_wallhack(self, entity_type: str, enabled: bool) -> None:
         """

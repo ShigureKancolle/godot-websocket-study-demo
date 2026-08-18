@@ -65,6 +65,9 @@ class SurvivalRun:
         self.pending_rewards: Dict[str, List[List[RewardChoice]]] = {}
         self.stats = {"kills": 0, "damage": 0}
         self._next_orb = 1
+        self.enemy_reschedule_clock: Dict[str, float] = {}
+        self._reschedule_clock = 0.0
+        self.reschedule_count = 0
 
     def active_players(self) -> list:
         """返回当前仍可参与 Run 的玩家实体；死亡玩家不参与刷怪和吸附。"""
@@ -113,7 +116,12 @@ class SurvivalRun:
         if not players:
             return
         self.spawn_accumulator += dt * (1.0 + self.elapsed / 120.0)
+        max_enemies = max(0, self.active_player_count() * 5)
         while self.spawn_accumulator >= 1.0:
+            active_enemies = sum(1 for entity in self.room.snapshot()
+                                 if entity.entity_type.startswith("enemy") and entity.state != "dead")
+            if active_enemies >= max_enemies:
+                break
             self.spawn_accumulator -= 1.0
             target = random.choice(players)
             angle = random.random() * math.tau
@@ -134,6 +142,9 @@ class SurvivalRun:
         # 不清血、不重置难度属性或统计。
         players = self.active_players()
         player_by_id = {p.entity_id: p for p in players}
+        self._reschedule_clock += max(0.0, dt)
+        rescheduled = 0
+        max_reschedules = int(config_loader.get_constant("ENEMY_MAX_RESCHEDULE_PER_TICK", 4))
         for enemy_id in list(self.room.get_enemy_manager().get_all_enemy_ids()):
             enemy = self.room.get_entity(enemy_id)
             if enemy is None or enemy.state == "dead":
@@ -152,6 +163,10 @@ class SurvivalRun:
                 enemy.ai_state = "returning"
                 self.room.apply_move_dir(enemy_id, 0, 0, False, dt)
                 continue
+            # 以玩家移动方向为候选基准；距离过远时直接把同一实体放回可行外围点。
+            if rescheduled < max_reschedules and self._try_front_reschedule(enemy_id, enemy, target):
+                rescheduled += 1
+                continue
             distance = math.hypot(target.x - enemy.x, target.y - enemy.y)
             if enemy_id in self.returning:
                 if distance < self.RESUME_DISTANCE:
@@ -163,6 +178,45 @@ class SurvivalRun:
                 self.returning.add(enemy_id)
                 enemy.ai_state = "returning"
                 self._move_toward(enemy_id, target, dt)
+
+    def _try_front_reschedule(self, enemy_id: str, enemy, target) -> bool:
+        """在敌人远离移动玩家时重定位；逐一检查前方多半径/多角度候选点。"""
+        if abs(target.move_dir_x) + abs(target.move_dir_y) <= 0.01 \
+                or enemy.state in ("attacking", "hurt", "dead"):
+            return False
+        distance = math.hypot(target.x - enemy.x, target.y - enemy.y)
+        threshold = float(config_loader.get_constant("ENEMY_FRONT_RESCHEDULE_DISTANCE", 1800.0))
+        if distance <= threshold:
+            return False
+        cooldown = float(config_loader.get_constant("ENEMY_RESCHEDULE_COOLDOWN", 2.0))
+        if self._reschedule_clock - self.enemy_reschedule_clock.get(enemy_id, -1e9) < cooldown:
+            return False
+        # 沿玩家移动方向扇区生成候选；每个候选都经过地形和
+        # GameRoom 权威接口检查，失败时不改变敌人的现有位置。
+        base_angle = math.atan2(target.move_dir_y, target.move_dir_x)
+        # 摄像头安全半径是硬约束；候选半径不得小于 850px，避免重定位直接落入视野。
+        safe_distance = float(config_loader.get_constant("ENEMY_RELOCATE_SAFE_DISTANCE", 850.0))
+        configured_radius = max(safe_distance, float(config_loader.get_constant("ENEMY_RELOCATE_BASE_DISTANCE", 850.0)))
+        radii = (configured_radius, configured_radius * 1.2, configured_radius * 1.5)
+        angles = (0.0, 0.35, -0.35, 0.7, -0.7, 1.1, -1.1)
+        candidates = []
+        for radius in radii:
+            for offset in angles:
+                candidate = (target.x + math.cos(base_angle + offset) * radius,
+                             target.y + math.sin(base_angle + offset) * radius)
+                if candidate not in candidates:
+                    candidates.append(candidate)
+        for candidate in candidates:
+            if not self.room.is_position_walkable(candidate[0], candidate[1], enemy.entity_type):
+                continue
+            if any(math.hypot(candidate[0] - player.x, candidate[1] - player.y) < safe_distance
+                   for player in self.active_players()):
+                continue
+            if self.room.relocate_entity(enemy_id, candidate[0], candidate[1]):
+                self.enemy_reschedule_clock[enemy_id] = self._reschedule_clock
+                self.reschedule_count += 1
+                return True
+        return False
 
     def _move_toward(self, enemy_id: str, target, dt: float) -> None:
         """以固定返程速度写入 GameRoom 移动入口，不重置敌人任何运行时属性。"""
@@ -280,5 +334,6 @@ class SurvivalRun:
         self.ended = True
         self.enemy_targets.clear()
         self.returning.clear()
+        self.enemy_reschedule_clock.clear()
         self.orbs.clear()
         self.pending_rewards.clear()
