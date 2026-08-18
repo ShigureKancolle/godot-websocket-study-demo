@@ -30,7 +30,7 @@ Role 本身只是一个「位置容器」: 有坐标、能挂子节点。
     - NPC → NpcVisual + NpcController(AI 驱动)
 
 ============================================================================
- 和服务器权威状态同步的关系(半预测 + 软对账)
+ 和服务器权威状态同步的关系(半预测 + 共同锚点对账)
 ============================================================================
 所有实体采用「服务端权威」;本地/远程的位置表现策略不同:
 
@@ -38,8 +38,7 @@ Role 本身只是一个「位置容器」: 有坐标、能挂子节点。
                 发完立即本地预测 position += dir * speed * delta(消除 RTT 滞后和顿挫)
                 → 服务端 apply_move_dir 记方向 → tick_movement 按实测 dt 推进权威位置 → 广播
                 → StateMirror 更新 → entity_updated → Role 更新 target_pos
-                → Role 软对账:回溯「RTT + 半个 tick」前的预测位置,与服务端坐标误差小则忽略,
-                  误差大(服务端因碰撞/锁定没推进)才 lerp 平滑回正;
+                → Role 以共同锚点比较相对位移，连续漂移超阈值才保留领先量回正;
                   变向/急停后的宽限窗口内跳过回正(服务端还没按新方向推进,回正会折回)
     - 远程玩家/敌人: 同上,但 Role._process 用 lerp 平滑 30Hz 跳变(30Hz→60Hz)
     - 木桩: StateMirror 收到 GameState 快照 → state_replaced 信号 → Role 创建并定位
@@ -48,7 +47,7 @@ Role 本身只是一个「位置容器」: 有坐标、能挂子节点。
     纯追赶(本地追服务端坐标)有个结构性缺陷:追到位 → 停等 → 等下一个广播。
 	30Hz 广播到达不均匀时(局域网 tick 也有 10-20ms 抖动),就变成"走走停停"的顿挫;
     方向切换时还追着旧方向坐标滑一小段再折回。本地玩家明明知道自己的方向,
-    用方向自推进(预测)就没有停等;服务端坐标只做校验(软对账),误差超阈值才回正。
+    用方向自推进(预测)就没有停等;服务端坐标只做共同锚点校验,连续相对漂移才回正。
 
 ============================================================================
  强类型 ClientEntityInfo(本次重构)
@@ -94,26 +93,26 @@ var _position_initialized: bool = false
 var _state: String = ""
 
 # ---------------------------------------------------------------------------
-# 本地玩家:预测轨迹历史 + 软对账(消除"拉扯")
+# 本地玩家:共同同步锚点 + 相对位移对账(消除"拉扯")
 # ---------------------------------------------------------------------------
-# 本地玩家位置由 LocalPlayerController 每帧预测推进,这里记录预测轨迹,
-# 收到服务端广播时回溯 RTT 前的预测位置与权威位置比较(软对账):
-#   - 误差小:预测正确,忽略(不回正 → 不拉扯)
-#   - 误差大:真脱节(服务端碰撞/锁定没推进),lerp 平滑回正
+# 本地玩家位置由 LocalPlayerController 每帧预测推进，收到服务端广播时
+# 比较共同锚点以来的客户端/服务端位移:
+#   - 稳定移动误差小:保持本地预测，不因固定传输领先量拉扯
+#   - 连续漂移过大:向带锚点领先量的权威位置平滑回正
 # 对比"限速追赶":追赶会"追到位→停等→等广播",广播抖动就顿挫;
 # 预测自推进没有停等,是消除拉扯的核心。
-var _pred_history: Array = []
+var _sync_anchor_local: Vector2 = Vector2.ZERO
+var _sync_anchor_server: Vector2 = Vector2.ZERO
+var _sync_anchor_valid: bool = false
+var _drift_batches: int = 0
+var _max_relative_error: float = 0.0
+var _authoritative_moving: bool = true
+var _dir_change_seen_ms: int = -1
+var _anchor_reset_after_grace: bool = false
 
-# 预测轨迹记录窗口(毫秒):只留最近这段,RTT 回溯够用
-# 60fps 下 1000ms ≈ 60 条
-const PRED_HISTORY_WINDOW_MS: int = 1000
-
-# 预测轨迹上限条数(防极端低帧率下窗口内条数爆炸)
-const PRED_HISTORY_MAX_ENTRIES: int = 200
-
-# 软对账阈值(像素):回溯 RTT 前预测位置与服务端位置误差超过它才回正
-# 需盖住 RTT 偏差引起的回溯偏移(speed×偏差,300px/s×30ms≈9px),取 15px
-const RECONCILE_THRESHOLD: float = 15.0
+# 稳定直行只比较锚点后的相对位移；连续三个批次超阈值才校正，避免网络抖动拉扯。
+const RELATIVE_DRIFT_THRESHOLD: float = 24.0
+const RELATIVE_DRIFT_BATCHES: int = 3
 
 # 回正插值系数:脱节时 position.lerp(target_pos, 0.35) 平滑回正,不硬跳(避免瞬移)
 const RECONCILE_LERP: float = 0.35
@@ -130,15 +129,20 @@ const RECOIL_DECAY: float = 12.0
 var _recoil_offset: Vector2 = Vector2.ZERO
 
 # 服务端 tick 周期(毫秒),和服务端 GameServer.TICK_INTERVAL_MS 对齐
-# 用于:对账回溯时刻修正(输入排队平均等半个 tick) + 变向宽限窗口计算
+# 用于:固定 tick 调度余量下的变向宽限窗口计算，不读取实时 RTT
 const SERVER_TICK_MS: float = 33.0
 
-# 变向宽限窗口 = RTT + DIR_CHANGE_GRACE_TICKS × tick + DIR_CHANGE_GRACE_MARGIN_MS
-# 方向刚变过(含急停)时,服务端要等「输入排队(≤1 tick)+ tick 处理 + 半程 RTT 回传」
+# 变向宽限窗口 = 固定 tick 排队余量 + DIR_CHANGE_GRACE_TICKS × tick + margin
+# 方向刚变过(含急停)时,服务端要等「输入排队(≤1 tick)+ tick 处理 + 固定同步余量」
 # 才按新方向推进,这期间广播的仍是旧方向轨迹,回正会把玩家"折回"旧方向 → 窗口内跳过。
-# 1.5 个 tick 覆盖「排队最坏 1 tick + 处理/回传抖动」;margin 兜底时序噪声
+# 1.5 个 tick 覆盖「排队最坏 1 tick + tick 调度抖动」;margin 兜底时序噪声
 const DIR_CHANGE_GRACE_TICKS: float = 1.5
 const DIR_CHANGE_GRACE_MARGIN_MS: float = 30.0
+const STABLE_DIR_GRACE_MS: float = SERVER_TICK_MS * DIR_CHANGE_GRACE_TICKS + DIR_CHANGE_GRACE_MARGIN_MS
+# 稳定对账设计：只保留固定 tick 调度余量；网络 RTT 仅用于诊断。
+
+# 对账诊断：RTT 仅在网络面板展示，不参与本地轨迹回溯。
+var _reconcile_count: int = 0
 
 # 远程实体 lerp 因子系数:lerp(position, target_pos, delta * LERP_FACTOR)
 # 15.0 → 60fps 时 alpha≈0.25,约 4 帧(66ms)追上目标点,视觉平滑无卡顿
@@ -331,6 +335,12 @@ func on_entity_updated(info: ClientEntityInfo) -> void:
 	if anim_machine != null and info.state != "":
 		anim_machine.update_state(info.state)
 
+## 重定位是服务端可靠控制事件，位置和插值目标同帧更新，避免敌人从旧位置滑入视野。
+func on_entity_relocated(info: ClientEntityInfo) -> void:
+	target_pos = Vector2(info.x, info.y)
+	position = target_pos
+	_position_initialized = true
+
 
 ## 攻击弧光触发:atk_id/朝向来自服务端广播,颜色按攻击者身份
 ## 本人淡蓝白 / 队友绿 / 敌人红(敌人攻击也显示红色威胁弧光)
@@ -367,16 +377,15 @@ func _process(delta: float) -> void:
 		return  # 首次位置还没设(setup 之前),跳过
 
 	if _is_local:
-		if _state == "hurt":
+		if _state == "hurt" or not _authoritative_moving or _state == "attacking" or _state == "dead":
 			# 硬直中:位置由服务端权威(击退等),本地不预测,lerp 跟随 target_pos
 			# 预测是"我按自己的方向走",硬直中我被推走,不能自己推自己;
-			# 软对账阈值(15px)也追不上单 tick 几像素的小步击退位移,直接 lerp 最稳
+			# 受击期间直接向服务端绝对位置收敛，确保击退不被本地预测遮蔽。
 			position = position.lerp(target_pos, min(delta * LERP_FACTOR, 1.0))
 		else:
-			# 本地:位置由 LocalPlayerController 每帧预测推进(LocalPlayerController._process
-			# 是子节点,本帧 Role 之后执行),这里只记录预测轨迹供收到广播时对账
+			# 本地:位置由 LocalPlayerController 每帧预测推进；批次到达时按锚点对账。
 			# 不做"限速追赶"——那是顿挫根源(追到位→停等→再追,广播抖动就走走停停)
-			_record_prediction()
+			pass
 	else:
 		# 远程:插值模式
 		# 服务端 30Hz 给出 target_pos,客户端 60Hz lerp 向它平滑过渡
@@ -400,83 +409,75 @@ func _process(delta: float) -> void:
 ## - 后续:只更新 target_pos,position 由 _process 对齐(本地 snap / 远程 lerp)
 func _update_position(info: ClientEntityInfo) -> void:
 	target_pos = Vector2(info.x, info.y)
+	_authoritative_moving = info.moving
+	var controller = get_node_or_null("LocalPlayerController")
+	if _is_local and controller != null:
+		var dir_change_ms: int = controller.get_last_dir_change_ms()
+		if dir_change_ms > _dir_change_seen_ms:
+			_dir_change_seen_ms = dir_change_ms
+			_anchor_reset_after_grace = true
 	if not _position_initialized:
 		# 首次定位:直接 snap(不插值,避免新 Role 从 (0,0) lerp 到目标点)
 		position = target_pos
 		_position_initialized = true
-	elif _is_local and _state != "hurt":
-		# 本地玩家且不在硬直中:软对账——回溯 RTT 前的预测位置与服务端权威位置比较,
-		# 误差小则忽略(正常移动信任本地预测,不回正→不拉扯),
-		# 误差大才平滑回正(服务端因碰撞/锁定没推进,预测跑偏了)
-		_reconcile_prediction()
+	elif _is_local:
+		# 停止、受击和攻击锁定必须收敛绝对权威目标；稳定移动使用相对锚点。
+		_reconcile_prediction(not info.moving or _state == "hurt" or _state == "attacking" or _state == "dead")
 	# 硬直中(hurt):只设 target_pos,由 _process lerp 跟随服务端位置(不软对账)
 	# 远程:只设 target_pos,由 _process lerp 插值趋近
 
 
-## 记录当前预测位置到轨迹历史(本地玩家每帧调用)
-## 条目: [time_ms, x, y](扁平数组,避免每帧分配 Vector2 对象)
-## 只在本地玩家调用;远程实体不需要预测轨迹(lerp 就行)
-func _record_prediction() -> void:
-	var now: int = Time.get_ticks_msec()
-	_pred_history.append([now, position.x, position.y])
-	# 裁剪窗口外的旧条目(按时间,窗口内通常 <100 条,单次遍历够快)
-	while _pred_history.size() > 0 and now - int(_pred_history[0][0]) > PRED_HISTORY_WINDOW_MS:
-		_pred_history.pop_front()
-	if _pred_history.size() > PRED_HISTORY_MAX_ENTRIES:
-		_pred_history.pop_front()
-
-
-## 软对账:收到服务端广播时,回溯对应时刻的预测位置,与服务端权威位置比较
-## 误差 <= 阈值:预测正确,忽略(不回正——回正就是"拉扯")
-## 误差 > 阈值:真脱节(服务端因碰撞/attacking 锁定没推进,预测跑偏),
-##   用 lerp 平滑回正(不是硬 snap,避免视觉瞬移),并清空轨迹
-##   (必须清空:回正后旧错误轨迹会继续误判脱节,见项目 memory 记录)
-##
-## 变向宽限:方向刚变过(含急停)时,服务端要等「输入排队 ≤1 tick + tick 处理 +
-##   半程 RTT 回传」才按新方向推进,这期间广播的仍是旧方向轨迹,
-##   此刻回正会把玩家"折回"旧方向 → 宽限窗口内跳过回正(轨迹照常记录,
-##   避免窗口结束后轨迹空洞)。窗口外恢复正常对账:真脱节仅延迟一个窗口仍会被回正。
-func _reconcile_prediction() -> void:
-	if _pred_history.is_empty():
-		return  # 无轨迹可回溯(刚开始/刚回正清空),跳过——首次靠 snap,之后靠预测
+## 共同锚点对账：稳定直行比较相对位移，连续多个批次漂移才校正。
+## 校正目标是 target_pos 加上锚点领先量，不把固定传输延迟误判为位置错误。
+func _reconcile_prediction(force_absolute: bool = false) -> void:
+	if not _sync_anchor_valid:
+		_sync_anchor_local = position
+		_sync_anchor_server = target_pos
+		_sync_anchor_valid = true
+		_drift_batches = 0
+		return
+	if force_absolute:
+		position = position.lerp(target_pos, RECONCILE_LERP)
+		_sync_anchor_local = position
+		_sync_anchor_server = target_pos
+		_drift_batches = 0
+		_reconcile_count += 1
+		return
 	var now: int = Time.get_ticks_msec()
 	# 变向宽限判断(只有本地玩家挂了 LocalPlayerController 才会走到这里)
 	var controller = get_node_or_null("LocalPlayerController")
 	if controller != null:
-		var grace_ms: float = WebScoketMgr.get_rtt_ms() \
-			+ SERVER_TICK_MS * DIR_CHANGE_GRACE_TICKS + DIR_CHANGE_GRACE_MARGIN_MS
+		var grace_ms: float = STABLE_DIR_GRACE_MS
 		if now - controller.get_last_dir_change_ms() < grace_ms:
 			return  # 宽限窗口内:跳过回正,继续信任本地预测
-	# 回溯时刻:服务端推进比客户端预测晚起步「RTT(输入上行+广播下行)+ 平均半个 tick
-	# (输入在 pending 里排队等 tick)」,所以要回溯相同跨度,对比的才是同一运动时刻
-	var lookup_time: float = float(now) - WebScoketMgr.get_rtt_ms() - SERVER_TICK_MS * 0.5
-	var predicted: Vector2 = _lookup_prediction_at(lookup_time)
-	if predicted.distance_to(target_pos) > RECONCILE_THRESHOLD:
-		# 真脱节:平滑回正(不用硬 snap,避免视觉瞬移)
-		position = position.lerp(target_pos, RECONCILE_LERP)
-		_pred_history.clear()
+	if _anchor_reset_after_grace:
+		# 变向后的首个有效批次重新建立锚点，避免旧方向的领先向量被当成漂移。
+		_sync_anchor_local = position
+		_sync_anchor_server = target_pos
+		_drift_batches = 0
+		_anchor_reset_after_grace = false
+		return
+	var relative_error := (position - _sync_anchor_local) - (target_pos - _sync_anchor_server)
+	var error := relative_error.length()
+	_max_relative_error = maxf(_max_relative_error, error)
+	if error > RELATIVE_DRIFT_THRESHOLD:
+		_drift_batches += 1
+	else:
+		_drift_batches = 0
+	if _drift_batches >= RELATIVE_DRIFT_BATCHES:
+		var lead := _sync_anchor_local - _sync_anchor_server
+		position = position.lerp(target_pos + lead, RECONCILE_LERP)
+		_sync_anchor_local = position
+		_sync_anchor_server = target_pos
+		_drift_batches = 0
+		_reconcile_count += 1
 
 
-## 在预测轨迹历史中回溯某时刻的预测位置
-## 找到相邻两条记录线性插值;目标时刻在窗口外则返回边界记录位置(退化)
-func _lookup_prediction_at(t: float) -> Vector2:
-	if _pred_history.is_empty():
-		return position  # 退化:无历史,返回当前
-	var first: Array = _pred_history[0]
-	if t <= float(first[0]):
-		return Vector2(first[1], first[2])  # 早于最旧记录
-	var last: Array = _pred_history[_pred_history.size() - 1]
-	if t >= float(last[0]):
-		return Vector2(last[1], last[2])  # 晚于最新记录
-	# 线性扫描找区间并插值(窗口内 <100 条,线性足够)
-	for i in range(1, _pred_history.size()):
-		var prev: Array = _pred_history[i - 1]
-		var cur: Array = _pred_history[i]
-		if t <= float(cur[0]):
-			var span: float = float(cur[0]) - float(prev[0])
-			var f: float = (t - float(prev[0])) / span if span > 0.0 else 0.0
-			return Vector2(lerpf(prev[1], cur[1], f), lerpf(prev[2], cur[2], f))
-	return Vector2(last[1], last[2])
+## 返回本地预测回正诊断，不包含 RTT 作为控制输入。
+func get_reconcile_diagnostics() -> Dictionary:
+	return {"count": _reconcile_count, "max_relative_error": _max_relative_error,
+		"drift_batches": _drift_batches, "anchor_valid": _sync_anchor_valid,
+		"anchor_lead": _sync_anchor_local - _sync_anchor_server}
 
 
 ## 移除指定名称的组件(如果存在)

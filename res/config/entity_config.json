@@ -71,7 +71,7 @@
         "body_params": {"radius": 20.0},
         "hit_layer": 2,
         "attack_mask": 1,
-        "speed": 150.0,
+          "speed": 235.0,
         "dead_duration_ms": 666,
         "combat_stats": {
             "max_hp": 50,
@@ -95,7 +95,7 @@
         "body_params": {"radius": 20.0},
         "hit_layer": 2,
         "attack_mask": 1,
-        "speed": 200.0,
+          "speed": 245.0,
         "dead_duration_ms": 666,
         "combat_stats": {
             "max_hp": 50,

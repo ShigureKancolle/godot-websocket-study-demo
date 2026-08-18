@@ -28,6 +28,7 @@ class_name ClientEntityInfo
 	- entity_type: EntityType   (服务端 str "player"/"stake",客户端枚举)
     - x, y: float               (服务端 float)
     - facing: float             (服务端 float,弧度)
+    - moving: bool              (服务端当前移动标志,供 Role 停止/预测对账)
     - state: String             (服务端 str: idle/run/attacking/hurt)
     - player_name: String       (服务端 str)
     - atk_id: int               (非 EntityInfo proto 字段,攻击消息携带,客户端临时存)
@@ -80,6 +81,9 @@ var y: float = 0.0
 # 朝向(弧度,0=朝右,逆时针正——Godot 标准)
 var facing: float = 0.0
 
+# 服务端当前移动标志；与动画 state 分开保存，避免战斗锁定状态覆盖它。
+var moving: bool = false
+
 # 动画状态(idle/run/attacking/hurt)
 # 和服务端 EntityInfo.state 严格对齐:服务端 apply_xxx 设什么,客户端就存什么
 var state: String = "idle"
@@ -121,6 +125,7 @@ static func from_dict(d: Dictionary) -> ClientEntityInfo:
 	info.x = float(d.get("x", 0.0))
 	info.y = float(d.get("y", 0.0))
 	info.facing = float(d.get("facing", 0.0))
+	info.moving = bool(d.get("moving", false))
 	info.state = d.get("state", "idle")
 	info.ai_state = d.get("ai_state", "idle")
 	info.player_name = d.get("player_name", "")

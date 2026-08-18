@@ -80,6 +80,7 @@ signal state_replaced(entities: Array)
 # 渲染层收到后只需「更新这一个实体」,比全量刷新省。
 # 参数:entity_info(ClientEntityInfo),变化的实体信息
 signal entity_updated(entity_info: ClientEntityInfo)
+signal entity_relocated(entity_info: ClientEntityInfo)
 
 # 实体离开信号:某实体离开了(玩家断连;木桩不会走这个路径,被破坏时另议)。
 # 渲染层收到后「移除该实体的显示」。
@@ -242,6 +243,8 @@ func register_handlers() -> void:
 	mb.onproto("game.GameState", _on_game_state)
 	mb.onproto("game.EnterRoom", _on_enter_room)
 	mb.onproto("game.PlayerMove", _on_player_move)
+	mb.onproto("game.MovementBatch", _on_movement_batch)
+	mb.onproto("game.EntityRelocated", _on_entity_relocated)
 	mb.onproto("game.PlayerFacing", _on_player_facing)
 	mb.onproto("game.LeaveRoom", _on_leave_room)
 	mb.onproto("game.Heartbeat", _on_heartbeat)
@@ -254,6 +257,7 @@ func register_handlers() -> void:
 	mb.onproto("game.HpChanged", _on_hp_changed)
 	mb.onproto("game.EntityRemove", _on_entity_remove)
 	mb.onproto("game.EntityDead", _on_entity_dead)
+	mb.onproto("game.EntitySpawn", _on_entity_spawn)
 	mb.onproto("game.MapInfo", _on_map_info)
 	mb.onproto("game.AiStateChanged", _on_ai_state_changed)
 	# 数据流：服务端 S2C -> MessageBus -> 本镜像 -> 信号 -> HUD/UI；镜像不改 Run 状态。
@@ -292,6 +296,36 @@ func _on_game_state(data: Dictionary) -> void:
 
 	# 通知渲染层:状态被整体替换了,请全量刷新
 	state_replaced.emit(_entities.values())
+
+
+## 收到 EntitySpawn：单实体出生增量，原子更新实体和战斗镜像。
+## 服务端先完成 GameRoom 创建，再经 MessageBus 到这里；不触发 state_replaced，
+## 因而已有 Role 不会被全量 free/rebuild。重复 ID 采用最新数据幂等覆盖。
+func _on_entity_spawn(data: Dictionary) -> void:
+	var entity_data: Dictionary = data.get("entity_info", {})
+	var combat_data: Dictionary = data.get("combat", {})
+	var eid: String = entity_data.get("entity_id", "")
+	if eid == "":
+		return
+	var info := ClientEntityInfo.from_dict(entity_data)
+	_entities[eid] = info
+	var combat := ClientCombatStats.from_dict(combat_data)
+	if combat.entity_id == "":
+		combat.entity_id = eid
+	_combats[eid] = combat
+	entity_updated.emit(info)
+	stats_changed.emit(combat)
+
+## 服务端重定位控制事件：更新权威镜像并单独通知渲染层，不能被 MovementBatch 插值吞掉。
+func _on_entity_relocated(data: Dictionary) -> void:
+	var eid: String = data.get("entity_id", "")
+	var entity: ClientEntityInfo = _entities.get(eid)
+	if entity == null:
+		return
+	entity.x = data.get("x", entity.x)
+	entity.y = data.get("y", entity.y)
+	entity.moving = false
+	entity_relocated.emit(entity)
 
 
 ## 收到 EnterRoom:增量添加一个实体(通常是玩家进入房间)
@@ -351,6 +385,7 @@ func _on_player_move(data: Dictionary) -> void:
 	# 没有 player_name 等字段,整体替换会丢信息。
 	entity.x = data.get("x", 0.0)
 	entity.y = data.get("y", 0.0)
+	entity.moving = bool(data.get("moving", false))
 
 	# 动画状态:从 moving 字段推断 state
 	# 服务端 apply_move_dir 也是用 moving 推 state(moving=true→"run", false→"idle"),
@@ -372,6 +407,25 @@ func _on_player_move(data: Dictionary) -> void:
 
 	# 通知渲染层:这个实体变了
 	entity_updated.emit(entity)
+
+
+## 原子应用服务端一个 tick 的移动批次；状态锁定时只更新坐标，不覆盖战斗动画状态。
+func _on_movement_batch(data: Dictionary) -> void:
+	var pending_updates: Array = []
+	for entry in data.get("entries", []):
+		var eid: String = entry.get("entity_id", "")
+		var entity: ClientEntityInfo = _entities.get(eid)
+		if eid == "" or entity == null:
+			continue
+		entity.x = entry.get("x", entity.x)
+		entity.y = entry.get("y", entity.y)
+		entity.moving = bool(entry.get("moving", false))
+		if entity.state != "attacking" and entity.state != "hurt" and entity.state != "dead":
+			entity.state = "run" if entry.get("moving", false) else "idle"
+		pending_updates.append(entity)
+	# 全部镜像字段写入后再发信号，避免渲染层看到半批次状态。
+	for entity in pending_updates:
+		entity_updated.emit(entity)
 
 
 ## 收到 PlayerFacing:增量更新某实体朝向

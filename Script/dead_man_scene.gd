@@ -38,6 +38,7 @@ func _ready() -> void:
 	var mirror = ClientStateMirror.instance()
 	mirror.state_replaced.connect(_on_state_replaced)
 	mirror.entity_updated.connect(_on_entity_updated)
+	mirror.entity_relocated.connect(_on_entity_relocated)
 	mirror.entity_removed.connect(_on_entity_removed)
 	mirror.entity_hurt_effect.connect(_on_entity_hurt_effect)
 	mirror.stats_inited.connect(_on_stats_inited)
@@ -81,6 +82,10 @@ func _on_entity_updated(info: ClientEntityInfo) -> void:
 	else:
 		# 不存在: 创建新 Role(可能是新玩家加入,或 GameState 乱序补单)
 		_create_role(info)
+
+func _on_entity_relocated(info: ClientEntityInfo) -> void:
+	if _entities.has(info.entity_id):
+		_entities[info.entity_id].on_entity_relocated(info)
 
 
 # StateMirror.entity_removed 信号: 实体离开

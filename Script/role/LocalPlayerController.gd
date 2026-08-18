@@ -70,6 +70,10 @@ const FACING_EPSILON: float = 0.01
 # 不加这个的话:玩家松开键盘后不再发 PlayerMove,服务端 state 永远停在 "run"
 var _was_moving: bool = false
 
+# 仅在移动开始、停止或方向真正变化时发送，服务端 tick 会持续推进权威位置。
+var _last_sent_move_dir: Vector2 = Vector2.ZERO
+var _last_sent_moving: bool = false
+
 # 本地预测速度(像素/秒),setup 时从 ConfigLoader 读
 # 必须和服务端 speed 一致(同一 shared_config/entity_config.json 同步),
 # 否则预测位移对不上服务端推进 → 对账误判脱节 → 回正抖动
@@ -210,11 +214,14 @@ func _process(delta: float) -> void:
 	_track_dir_change(intent.move_dir)  # 记录变向时刻(Role 软对账宽限用)
 	if moving:
 		# 发方向向量(Input.get_vector 已归一化)
-		MessageBus.instance().send("game.PlayerMove", {
-			"dir_x": intent.move_dir.x,
-			"dir_y": intent.move_dir.y,
-			"moving": true
-		})
+		if not _last_sent_moving or _last_sent_move_dir != intent.move_dir:
+			MessageBus.instance().send("game.PlayerMove", {
+				"dir_x": intent.move_dir.x,
+				"dir_y": intent.move_dir.y,
+				"moving": true
+			})
+			_last_sent_move_dir = intent.move_dir
+			_last_sent_moving = true
 		# 本地预测:发完方向立即按 dir * speed * delta 推进自己,不等服务端回传
 		# 消除"追-停"顿挫和 RTT 输入滞后;服务端坐标只做软对账(Role._reconcile_prediction)
 		#
@@ -246,6 +253,8 @@ func _process(delta: float) -> void:
 			"dir_y": 0.0,
 			"moving": false
 		})
+		_last_sent_move_dir = Vector2.ZERO
+		_last_sent_moving = false
 	_was_moving = moving
 
 	# 2. 朝向(从 intent.look_target 算 facing)

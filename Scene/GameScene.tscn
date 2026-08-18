@@ -5,6 +5,7 @@
 [ext_resource type="Script" uid="uid://bsya6e2ymvueq" path="res://Script/role/CameraFollow.gd" id="4_cv315"]
 [ext_resource type="Script" uid="uid://baakp84a8a7mh" path="res://Script/tiledmap/InfiniteTileMap.gd" id="5_infinite"]
 [ext_resource type="TileSet" uid="uid://b457v31ayifv6" path="res://tiledmap/Tileset.tres" id="6_tileset"]
+[ext_resource type="Script" path="res://Script/game_diagnostics.gd" id="7_diag"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_xbt3w"]
 
@@ -32,6 +33,14 @@ tile_set = ExtResource("6_tileset")
 [node name="DamageLayer" type="Node2D" parent="." unique_id=349648776]
 
 [node name="UILayer" type="CanvasLayer" parent="." unique_id=843776507]
+
+[node name="Diagnostics" type="Label" parent="UILayer"]
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 360.0
+offset_bottom = 42.0
+mouse_filter = 2
+script = ExtResource("7_diag")
 
 [node name="E_Back" type="Button" parent="UILayer" unique_id=1011072487]
 offset_left = 1091.0

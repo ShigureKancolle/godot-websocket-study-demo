@@ -25,19 +25,41 @@ var _role: ClientEntityInfo = null
 var _target_pos: Vector2 = Vector2.ZERO
 
 func _ready() -> void:
-	_target_id = ClientStateMirror.instance().local_entity_id()
-	ClientStateMirror.instance().entity_updated.connect(_on_entity_updated)
+	var mirror := ClientStateMirror.instance()
+	_target_id = mirror.local_entity_id()
+	mirror.state_replaced.connect(_on_state_replaced)
+	mirror.entity_updated.connect(_on_entity_updated)
+	mirror.entity_removed.connect(_on_entity_removed)
 
-func _on_entity_updated(_info: ClientEntityInfo) -> void:
-	pass
+func _on_state_replaced(_entities: Array) -> void:
+	# 全量快照可能清掉旧对象引用；下一帧从镜像重新绑定，避免跟随悬空对象。
+	_role = null
+
+func _on_entity_updated(info: ClientEntityInfo) -> void:
+	if info.entity_id == _target_id:
+		_role = info
+
+func _on_entity_removed(entity_id: String) -> void:
+	if entity_id == _target_id:
+		_role = null
 
 func _find_role() -> void:
 	# 从镜像里取本地玩家的 ClientEntityInfo(含 x/y 坐标,强类型)
 	_role = ClientStateMirror.instance().get_entity(_target_id)
 
 func _process(delta: float) -> void:
+	var mirror := ClientStateMirror.instance()
+	var local_id := mirror.local_entity_id()
+	if local_id != "" and local_id != _target_id:
+		_target_id = local_id
+		_role = null
 	if _target_id == "":
 		return
+	# 每帧 O(1) 查表是兜底：ready 可能早于 EnterRoom/EntitySpawn，且全量
+	# 清理可能替换 RefCounted 对象；位置权威仍来自服务端镜像，不在相机本地推演。
+	var latest_role: ClientEntityInfo = mirror.get_entity(_target_id)
+	if latest_role != _role:
+		_role = latest_role
 	if _role == null:
 		_find_role()
 		if _role == null:

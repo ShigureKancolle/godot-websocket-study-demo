@@ -159,6 +159,9 @@
         "ExperienceOrb": {"direction": "S2C", "category": "event", "state_affecting": true},
         "LevelUpChoices": {"direction": "S2C", "category": "event", "state_affecting": false},
         "ChooseReward": {"direction": "C2S", "category": "input", "state_affecting": true},
-        "SurvivalResult": {"direction": "S2C", "category": "event", "state_affecting": false}
+        "SurvivalResult": {"direction": "S2C", "category": "event", "state_affecting": false},
+        "EntitySpawn": {"direction": "S2C", "category": "event", "state_affecting": true, "comment": "原子携带实体镜像和初始战斗属性，客户端不触发全量替换。"},
+        "MovementBatch": {"direction": "S2C", "category": "snapshot", "state_affecting": false, "comment": "每 tick 的移动实体合并快照；tick 为服务端移动时基序号，entries 携带实体坐标和 moving 状态，客户端按批次原子应用。"},
+        "EntityRelocated": {"direction": "S2C", "category": "event", "state_affecting": true, "comment": "敌人重定位可靠控制事件；客户端镜像更新坐标并通知 Role 直接 snap，不经过插值。"}
     }
 }

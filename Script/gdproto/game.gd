@@ -2990,6 +2990,320 @@ class SurvivalResult:
 			return PB_ERR.PARSE_INCOMPLETE
 		return result
 	
+class EntitySpawn:
+	extends RefCounted
+	func _init():
+		var service
+		
+		__entity_info = PBField.new("entity_info", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		service = PBServiceField.new()
+		service.field = __entity_info
+		service.func_ref = Callable(self, "new_entity_info")
+		data[__entity_info.tag] = service
+		
+		__combat = PBField.new("combat", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 2, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		service = PBServiceField.new()
+		service.field = __combat
+		service.func_ref = Callable(self, "new_combat")
+		data[__combat.tag] = service
+		
+	var data = {}
+	
+	var __entity_info: PBField
+	func has_entity_info() -> bool:
+		if __entity_info.value != null:
+			return true
+		return false
+	func get_entity_info() -> EntityInfo:
+		return __entity_info.value
+	func clear_entity_info() -> void:
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__entity_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_entity_info() -> EntityInfo:
+		__entity_info.value = EntityInfo.new()
+		return __entity_info.value
+	
+	var __combat: PBField
+	func has_combat() -> bool:
+		if __combat.value != null:
+			return true
+		return false
+	func get_combat() -> CombatStatsEntry:
+		return __combat.value
+	func clear_combat() -> void:
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__combat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_combat() -> CombatStatsEntry:
+		__combat.value = CombatStatsEntry.new()
+		return __combat.value
+	
+	func _to_string() -> String:
+		return PBPacker.message_to_string(data)
+		
+	func to_bytes() -> PackedByteArray:
+		return PBPacker.pack_message(data)
+		
+	func from_bytes(bytes : PackedByteArray, offset : int = 0, limit : int = -1) -> int:
+		var cur_limit = bytes.size()
+		if limit != -1:
+			cur_limit = limit
+		var result = PBPacker.unpack_message(data, bytes, offset, cur_limit)
+		if result == cur_limit:
+			if PBPacker.check_required(data):
+				if limit == -1:
+					return PB_ERR.NO_ERRORS
+			else:
+				return PB_ERR.REQUIRED_FIELDS
+		elif limit == -1 && result > 0:
+			return PB_ERR.PARSE_INCOMPLETE
+		return result
+	
+class MovementBatchEntry:
+	extends RefCounted
+	func _init():
+		var service
+		
+		__entity_id = PBField.new("entity_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
+		service = PBServiceField.new()
+		service.field = __entity_id
+		data[__entity_id.tag] = service
+		
+		__x = PBField.new("x", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 2, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
+		service = PBServiceField.new()
+		service.field = __x
+		data[__x.tag] = service
+		
+		__y = PBField.new("y", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 3, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
+		service = PBServiceField.new()
+		service.field = __y
+		data[__y.tag] = service
+		
+		__moving = PBField.new("moving", PB_DATA_TYPE.BOOL, PB_RULE.OPTIONAL, 4, true, DEFAULT_VALUES_3[PB_DATA_TYPE.BOOL])
+		service = PBServiceField.new()
+		service.field = __moving
+		data[__moving.tag] = service
+		
+	var data = {}
+	
+	var __entity_id: PBField
+	func has_entity_id() -> bool:
+		if __entity_id.value != null:
+			return true
+		return false
+	func get_entity_id() -> String:
+		return __entity_id.value
+	func clear_entity_id() -> void:
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__entity_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
+	func set_entity_id(value : String) -> void:
+		__entity_id.value = value
+	
+	var __x: PBField
+	func has_x() -> bool:
+		if __x.value != null:
+			return true
+		return false
+	func get_x() -> float:
+		return __x.value
+	func clear_x() -> void:
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__x.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
+	func set_x(value : float) -> void:
+		__x.value = value
+	
+	var __y: PBField
+	func has_y() -> bool:
+		if __y.value != null:
+			return true
+		return false
+	func get_y() -> float:
+		return __y.value
+	func clear_y() -> void:
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__y.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
+	func set_y(value : float) -> void:
+		__y.value = value
+	
+	var __moving: PBField
+	func has_moving() -> bool:
+		if __moving.value != null:
+			return true
+		return false
+	func get_moving() -> bool:
+		return __moving.value
+	func clear_moving() -> void:
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__moving.value = DEFAULT_VALUES_3[PB_DATA_TYPE.BOOL]
+	func set_moving(value : bool) -> void:
+		__moving.value = value
+	
+	func _to_string() -> String:
+		return PBPacker.message_to_string(data)
+		
+	func to_bytes() -> PackedByteArray:
+		return PBPacker.pack_message(data)
+		
+	func from_bytes(bytes : PackedByteArray, offset : int = 0, limit : int = -1) -> int:
+		var cur_limit = bytes.size()
+		if limit != -1:
+			cur_limit = limit
+		var result = PBPacker.unpack_message(data, bytes, offset, cur_limit)
+		if result == cur_limit:
+			if PBPacker.check_required(data):
+				if limit == -1:
+					return PB_ERR.NO_ERRORS
+			else:
+				return PB_ERR.REQUIRED_FIELDS
+		elif limit == -1 && result > 0:
+			return PB_ERR.PARSE_INCOMPLETE
+		return result
+	
+class MovementBatch:
+	extends RefCounted
+	func _init():
+		var service
+		
+		__tick = PBField.new("tick", PB_DATA_TYPE.INT64, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT64])
+		service = PBServiceField.new()
+		service.field = __tick
+		data[__tick.tag] = service
+		
+		var __entries_default: Array[MovementBatchEntry] = []
+		__entries = PBField.new("entries", PB_DATA_TYPE.MESSAGE, PB_RULE.REPEATED, 2, true, __entries_default)
+		service = PBServiceField.new()
+		service.field = __entries
+		service.func_ref = Callable(self, "add_entries")
+		data[__entries.tag] = service
+		
+	var data = {}
+	
+	var __tick: PBField
+	func has_tick() -> bool:
+		if __tick.value != null:
+			return true
+		return false
+	func get_tick() -> int:
+		return __tick.value
+	func clear_tick() -> void:
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__tick.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT64]
+	func set_tick(value : int) -> void:
+		__tick.value = value
+	
+	var __entries: PBField
+	func get_entries() -> Array[MovementBatchEntry]:
+		return __entries.value
+	func clear_entries() -> void:
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__entries.value.clear()
+	func add_entries() -> MovementBatchEntry:
+		var element = MovementBatchEntry.new()
+		__entries.value.append(element)
+		return element
+	
+	func _to_string() -> String:
+		return PBPacker.message_to_string(data)
+		
+	func to_bytes() -> PackedByteArray:
+		return PBPacker.pack_message(data)
+		
+	func from_bytes(bytes : PackedByteArray, offset : int = 0, limit : int = -1) -> int:
+		var cur_limit = bytes.size()
+		if limit != -1:
+			cur_limit = limit
+		var result = PBPacker.unpack_message(data, bytes, offset, cur_limit)
+		if result == cur_limit:
+			if PBPacker.check_required(data):
+				if limit == -1:
+					return PB_ERR.NO_ERRORS
+			else:
+				return PB_ERR.REQUIRED_FIELDS
+		elif limit == -1 && result > 0:
+			return PB_ERR.PARSE_INCOMPLETE
+		return result
+	
+class EntityRelocated:
+	extends RefCounted
+	func _init():
+		var service
+		
+		__entity_id = PBField.new("entity_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
+		service = PBServiceField.new()
+		service.field = __entity_id
+		data[__entity_id.tag] = service
+		
+		__x = PBField.new("x", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 2, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
+		service = PBServiceField.new()
+		service.field = __x
+		data[__x.tag] = service
+		
+		__y = PBField.new("y", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 3, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
+		service = PBServiceField.new()
+		service.field = __y
+		data[__y.tag] = service
+		
+	var data = {}
+	
+	var __entity_id: PBField
+	func has_entity_id() -> bool:
+		if __entity_id.value != null:
+			return true
+		return false
+	func get_entity_id() -> String:
+		return __entity_id.value
+	func clear_entity_id() -> void:
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__entity_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
+	func set_entity_id(value : String) -> void:
+		__entity_id.value = value
+	
+	var __x: PBField
+	func has_x() -> bool:
+		if __x.value != null:
+			return true
+		return false
+	func get_x() -> float:
+		return __x.value
+	func clear_x() -> void:
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__x.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
+	func set_x(value : float) -> void:
+		__x.value = value
+	
+	var __y: PBField
+	func has_y() -> bool:
+		if __y.value != null:
+			return true
+		return false
+	func get_y() -> float:
+		return __y.value
+	func clear_y() -> void:
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__y.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
+	func set_y(value : float) -> void:
+		__y.value = value
+	
+	func _to_string() -> String:
+		return PBPacker.message_to_string(data)
+		
+	func to_bytes() -> PackedByteArray:
+		return PBPacker.pack_message(data)
+		
+	func from_bytes(bytes : PackedByteArray, offset : int = 0, limit : int = -1) -> int:
+		var cur_limit = bytes.size()
+		if limit != -1:
+			cur_limit = limit
+		var result = PBPacker.unpack_message(data, bytes, offset, cur_limit)
+		if result == cur_limit:
+			if PBPacker.check_required(data):
+				if limit == -1:
+					return PB_ERR.NO_ERRORS
+			else:
+				return PB_ERR.REQUIRED_FIELDS
+		elif limit == -1 && result > 0:
+			return PB_ERR.PARSE_INCOMPLETE
+		return result
+	
 class GameMessage:
 	extends RefCounted
 	func _init():
@@ -3151,6 +3465,24 @@ class GameMessage:
 		service.func_ref = Callable(self, "new_survival_result")
 		data[__survival_result.tag] = service
 		
+		__entity_spawn = PBField.new("entity_spawn", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 28, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		service = PBServiceField.new()
+		service.field = __entity_spawn
+		service.func_ref = Callable(self, "new_entity_spawn")
+		data[__entity_spawn.tag] = service
+		
+		__movement_batch = PBField.new("movement_batch", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 29, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		service = PBServiceField.new()
+		service.field = __movement_batch
+		service.func_ref = Callable(self, "new_movement_batch")
+		data[__movement_batch.tag] = service
+		
+		__entity_relocated = PBField.new("entity_relocated", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 30, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		service = PBServiceField.new()
+		service.field = __entity_relocated
+		service.func_ref = Callable(self, "new_entity_relocated")
+		data[__entity_relocated.tag] = service
+		
 	var data = {}
 	
 	enum MessageTypeCase {
@@ -3181,6 +3513,9 @@ class GameMessage:
 		LEVEL_UP_CHOICES = 25,
 		CHOOSE_REWARD = 26,
 		SURVIVAL_RESULT = 27,
+		ENTITY_SPAWN = 28,
+		MOVEMENT_BATCH = 29,
+		ENTITY_RELOCATED = 30,
 	}
 	var _message_type_case: int = 0
 
@@ -3245,6 +3580,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__login.value = Login.new()
 		return __login.value
 	
@@ -3309,6 +3650,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__enter_room.value = EnterRoom.new()
 		return __enter_room.value
 	
@@ -3373,6 +3720,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__leave_room.value = LeaveRoom.new()
 		return __leave_room.value
 	
@@ -3437,6 +3790,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = PlayerMove.new()
 		return __player_move.value
 	
@@ -3501,6 +3860,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__chat_message.value = ChatMessage.new()
 		return __chat_message.value
 	
@@ -3565,6 +3930,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__game_state.value = GameState.new()
 		return __game_state.value
 	
@@ -3629,6 +4000,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__heartbeat.value = Heartbeat.new()
 		return __heartbeat.value
 	
@@ -3693,6 +4070,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__player_facing.value = PlayerFacing.new()
 		return __player_facing.value
 	
@@ -3757,6 +4140,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__attack_start.value = AttackStart.new()
 		return __attack_start.value
 	
@@ -3821,6 +4210,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__attack_hit.value = AttackHit.new()
 		return __attack_hit.value
 	
@@ -3885,6 +4280,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__attack_end.value = AttackEnd.new()
 		return __attack_end.value
 	
@@ -3949,6 +4350,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__hurt_end.value = HurtEnd.new()
 		return __hurt_end.value
 	
@@ -4013,6 +4420,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__stats_init.value = StatsInit.new()
 		return __stats_init.value
 	
@@ -4077,6 +4490,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__stats_changed.value = StatsChanged.new()
 		return __stats_changed.value
 	
@@ -4141,6 +4560,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__hp_changed.value = HpChanged.new()
 		return __hp_changed.value
 	
@@ -4205,6 +4630,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__entity_dead.value = EntityDead.new()
 		return __entity_dead.value
 	
@@ -4269,6 +4700,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__entity_remove.value = EntityRemove.new()
 		return __entity_remove.value
 	
@@ -4333,6 +4770,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__ping.value = Ping.new()
 		return __ping.value
 	
@@ -4397,6 +4840,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__pong.value = Pong.new()
 		return __pong.value
 	
@@ -4461,6 +4910,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__map_info.value = MapInfo.new()
 		return __map_info.value
 	
@@ -4525,6 +4980,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = AiStateChanged.new()
 		return __ai_state_changed.value
 	
@@ -4589,6 +5050,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__survival_state.value = SurvivalState.new()
 		return __survival_state.value
 	
@@ -4653,6 +5120,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__experience_orb.value = ExperienceOrb.new()
 		return __experience_orb.value
 	
@@ -4717,6 +5190,12 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__level_up_choices.value = LevelUpChoices.new()
 		return __level_up_choices.value
 	
@@ -4781,6 +5260,12 @@ class GameMessage:
 		_message_type_case = 26
 		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__choose_reward.value = ChooseReward.new()
 		return __choose_reward.value
 	
@@ -4845,8 +5330,224 @@ class GameMessage:
 		data[26].state = PB_SERVICE_STATE.UNFILLED
 		data[27].state = PB_SERVICE_STATE.FILLED
 		_message_type_case = 27
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
 		__survival_result.value = SurvivalResult.new()
 		return __survival_result.value
+	
+	var __entity_spawn: PBField
+	func has_entity_spawn() -> bool:
+		return data[28].state == PB_SERVICE_STATE.FILLED
+	func get_entity_spawn() -> EntitySpawn:
+		return __entity_spawn.value
+	func clear_entity_spawn() -> void:
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_entity_spawn() -> EntitySpawn:
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__chat_message.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__game_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[5].state = PB_SERVICE_STATE.UNFILLED
+		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
+		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[8].state = PB_SERVICE_STATE.UNFILLED
+		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[9].state = PB_SERVICE_STATE.UNFILLED
+		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
+		__stats_init.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[12].state = PB_SERVICE_STATE.UNFILLED
+		__stats_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[13].state = PB_SERVICE_STATE.UNFILLED
+		__hp_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[14].state = PB_SERVICE_STATE.UNFILLED
+		__entity_dead.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[15].state = PB_SERVICE_STATE.UNFILLED
+		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
+		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
+		data[28].state = PB_SERVICE_STATE.FILLED
+		_message_type_case = 28
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = EntitySpawn.new()
+		return __entity_spawn.value
+	
+	var __movement_batch: PBField
+	func has_movement_batch() -> bool:
+		return data[29].state == PB_SERVICE_STATE.FILLED
+	func get_movement_batch() -> MovementBatch:
+		return __movement_batch.value
+	func clear_movement_batch() -> void:
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_movement_batch() -> MovementBatch:
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__chat_message.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__game_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[5].state = PB_SERVICE_STATE.UNFILLED
+		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
+		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[8].state = PB_SERVICE_STATE.UNFILLED
+		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[9].state = PB_SERVICE_STATE.UNFILLED
+		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
+		__stats_init.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[12].state = PB_SERVICE_STATE.UNFILLED
+		__stats_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[13].state = PB_SERVICE_STATE.UNFILLED
+		__hp_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[14].state = PB_SERVICE_STATE.UNFILLED
+		__entity_dead.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[15].state = PB_SERVICE_STATE.UNFILLED
+		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
+		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		data[29].state = PB_SERVICE_STATE.FILLED
+		_message_type_case = 29
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[30].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = MovementBatch.new()
+		return __movement_batch.value
+	
+	var __entity_relocated: PBField
+	func has_entity_relocated() -> bool:
+		return data[30].state == PB_SERVICE_STATE.FILLED
+	func get_entity_relocated() -> EntityRelocated:
+		return __entity_relocated.value
+	func clear_entity_relocated() -> void:
+		data[30].state = PB_SERVICE_STATE.UNFILLED
+		__entity_relocated.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_entity_relocated() -> EntityRelocated:
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__chat_message.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__game_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[5].state = PB_SERVICE_STATE.UNFILLED
+		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
+		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[8].state = PB_SERVICE_STATE.UNFILLED
+		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[9].state = PB_SERVICE_STATE.UNFILLED
+		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
+		__stats_init.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[12].state = PB_SERVICE_STATE.UNFILLED
+		__stats_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[13].state = PB_SERVICE_STATE.UNFILLED
+		__hp_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[14].state = PB_SERVICE_STATE.UNFILLED
+		__entity_dead.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[15].state = PB_SERVICE_STATE.UNFILLED
+		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
+		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__entity_spawn.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[28].state = PB_SERVICE_STATE.UNFILLED
+		__movement_batch.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[29].state = PB_SERVICE_STATE.UNFILLED
+		data[30].state = PB_SERVICE_STATE.FILLED
+		_message_type_case = 30
+		__entity_relocated.value = EntityRelocated.new()
+		return __entity_relocated.value
 	
 	func get_message_type_case() -> int:
 		return _message_type_case

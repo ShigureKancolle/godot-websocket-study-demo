@@ -4,6 +4,8 @@
 
 extends Node
 
+# RTT 只用于网络质量诊断与 HUD 展示；Role 对账不读取 RTT，使用固定同步时基。
+
 var ws_path = "ws://127.0.0.1:8765"
 
 # 是否已发送 Login（连接后/登录后自动补发）
@@ -27,16 +29,15 @@ var _need_rejoin: bool = false
 # ---------------------------------------------------------------------------
 # 原理:客户端每 PING_INTERVAL_MS 发一次 game.Ping{t}(t=本地发送时刻ms),
 #       服务端原样回 game.Pong{t},客户端 now - t 即一次往返延迟(RTT)。
-# 作用:本地玩家移动软对账用——Role._reconcile_prediction 收到服务端广播时,
-#       回溯 now-RTT 时刻自己预测的位置再与服务端坐标比较,抵消传输延迟。
-# EMA 平滑(alpha=RTT_SMOOTH_ALPHA)抗单次抖动;首个 Pong 到达前用默认值(局域网经验 50ms)。
-# 250ms 发一次 Ping:RTT 更新更频繁、收敛更快,对账回溯的时刻偏移更小。
-# 旧值 1000ms:局域网 RTT 突变后要等 1s 才修正,期间回溯偏差大易误判脱节
+# 作用:仅供网络诊断与 HUD 展示；Role 不读取 RTT，预测和回正使用稳定同步时基。
+# EMA 平滑用于让诊断数据显示稳定；它不会改变任何本地预测或权威位置对账。
+# 250ms 发一次 Ping 便于及时观察网络质量，不能作为位置校时依据。
 const PING_INTERVAL_MS: int = 250
 const RTT_SMOOTH_ALPHA: float = 0.2
 
-# 当前估计的往返延迟(毫秒),已平滑。Role 对账时读它。
+# 当前估计的往返延迟(毫秒),已平滑，仅供诊断面板读取。
 var _rtt_ms: float = 50.0
+# 说明：RTT 仅用于网络诊断展示；本地 Role 对账采用稳定时基，不读取该值。
 # 上次发 Ping 的时刻(ms),用于按 PING_INTERVAL_MS 节流
 var _last_ping_ms: int = 0
 # 是否开始 RTT 测量。默认关闭——服务端要求第一条消息必须是 Login,
@@ -172,7 +173,7 @@ func _send_enter_room() -> void:
 
 
 
-## 收到服务端回传的 Pong:算一次 RTT 并做 EMA 平滑
+## 收到 Pong：更新诊断用 RTT EMA；该值不参与本地预测或权威位置对账。
 func _on_pong(data: Dictionary) -> void:
 	var t: int = int(data.get("t", 0))
 	if t == 0:
@@ -183,14 +184,14 @@ func _on_pong(data: Dictionary) -> void:
 	# EMA 平滑:新样本占 20%,抗网络抖动造成的单次异常值
 	_rtt_ms = lerpf(_rtt_ms, rtt, RTT_SMOOTH_ALPHA)
 
-## 当前估计的往返延迟(毫秒)。供 Role 对账外推使用。
+## 当前估计的往返延迟(毫秒)，仅供网络诊断读取。
 func get_rtt_ms() -> float:
 	return _rtt_ms
 
 
-## 开始 RTT 测量(进入游戏场景后由场景 _ready 调用)
+## 开始 RTT 测量(进入游戏场景后由场景 _ready 调用，仅用于网络诊断)
 ## 为什么不在连接成功时就开始:服务端校验「第一条消息必须是 Login」,
 ## 一连接就发 Ping 会抢首消息被踢;进游戏时 EnterRoom 已发出,此时再测 RTT 安全,
-## 且 RTT 也只在本地玩家移动对账时才真正需要。
+## RTT 不参与本地玩家移动预测、回正或任何游戏状态决策。
 func start_rtt_measurement() -> void:
 	_rtt_active = true
