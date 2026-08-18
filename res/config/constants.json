@@ -4,6 +4,9 @@
 
 	"HURT_DURATION_MS": 666,
 	"AI_ACTIVATE_DISTANCE": 1500.0,
+	"LEASH_RETURN_DISTANCE": 1500.0,
+	"LEASH_RESUME_DISTANCE": 1200.0,
+	"LEASH_RETURN_SPEED": 220.0,
 
 	"_vision_switch_desc": "VISION_ENABLED=敌人视锥功能总开关。true=开启(默认),敌人按视锥(角度+半径)寻人、按追逐视野判定脱离并放弃追击;false=关闭,敌人无视视锥角度/半径与追击距离上限(max_chase_distance),追击最近的玩家(AI_ACTIVATE_DISTANCE 激活距离仍生效,玩家在激活范围外 AI 不跑)",
 	"VISION_ENABLED": false

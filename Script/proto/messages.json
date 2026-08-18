@@ -154,6 +154,11 @@
             "category": "event",
             "state_affecting": false,
             "comment": "AI 状态变更(服务端广播,敌人 AI 状态切换时实时发,和 PlayerFacing 平行的独立维度)。字段:entity_id(实体ID)/ai_state(新的 AI 状态:patrol/chase/attack/look_around,只有敌人有,玩家/木桩不填)。触发时机:EnemyAIMachine.change_state 状态真正切换(old != new)时,由 GameServer 注册的钩子广播(低频事件,切换即广播,不走 tick dirty 集合)。客户端 StateMirror 收到后只改镜像里的 ai_state 字段,不动坐标/朝向,渲染层据此切换视锥形态(normal/chase)。state_affecting=false:广播本身不改 GameRoom 状态(AI 状态在 EnemyMgr 里已切换,广播只是通知客户端)"
-        }
+        },
+        "SurvivalState": {"direction": "S2C", "category": "snapshot", "state_affecting": false},
+        "ExperienceOrb": {"direction": "S2C", "category": "event", "state_affecting": true},
+        "LevelUpChoices": {"direction": "S2C", "category": "event", "state_affecting": false},
+        "ChooseReward": {"direction": "C2S", "category": "input", "state_affecting": true},
+        "SurvivalResult": {"direction": "S2C", "category": "event", "state_affecting": false}
     }
 }

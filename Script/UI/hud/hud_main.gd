@@ -10,6 +10,29 @@ HUD 主控脚本(纯客户端显示控制)
 '''
 extends Control
 
+signal survival_reward_requested(index: int)
+signal survival_result_shown(result: Dictionary)
+
+var survival_state: Dictionary = {}
+var pending_reward_choices: Dictionary = {}
+
+func apply_survival_state(state: Dictionary) -> void:
+	# 仅更新展示数据；权威值来自 ClientStateMirror，客户端不推进 Run 计时或经验。
+	survival_state = state.duplicate()
+
+func show_level_up_choices(choices: Dictionary) -> void:
+	# 保存当前待选项供 UI 绘制，点击后仍需通过信号发送服务端请求。
+	pending_reward_choices = choices.duplicate()
+
+func request_survival_reward(index: int) -> void:
+	# 数据流：UI 点击 -> 上层发送 ChooseReward(C2S) -> 服务端校验 ->
+	# SurvivalState/LevelUpChoices 回传；HUD 不直接改等级或奖励。
+	survival_reward_requested.emit(index)
+
+func show_survival_result(result: Dictionary) -> void:
+	# 结算面板只显示服务端统计；不在本地重新计算生存时间或击杀数。
+	survival_result_shown.emit(result.duplicate())
+
 # 聊天框提交(回车或点发送按钮),由上层决定走 game.ChatMessage 还是本地测试
 signal chat_submitted(text: String)
 # 点击「角色详情」按钮

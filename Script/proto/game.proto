@@ -209,6 +209,40 @@ message AiStateChanged {
 }
 
 // 通用消息包装器
+// 生存状态快照（S2C）：服务端每个 tick 广播，客户端只镜像和显示。
+message SurvivalState {
+  float elapsed_seconds = 1; // 本局已生存秒数，服务端 Run 的权威值。
+  int32 wave = 2;             // 当前波次，由服务端按时间推进。
+  bool paused = 3;            // 单人待选奖励时暂停；多人不因他人升级暂停。
+  int32 level = 4;            // 该玩家等级。
+  int32 experience = 5;       // 距离下一次升级的当前经验余量。
+  int32 next_experience = 6;  // 下一等级所需经验阈值。
+}
+// 经验球事件（S2C）：敌人死亡后产生，服务端确认抵达后才加经验。
+message ExperienceOrb {
+  string orb_id = 1; // 球的唯一 ID，客户端用于表现层去重。
+  float x = 2;       // 服务端提供的世界 X 坐标。
+  float y = 3;       // 服务端提供的世界 Y 坐标。
+  int32 value = 4;   // 球抵达玩家时由服务端结算的经验值。
+}
+// 升级候选事件（S2C）：队列归服务端所有，客户端只负责展示。
+message LevelUpChoices {
+  string player_id = 1;           // 选择权限所属玩家。
+  repeated string reward_ids = 2; // 候选奖励 ID，与 labels 同下标对应。
+  repeated string labels = 3;     // 展示文本，不代表客户端可直接应用属性。
+}
+// 升级选择请求（C2S）：服务端校验玩家、队列、下标及请求是否过期。
+message ChooseReward {
+  int32 index = 1; // 当前队列首项下标；非法、重复或过期请求被拒绝。
+}
+// 生存结算（S2C）：全员死亡后服务端封存，客户端只显示统计。
+message SurvivalResult {
+  int32 survival_seconds = 1; // Run 结束时的生存时间。
+  int32 wave = 2;             // Run 结束时抵达的波次。
+  int32 kills = 3;            // 服务端累计击杀数。
+  int32 damage = 4;           // 服务端累计伤害值。
+}
+
 message GameMessage {
   oneof message_type {
     Login login = 21;
@@ -231,6 +265,11 @@ message GameMessage {
     Ping ping = 17;       // 延迟探测请求(C2S)
     Pong pong = 18;       // 延迟探测响应(S2C)
     MapInfo map_info = 19;            // 地图信息(S2C 单播,新玩家加入时发)
-    AiStateChanged ai_state_changed = 20; // AI 状态变更(S2C 广播,敌人状态切换时发)
+    AiStateChanged ai_state_changed = 20; // AI 状态变更
+    SurvivalState survival_state = 23;      // S2C 状态快照。
+    ExperienceOrb experience_orb = 24;      // S2C 经验球事件。
+    LevelUpChoices level_up_choices = 25;  // S2C 升级候选事件。
+    ChooseReward choose_reward = 26;       // C2S 升级选择请求。
+    SurvivalResult survival_result = 27;   // S2C 终局统计。
   }
 }

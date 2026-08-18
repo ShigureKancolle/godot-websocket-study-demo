@@ -118,6 +118,10 @@ signal fire_damage_effect(pos: Vector2, atk_id: int, damage: int)
 #   场景监听这个信号,自己决定怎么用 seed(当前是调 InfiniteTileMap.setup,
 #   未来可能还会做别的:如生成小地图、初始化寻路可视化等)。
 signal map_info_received(seed: int)
+signal survival_state_updated(state: Dictionary)
+signal level_up_choices_received(choices: Dictionary)
+signal experience_orb_received(orb: Dictionary)
+signal survival_result_received(result: Dictionary)
 
 
 # ===========================================================================
@@ -252,6 +256,11 @@ func register_handlers() -> void:
 	mb.onproto("game.EntityDead", _on_entity_dead)
 	mb.onproto("game.MapInfo", _on_map_info)
 	mb.onproto("game.AiStateChanged", _on_ai_state_changed)
+	# 数据流：服务端 S2C -> MessageBus -> 本镜像 -> 信号 -> HUD/UI；镜像不改 Run 状态。
+	mb.onproto("game.SurvivalState", _on_survival_state)
+	mb.onproto("game.LevelUpChoices", _on_level_up_choices)
+	mb.onproto("game.ExperienceOrb", _on_experience_orb)
+	mb.onproto("game.SurvivalResult", _on_survival_result)
 
 
 ## 收到 GameState 快照:整体替换本地镜像
@@ -644,3 +653,19 @@ func _on_map_info(data: Dictionary) -> void:
 		push_warning("[StateMirror] MapInfo 收到 seed=0,可能是服务端没配 seed,跳过地图初始化")
 		return
 	map_info_received.emit(seed)
+
+func _on_survival_state(data: Dictionary) -> void:
+	# Run 状态是服务端快照；镜像只复制并发信号，不在客户端计算暂停、经验或等级。
+	survival_state_updated.emit(data.duplicate())
+
+func _on_level_up_choices(data: Dictionary) -> void:
+	# 奖励队列归服务端所有，客户端只展示当前玩家的可选项。
+	level_up_choices_received.emit(data.duplicate())
+
+func _on_experience_orb(data: Dictionary) -> void:
+	# 经验球事件用于表现层跟随；实际吸收和加经验由服务端确认。
+	experience_orb_received.emit(data.duplicate())
+
+func _on_survival_result(data: Dictionary) -> void:
+	# 结算数据不可由客户端推导，直接转发服务端封存的最终统计。
+	survival_result_received.emit(data.duplicate())

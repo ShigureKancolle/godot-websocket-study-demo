@@ -2532,6 +2532,464 @@ class AiStateChanged:
 			return PB_ERR.PARSE_INCOMPLETE
 		return result
 	
+class SurvivalState:
+	extends RefCounted
+	func _init():
+		var service
+		
+		__elapsed_seconds = PBField.new("elapsed_seconds", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
+		service = PBServiceField.new()
+		service.field = __elapsed_seconds
+		data[__elapsed_seconds.tag] = service
+		
+		__wave = PBField.new("wave", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 2, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
+		service = PBServiceField.new()
+		service.field = __wave
+		data[__wave.tag] = service
+		
+		__paused = PBField.new("paused", PB_DATA_TYPE.BOOL, PB_RULE.OPTIONAL, 3, true, DEFAULT_VALUES_3[PB_DATA_TYPE.BOOL])
+		service = PBServiceField.new()
+		service.field = __paused
+		data[__paused.tag] = service
+		
+		__level = PBField.new("level", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 4, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
+		service = PBServiceField.new()
+		service.field = __level
+		data[__level.tag] = service
+		
+		__experience = PBField.new("experience", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 5, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
+		service = PBServiceField.new()
+		service.field = __experience
+		data[__experience.tag] = service
+		
+		__next_experience = PBField.new("next_experience", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 6, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
+		service = PBServiceField.new()
+		service.field = __next_experience
+		data[__next_experience.tag] = service
+		
+	var data = {}
+	
+	var __elapsed_seconds: PBField
+	func has_elapsed_seconds() -> bool:
+		if __elapsed_seconds.value != null:
+			return true
+		return false
+	func get_elapsed_seconds() -> float:
+		return __elapsed_seconds.value
+	func clear_elapsed_seconds() -> void:
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__elapsed_seconds.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
+	func set_elapsed_seconds(value : float) -> void:
+		__elapsed_seconds.value = value
+	
+	var __wave: PBField
+	func has_wave() -> bool:
+		if __wave.value != null:
+			return true
+		return false
+	func get_wave() -> int:
+		return __wave.value
+	func clear_wave() -> void:
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__wave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
+	func set_wave(value : int) -> void:
+		__wave.value = value
+	
+	var __paused: PBField
+	func has_paused() -> bool:
+		if __paused.value != null:
+			return true
+		return false
+	func get_paused() -> bool:
+		return __paused.value
+	func clear_paused() -> void:
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__paused.value = DEFAULT_VALUES_3[PB_DATA_TYPE.BOOL]
+	func set_paused(value : bool) -> void:
+		__paused.value = value
+	
+	var __level: PBField
+	func has_level() -> bool:
+		if __level.value != null:
+			return true
+		return false
+	func get_level() -> int:
+		return __level.value
+	func clear_level() -> void:
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__level.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
+	func set_level(value : int) -> void:
+		__level.value = value
+	
+	var __experience: PBField
+	func has_experience() -> bool:
+		if __experience.value != null:
+			return true
+		return false
+	func get_experience() -> int:
+		return __experience.value
+	func clear_experience() -> void:
+		data[5].state = PB_SERVICE_STATE.UNFILLED
+		__experience.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
+	func set_experience(value : int) -> void:
+		__experience.value = value
+	
+	var __next_experience: PBField
+	func has_next_experience() -> bool:
+		if __next_experience.value != null:
+			return true
+		return false
+	func get_next_experience() -> int:
+		return __next_experience.value
+	func clear_next_experience() -> void:
+		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__next_experience.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
+	func set_next_experience(value : int) -> void:
+		__next_experience.value = value
+	
+	func _to_string() -> String:
+		return PBPacker.message_to_string(data)
+		
+	func to_bytes() -> PackedByteArray:
+		return PBPacker.pack_message(data)
+		
+	func from_bytes(bytes : PackedByteArray, offset : int = 0, limit : int = -1) -> int:
+		var cur_limit = bytes.size()
+		if limit != -1:
+			cur_limit = limit
+		var result = PBPacker.unpack_message(data, bytes, offset, cur_limit)
+		if result == cur_limit:
+			if PBPacker.check_required(data):
+				if limit == -1:
+					return PB_ERR.NO_ERRORS
+			else:
+				return PB_ERR.REQUIRED_FIELDS
+		elif limit == -1 && result > 0:
+			return PB_ERR.PARSE_INCOMPLETE
+		return result
+	
+class ExperienceOrb:
+	extends RefCounted
+	func _init():
+		var service
+		
+		__orb_id = PBField.new("orb_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
+		service = PBServiceField.new()
+		service.field = __orb_id
+		data[__orb_id.tag] = service
+		
+		__x = PBField.new("x", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 2, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
+		service = PBServiceField.new()
+		service.field = __x
+		data[__x.tag] = service
+		
+		__y = PBField.new("y", PB_DATA_TYPE.FLOAT, PB_RULE.OPTIONAL, 3, true, DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT])
+		service = PBServiceField.new()
+		service.field = __y
+		data[__y.tag] = service
+		
+		__value = PBField.new("value", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 4, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
+		service = PBServiceField.new()
+		service.field = __value
+		data[__value.tag] = service
+		
+	var data = {}
+	
+	var __orb_id: PBField
+	func has_orb_id() -> bool:
+		if __orb_id.value != null:
+			return true
+		return false
+	func get_orb_id() -> String:
+		return __orb_id.value
+	func clear_orb_id() -> void:
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__orb_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
+	func set_orb_id(value : String) -> void:
+		__orb_id.value = value
+	
+	var __x: PBField
+	func has_x() -> bool:
+		if __x.value != null:
+			return true
+		return false
+	func get_x() -> float:
+		return __x.value
+	func clear_x() -> void:
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__x.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
+	func set_x(value : float) -> void:
+		__x.value = value
+	
+	var __y: PBField
+	func has_y() -> bool:
+		if __y.value != null:
+			return true
+		return false
+	func get_y() -> float:
+		return __y.value
+	func clear_y() -> void:
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__y.value = DEFAULT_VALUES_3[PB_DATA_TYPE.FLOAT]
+	func set_y(value : float) -> void:
+		__y.value = value
+	
+	var __value: PBField
+	func has_value() -> bool:
+		if __value.value != null:
+			return true
+		return false
+	func get_value() -> int:
+		return __value.value
+	func clear_value() -> void:
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__value.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
+	func set_value(value : int) -> void:
+		__value.value = value
+	
+	func _to_string() -> String:
+		return PBPacker.message_to_string(data)
+		
+	func to_bytes() -> PackedByteArray:
+		return PBPacker.pack_message(data)
+		
+	func from_bytes(bytes : PackedByteArray, offset : int = 0, limit : int = -1) -> int:
+		var cur_limit = bytes.size()
+		if limit != -1:
+			cur_limit = limit
+		var result = PBPacker.unpack_message(data, bytes, offset, cur_limit)
+		if result == cur_limit:
+			if PBPacker.check_required(data):
+				if limit == -1:
+					return PB_ERR.NO_ERRORS
+			else:
+				return PB_ERR.REQUIRED_FIELDS
+		elif limit == -1 && result > 0:
+			return PB_ERR.PARSE_INCOMPLETE
+		return result
+	
+class LevelUpChoices:
+	extends RefCounted
+	func _init():
+		var service
+		
+		__player_id = PBField.new("player_id", PB_DATA_TYPE.STRING, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.STRING])
+		service = PBServiceField.new()
+		service.field = __player_id
+		data[__player_id.tag] = service
+		
+		var __reward_ids_default: Array[String] = []
+		__reward_ids = PBField.new("reward_ids", PB_DATA_TYPE.STRING, PB_RULE.REPEATED, 2, true, __reward_ids_default)
+		service = PBServiceField.new()
+		service.field = __reward_ids
+		data[__reward_ids.tag] = service
+		
+		var __labels_default: Array[String] = []
+		__labels = PBField.new("labels", PB_DATA_TYPE.STRING, PB_RULE.REPEATED, 3, true, __labels_default)
+		service = PBServiceField.new()
+		service.field = __labels
+		data[__labels.tag] = service
+		
+	var data = {}
+	
+	var __player_id: PBField
+	func has_player_id() -> bool:
+		if __player_id.value != null:
+			return true
+		return false
+	func get_player_id() -> String:
+		return __player_id.value
+	func clear_player_id() -> void:
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__player_id.value = DEFAULT_VALUES_3[PB_DATA_TYPE.STRING]
+	func set_player_id(value : String) -> void:
+		__player_id.value = value
+	
+	var __reward_ids: PBField
+	func get_reward_ids() -> Array[String]:
+		return __reward_ids.value
+	func clear_reward_ids() -> void:
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__reward_ids.value.clear()
+	func add_reward_ids(value : String) -> void:
+		__reward_ids.value.append(value)
+	
+	var __labels: PBField
+	func get_labels() -> Array[String]:
+		return __labels.value
+	func clear_labels() -> void:
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__labels.value.clear()
+	func add_labels(value : String) -> void:
+		__labels.value.append(value)
+	
+	func _to_string() -> String:
+		return PBPacker.message_to_string(data)
+		
+	func to_bytes() -> PackedByteArray:
+		return PBPacker.pack_message(data)
+		
+	func from_bytes(bytes : PackedByteArray, offset : int = 0, limit : int = -1) -> int:
+		var cur_limit = bytes.size()
+		if limit != -1:
+			cur_limit = limit
+		var result = PBPacker.unpack_message(data, bytes, offset, cur_limit)
+		if result == cur_limit:
+			if PBPacker.check_required(data):
+				if limit == -1:
+					return PB_ERR.NO_ERRORS
+			else:
+				return PB_ERR.REQUIRED_FIELDS
+		elif limit == -1 && result > 0:
+			return PB_ERR.PARSE_INCOMPLETE
+		return result
+	
+class ChooseReward:
+	extends RefCounted
+	func _init():
+		var service
+		
+		__index = PBField.new("index", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
+		service = PBServiceField.new()
+		service.field = __index
+		data[__index.tag] = service
+		
+	var data = {}
+	
+	var __index: PBField
+	func has_index() -> bool:
+		if __index.value != null:
+			return true
+		return false
+	func get_index() -> int:
+		return __index.value
+	func clear_index() -> void:
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__index.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
+	func set_index(value : int) -> void:
+		__index.value = value
+	
+	func _to_string() -> String:
+		return PBPacker.message_to_string(data)
+		
+	func to_bytes() -> PackedByteArray:
+		return PBPacker.pack_message(data)
+		
+	func from_bytes(bytes : PackedByteArray, offset : int = 0, limit : int = -1) -> int:
+		var cur_limit = bytes.size()
+		if limit != -1:
+			cur_limit = limit
+		var result = PBPacker.unpack_message(data, bytes, offset, cur_limit)
+		if result == cur_limit:
+			if PBPacker.check_required(data):
+				if limit == -1:
+					return PB_ERR.NO_ERRORS
+			else:
+				return PB_ERR.REQUIRED_FIELDS
+		elif limit == -1 && result > 0:
+			return PB_ERR.PARSE_INCOMPLETE
+		return result
+	
+class SurvivalResult:
+	extends RefCounted
+	func _init():
+		var service
+		
+		__survival_seconds = PBField.new("survival_seconds", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 1, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
+		service = PBServiceField.new()
+		service.field = __survival_seconds
+		data[__survival_seconds.tag] = service
+		
+		__wave = PBField.new("wave", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 2, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
+		service = PBServiceField.new()
+		service.field = __wave
+		data[__wave.tag] = service
+		
+		__kills = PBField.new("kills", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 3, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
+		service = PBServiceField.new()
+		service.field = __kills
+		data[__kills.tag] = service
+		
+		__damage = PBField.new("damage", PB_DATA_TYPE.INT32, PB_RULE.OPTIONAL, 4, true, DEFAULT_VALUES_3[PB_DATA_TYPE.INT32])
+		service = PBServiceField.new()
+		service.field = __damage
+		data[__damage.tag] = service
+		
+	var data = {}
+	
+	var __survival_seconds: PBField
+	func has_survival_seconds() -> bool:
+		if __survival_seconds.value != null:
+			return true
+		return false
+	func get_survival_seconds() -> int:
+		return __survival_seconds.value
+	func clear_survival_seconds() -> void:
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__survival_seconds.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
+	func set_survival_seconds(value : int) -> void:
+		__survival_seconds.value = value
+	
+	var __wave: PBField
+	func has_wave() -> bool:
+		if __wave.value != null:
+			return true
+		return false
+	func get_wave() -> int:
+		return __wave.value
+	func clear_wave() -> void:
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__wave.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
+	func set_wave(value : int) -> void:
+		__wave.value = value
+	
+	var __kills: PBField
+	func has_kills() -> bool:
+		if __kills.value != null:
+			return true
+		return false
+	func get_kills() -> int:
+		return __kills.value
+	func clear_kills() -> void:
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__kills.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
+	func set_kills(value : int) -> void:
+		__kills.value = value
+	
+	var __damage: PBField
+	func has_damage() -> bool:
+		if __damage.value != null:
+			return true
+		return false
+	func get_damage() -> int:
+		return __damage.value
+	func clear_damage() -> void:
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__damage.value = DEFAULT_VALUES_3[PB_DATA_TYPE.INT32]
+	func set_damage(value : int) -> void:
+		__damage.value = value
+	
+	func _to_string() -> String:
+		return PBPacker.message_to_string(data)
+		
+	func to_bytes() -> PackedByteArray:
+		return PBPacker.pack_message(data)
+		
+	func from_bytes(bytes : PackedByteArray, offset : int = 0, limit : int = -1) -> int:
+		var cur_limit = bytes.size()
+		if limit != -1:
+			cur_limit = limit
+		var result = PBPacker.unpack_message(data, bytes, offset, cur_limit)
+		if result == cur_limit:
+			if PBPacker.check_required(data):
+				if limit == -1:
+					return PB_ERR.NO_ERRORS
+			else:
+				return PB_ERR.REQUIRED_FIELDS
+		elif limit == -1 && result > 0:
+			return PB_ERR.PARSE_INCOMPLETE
+		return result
+	
 class GameMessage:
 	extends RefCounted
 	func _init():
@@ -2663,6 +3121,36 @@ class GameMessage:
 		service.func_ref = Callable(self, "new_ai_state_changed")
 		data[__ai_state_changed.tag] = service
 		
+		__survival_state = PBField.new("survival_state", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 23, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		service = PBServiceField.new()
+		service.field = __survival_state
+		service.func_ref = Callable(self, "new_survival_state")
+		data[__survival_state.tag] = service
+		
+		__experience_orb = PBField.new("experience_orb", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 24, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		service = PBServiceField.new()
+		service.field = __experience_orb
+		service.func_ref = Callable(self, "new_experience_orb")
+		data[__experience_orb.tag] = service
+		
+		__level_up_choices = PBField.new("level_up_choices", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 25, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		service = PBServiceField.new()
+		service.field = __level_up_choices
+		service.func_ref = Callable(self, "new_level_up_choices")
+		data[__level_up_choices.tag] = service
+		
+		__choose_reward = PBField.new("choose_reward", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 26, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		service = PBServiceField.new()
+		service.field = __choose_reward
+		service.func_ref = Callable(self, "new_choose_reward")
+		data[__choose_reward.tag] = service
+		
+		__survival_result = PBField.new("survival_result", PB_DATA_TYPE.MESSAGE, PB_RULE.OPTIONAL, 27, true, DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE])
+		service = PBServiceField.new()
+		service.field = __survival_result
+		service.func_ref = Callable(self, "new_survival_result")
+		data[__survival_result.tag] = service
+		
 	var data = {}
 	
 	enum MessageTypeCase {
@@ -2688,6 +3176,11 @@ class GameMessage:
 		PONG = 18,
 		MAP_INFO = 19,
 		AI_STATE_CHANGED = 20,
+		SURVIVAL_STATE = 23,
+		EXPERIENCE_ORB = 24,
+		LEVEL_UP_CHOICES = 25,
+		CHOOSE_REWARD = 26,
+		SURVIVAL_RESULT = 27,
 	}
 	var _message_type_case: int = 0
 
@@ -2742,6 +3235,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__login.value = Login.new()
 		return __login.value
 	
@@ -2796,6 +3299,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__enter_room.value = EnterRoom.new()
 		return __enter_room.value
 	
@@ -2850,6 +3363,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__leave_room.value = LeaveRoom.new()
 		return __leave_room.value
 	
@@ -2904,6 +3427,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__player_move.value = PlayerMove.new()
 		return __player_move.value
 	
@@ -2958,6 +3491,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__chat_message.value = ChatMessage.new()
 		return __chat_message.value
 	
@@ -3012,6 +3555,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__game_state.value = GameState.new()
 		return __game_state.value
 	
@@ -3066,6 +3619,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__heartbeat.value = Heartbeat.new()
 		return __heartbeat.value
 	
@@ -3120,6 +3683,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__player_facing.value = PlayerFacing.new()
 		return __player_facing.value
 	
@@ -3174,6 +3747,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__attack_start.value = AttackStart.new()
 		return __attack_start.value
 	
@@ -3228,6 +3811,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__attack_hit.value = AttackHit.new()
 		return __attack_hit.value
 	
@@ -3282,6 +3875,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__attack_end.value = AttackEnd.new()
 		return __attack_end.value
 	
@@ -3336,6 +3939,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__hurt_end.value = HurtEnd.new()
 		return __hurt_end.value
 	
@@ -3390,6 +4003,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__stats_init.value = StatsInit.new()
 		return __stats_init.value
 	
@@ -3444,6 +4067,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__stats_changed.value = StatsChanged.new()
 		return __stats_changed.value
 	
@@ -3498,6 +4131,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__hp_changed.value = HpChanged.new()
 		return __hp_changed.value
 	
@@ -3552,6 +4195,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__entity_dead.value = EntityDead.new()
 		return __entity_dead.value
 	
@@ -3606,6 +4259,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__entity_remove.value = EntityRemove.new()
 		return __entity_remove.value
 	
@@ -3660,6 +4323,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__ping.value = Ping.new()
 		return __ping.value
 	
@@ -3714,6 +4387,16 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__pong.value = Pong.new()
 		return __pong.value
 	
@@ -3768,6 +4451,16 @@ class GameMessage:
 		_message_type_case = 19
 		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
 		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__map_info.value = MapInfo.new()
 		return __map_info.value
 	
@@ -3822,8 +4515,338 @@ class GameMessage:
 		data[19].state = PB_SERVICE_STATE.UNFILLED
 		data[20].state = PB_SERVICE_STATE.FILLED
 		_message_type_case = 20
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
 		__ai_state_changed.value = AiStateChanged.new()
 		return __ai_state_changed.value
+	
+	var __survival_state: PBField
+	func has_survival_state() -> bool:
+		return data[23].state == PB_SERVICE_STATE.FILLED
+	func get_survival_state() -> SurvivalState:
+		return __survival_state.value
+	func clear_survival_state() -> void:
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_survival_state() -> SurvivalState:
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__chat_message.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__game_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[5].state = PB_SERVICE_STATE.UNFILLED
+		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
+		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[8].state = PB_SERVICE_STATE.UNFILLED
+		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[9].state = PB_SERVICE_STATE.UNFILLED
+		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
+		__stats_init.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[12].state = PB_SERVICE_STATE.UNFILLED
+		__stats_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[13].state = PB_SERVICE_STATE.UNFILLED
+		__hp_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[14].state = PB_SERVICE_STATE.UNFILLED
+		__entity_dead.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[15].state = PB_SERVICE_STATE.UNFILLED
+		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
+		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[20].state = PB_SERVICE_STATE.UNFILLED
+		data[23].state = PB_SERVICE_STATE.FILLED
+		_message_type_case = 23
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = SurvivalState.new()
+		return __survival_state.value
+	
+	var __experience_orb: PBField
+	func has_experience_orb() -> bool:
+		return data[24].state == PB_SERVICE_STATE.FILLED
+	func get_experience_orb() -> ExperienceOrb:
+		return __experience_orb.value
+	func clear_experience_orb() -> void:
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_experience_orb() -> ExperienceOrb:
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__chat_message.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__game_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[5].state = PB_SERVICE_STATE.UNFILLED
+		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
+		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[8].state = PB_SERVICE_STATE.UNFILLED
+		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[9].state = PB_SERVICE_STATE.UNFILLED
+		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
+		__stats_init.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[12].state = PB_SERVICE_STATE.UNFILLED
+		__stats_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[13].state = PB_SERVICE_STATE.UNFILLED
+		__hp_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[14].state = PB_SERVICE_STATE.UNFILLED
+		__entity_dead.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[15].state = PB_SERVICE_STATE.UNFILLED
+		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
+		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		data[24].state = PB_SERVICE_STATE.FILLED
+		_message_type_case = 24
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = ExperienceOrb.new()
+		return __experience_orb.value
+	
+	var __level_up_choices: PBField
+	func has_level_up_choices() -> bool:
+		return data[25].state == PB_SERVICE_STATE.FILLED
+	func get_level_up_choices() -> LevelUpChoices:
+		return __level_up_choices.value
+	func clear_level_up_choices() -> void:
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_level_up_choices() -> LevelUpChoices:
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__chat_message.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__game_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[5].state = PB_SERVICE_STATE.UNFILLED
+		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
+		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[8].state = PB_SERVICE_STATE.UNFILLED
+		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[9].state = PB_SERVICE_STATE.UNFILLED
+		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
+		__stats_init.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[12].state = PB_SERVICE_STATE.UNFILLED
+		__stats_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[13].state = PB_SERVICE_STATE.UNFILLED
+		__hp_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[14].state = PB_SERVICE_STATE.UNFILLED
+		__entity_dead.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[15].state = PB_SERVICE_STATE.UNFILLED
+		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
+		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		data[25].state = PB_SERVICE_STATE.FILLED
+		_message_type_case = 25
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = LevelUpChoices.new()
+		return __level_up_choices.value
+	
+	var __choose_reward: PBField
+	func has_choose_reward() -> bool:
+		return data[26].state == PB_SERVICE_STATE.FILLED
+	func get_choose_reward() -> ChooseReward:
+		return __choose_reward.value
+	func clear_choose_reward() -> void:
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_choose_reward() -> ChooseReward:
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__chat_message.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__game_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[5].state = PB_SERVICE_STATE.UNFILLED
+		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
+		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[8].state = PB_SERVICE_STATE.UNFILLED
+		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[9].state = PB_SERVICE_STATE.UNFILLED
+		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
+		__stats_init.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[12].state = PB_SERVICE_STATE.UNFILLED
+		__stats_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[13].state = PB_SERVICE_STATE.UNFILLED
+		__hp_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[14].state = PB_SERVICE_STATE.UNFILLED
+		__entity_dead.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[15].state = PB_SERVICE_STATE.UNFILLED
+		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
+		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		data[26].state = PB_SERVICE_STATE.FILLED
+		_message_type_case = 26
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = ChooseReward.new()
+		return __choose_reward.value
+	
+	var __survival_result: PBField
+	func has_survival_result() -> bool:
+		return data[27].state == PB_SERVICE_STATE.FILLED
+	func get_survival_result() -> SurvivalResult:
+		return __survival_result.value
+	func clear_survival_result() -> void:
+		data[27].state = PB_SERVICE_STATE.UNFILLED
+		__survival_result.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+	func new_survival_result() -> SurvivalResult:
+		__login.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[21].state = PB_SERVICE_STATE.UNFILLED
+		__enter_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[1].state = PB_SERVICE_STATE.UNFILLED
+		__leave_room.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[2].state = PB_SERVICE_STATE.UNFILLED
+		__player_move.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[3].state = PB_SERVICE_STATE.UNFILLED
+		__chat_message.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[4].state = PB_SERVICE_STATE.UNFILLED
+		__game_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[5].state = PB_SERVICE_STATE.UNFILLED
+		__heartbeat.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[6].state = PB_SERVICE_STATE.UNFILLED
+		__player_facing.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[7].state = PB_SERVICE_STATE.UNFILLED
+		__attack_start.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[8].state = PB_SERVICE_STATE.UNFILLED
+		__attack_hit.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[9].state = PB_SERVICE_STATE.UNFILLED
+		__attack_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[10].state = PB_SERVICE_STATE.UNFILLED
+		__hurt_end.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[11].state = PB_SERVICE_STATE.UNFILLED
+		__stats_init.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[12].state = PB_SERVICE_STATE.UNFILLED
+		__stats_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[13].state = PB_SERVICE_STATE.UNFILLED
+		__hp_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[14].state = PB_SERVICE_STATE.UNFILLED
+		__entity_dead.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[15].state = PB_SERVICE_STATE.UNFILLED
+		__entity_remove.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[16].state = PB_SERVICE_STATE.UNFILLED
+		__ping.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[17].state = PB_SERVICE_STATE.UNFILLED
+		__pong.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[18].state = PB_SERVICE_STATE.UNFILLED
+		__map_info.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[19].state = PB_SERVICE_STATE.UNFILLED
+		__ai_state_changed.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[20].state = PB_SERVICE_STATE.UNFILLED
+		__survival_state.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[23].state = PB_SERVICE_STATE.UNFILLED
+		__experience_orb.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[24].state = PB_SERVICE_STATE.UNFILLED
+		__level_up_choices.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[25].state = PB_SERVICE_STATE.UNFILLED
+		__choose_reward.value = DEFAULT_VALUES_3[PB_DATA_TYPE.MESSAGE]
+		data[26].state = PB_SERVICE_STATE.UNFILLED
+		data[27].state = PB_SERVICE_STATE.FILLED
+		_message_type_case = 27
+		__survival_result.value = SurvivalResult.new()
+		return __survival_result.value
 	
 	func get_message_type_case() -> int:
 		return _message_type_case
