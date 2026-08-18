@@ -479,3 +479,6 @@ infinite_map.set_follow_target(local_role)
 - 木桩场景只做玩家同步,木桩玩法暂缓
 - 调试控制台已实现(DebugConsole/DebugCommands/DebugConsoleLoader),默认关闭,需在 project features 或 export preset 加 `debug_console` 启用
 - 无限地图模块已实现阶段1(纯客户端独立调试):ChunkGenerator + InfiniteTileMap + DebugCursor + TestTiledSeed,在 TiledMap.tscn 独立场景跑通。2×2 block 生成 + 草地过渡贴图系统(form8 旋转归一化 + MyTiledCell 候选权重抽取)已实现,占位贴图待用户配真实过渡贴图。未来接服务器双端一致生成(阶段2-4)
+## 生存 UI 接入（PLAN-20260818-003）
+
+局内 UI 显示服务端 Run 时间、波次、经验和等级；收到候选后显示三选一。单人暂停由服务端状态驱动，多人模式不阻塞世界。结算页只显示存活时间、波次、击杀、伤害。

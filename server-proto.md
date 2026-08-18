@@ -147,3 +147,12 @@ proto 只描述消息"长什么样",契约描述消息"怎么用":
 - 契约 20 条消息已登记,AttackHit 的 state_affecting=true(调 apply_hurt 改状态)
 - EntityInfo 加 ai_state 字段 + AiStateChanged 消息(tag=20):AI 状态切换即广播,客户端据此切换敌人视锥形态(详见 tools/视锥渲染方案.md)
 - 编译流程正常
+## 生存协议扩展（PLAN-20260818-003）
+
+生存协议由 `GameRoom.survival_run` 产生，客户端只接收镜像。`SurvivalState` 是服务端按 tick 发送的玩家快照；`ExperienceOrb` 是敌死后的表现事件，只有服务端确认球抵达才增加经验；`LevelUpChoices` 只描述指定玩家队列首项；`ChooseReward` 是客户端提交的下标请求，服务端检查玩家身份、队列存在、下标有效以及是否重复/过期；`SurvivalResult` 在全员死亡后发送封存的四项统计。
+
+数据流为：GameRoom/Run 状态变更 → WebServer 广播 S2C → ClientStateMirror 发出信号 → HUD 展示；选择则反向为 HUD → ChooseReward C2S → handler/Run 校验 → GameRoom 应用奖励 → 新快照回传。协议源文件的字段注释和 oneof 23--27 tag 必须与双端保持一致，生成的 Python/GDScript 文件只能由既有工具产生。
+
+### PLAN-20260818-004 验证记录
+
+Godobuf 使用项目内 `godobuf_cmdln.gd` 和 Godot 4.6.3 headless 成功生成 `client/Script/gdproto/game.gd`；生成文件包含五个生存消息及 23--27 标签。Godot headless editor 检查、服务端 py_compile、protobuf 编译和 SurvivalRun smoke 均通过。配置同步脚本成功，抽查的 constants/entity 配置在 shared/server/client 三处哈希一致。

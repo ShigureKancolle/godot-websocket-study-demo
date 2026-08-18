@@ -209,3 +209,8 @@ WebScoketMgr 需要 _process 轮询,用 Node + autoload。
 - **AI 状态同步已实现**:StateMirror 注册 `_on_ai_state_changed`(设 ai_state + emit entity_updated,只改 ai_state 不动坐标/朝向);EntityInfo.gd 加 ai_state 字段 + from_dict 转换;渲染层(Role.VisionFan)据此切换敌人视锥形态(详见 tools/视锥渲染方案.md)
 - AttackHit 消息带 hurt_duration 字段,客户端当前不读(留作未来预演/调试)
 - 注意:WebScoketMgr/WebScoketClient 是原拼写(Scoket),已遍布代码,暂不改
+## 生存镜像扩展（PLAN-20260818-003）
+
+`ClientStateMirror` 只接收并转发 Run 状态、经验球、升级候选和结算事件，不计算经验、等级或暂停。数据流为 S2C → MessageBus → Mirror → 信号 → HUD；HUD 的选择沿 C2S → handler → SurvivalRun 校验 → GameRoom 应用奖励 → 权威快照/事件回传。奖励选择只是向服务端发送请求，服务端拒绝重复、越界或过期选择时客户端不得本地应用。
+
+协议职责：`SurvivalState` 镜像计时/波次/等级，`ExperienceOrb` 只驱动表现，`LevelUpChoices` 只展示当前玩家队列，`SurvivalResult` 只展示服务端结算。客户端不会创建 Run、推进球或修改任何镜像状态。

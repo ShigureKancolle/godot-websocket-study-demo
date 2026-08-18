@@ -123,3 +123,6 @@ d:\work2\godot_demo\
 - 客户端预测+对账(留到真感觉到延迟时)
 - 木桩玩法(暂缓)
 - test_vectors.json 测试向量(暂缓)
+## 生存玩法文档索引（PLAN-20260818-003）
+
+生存 Run 的总方案和拆分任务位于 `docs/vs-like.md` 与 `docs/vs-like/`。实现时必须遵守 GameRoom 唯一权威、客户端只读镜像、协议生成和 shared_config 同步规则。

@@ -424,3 +424,6 @@ DeadManScene.tscn 里有个 E_Back 按钮用于返回 MainScene。Role 实例用
 - **视锥开关联动已实现**:ConfigLoader.is_vision_enabled() 读 constants.json 的 VISION_ENABLED(默认 true);false 时 _setup_enemy 不挂 VisionFan(服务端敌人无视视锥,显示扇形会误导),on_entity_updated 的 get_node_or_null 自然跳过
 - **攻击扇形弧光已实现**:新建 AttackFan.gd(Polygon2D,玩家/敌人都挂)——按攻击形状配置(radius/angle/hit_time/duration)渲染扇形范围,顶点色渐变(圆心透明→弧上峰值,"剑气外放"),颜色按身份(本人淡蓝白/队友绿/敌人红),0.15s 膨胀+保持到命中时刻最亮+淡出(零贴图);Role.on_entity_updated 检测 state 进入 attacking 瞬间触发(was_attacking 防重复);命中时刻发 hit_moment 信号
 - **屏幕震动 + 攻击后坐已实现**:CameraFollow.gd 加 shake()(攻击命中时刻随机偏移 3px 衰减归零,只震本机);本地玩家攻击时 Role 设 _recoil_offset(朝向反方向 12px)只偏移 PlayerVisual 子节点并衰减回零,Role.position(预测/权威)不动、不污染软对账
+## 生存实体表现（PLAN-20260818-003）
+
+敌人的 `ai_state=returning` 仅作为服务端镜像状态，客户端负责表现返程移动；实体 ID 生命周期由快照/移除事件驱动，不因离开激活距离而重建或清血。

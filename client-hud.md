@@ -192,3 +192,6 @@ func _process(_delta):
 ```
 
 纯客户端自测(不接网络):拿到 hud 实例后直接调 API 即可,如 `hud.set_local_hp(80, 100)`、`hud.add_battle_log("玩家A 杀死了 敌人A", 2)`、`hud.update_radar_blip("e1", hud.BlipType.ENEMY, Vector2(300, -500))`。
+## 生存 HUD 接入（PLAN-20260818-003）
+
+HUD 消费客户端镜像信号更新经验条、等级、波次、暂停提示和奖励选择；不得从本地计时推导权威状态。结算数据直接来自服务端结果，返回大厅时清除本局节点和统计。

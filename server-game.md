@@ -85,7 +85,7 @@ ID 格式统一带类型前缀:`player:uuid-xxx` / `entity:stake_1`。
 
 - `add_entity(entity_id, entity_info: EntityInfo)` — 强制覆盖 entity_id(不变式:状态里的 entity_id 永远=传入的 key)。重复加入抛 ValueError(bug 早暴露)
 - `remove_entity(entity_id)` — pop,不存在返回 None(幂等,断连清理可能重复调用)。连带清理 `_combats`(战斗组件)+ `_knockbacks`(击退状态)+ EnemyMgr AI 状态,避免遗留幽灵状态
-- `create_enemy(entity_type, pos) -> EntityInfo` — 敌人创建语法糖:分配 `enemy:{type}_{序号}` entity_id(序号按该类型现有数量+1 推算)→ 构造 EntityInfo 设好位置 → `add_entity`(自动建 CombatComponent)→ `EnemyMgr.on_enemy_created` 挂 AI(默认 patrol)。创建完成后回调 `_entity_spawn_hook` 通知网络层广播新实体——**GM 运行时调 room.create_enemy 时,在线客户端才能立刻看到新敌人**
+- `create_enemy(entity_type, pos) -> EntityInfo` — 敌人创建语法糖:按类型从 GameRoom 私有序列分配单调递增且一局不复用的 `enemy:{type}_{序号}` entity_id；旧实例热更后会从现存合法后缀恢复，冲突继续递增。随后构造 EntityInfo 设好位置 → `add_entity`(自动建 CombatComponent)→ `EnemyMgr.on_enemy_created` 挂 AI(默认 patrol)。创建完成后回调 `_entity_spawn_hook` 通知网络层广播新实体——**GM 运行时调 room.create_enemy 时,在线客户端才能立刻看到新敌人**
 - `apply_move_dir(entity_id, dir_x, dir_y, moving, dt)` — **只记住方向,不推进位移!** 能力校验:can_move=False 直接拒(木桩不能动)。**输入锁定校验:调 `_is_input_locked`,hurt(硬直)/dead(死亡)/attacking(攻击中)期间拒移动**。归一化方向存到 `EntityInfo.move_dir_x/y`,设 moving/state。位移推进由 `tick_movement` 每 tick 统一做。moving=false 时清零方向,设 state='idle'。
 - `tick_movement(dt) -> list` — 每 tick 推进位移,分两段:**① 击退推进** 遍历 `_knockbacks` 表,对被击退实体按 vx/vy 推进(不受输入锁定影响,硬直中被推走),耗时耗尽自动清理;**② 普通移动推进** 所有 moving=True 且未锁定实体的位移 `info.x += move_dir_x * speed * dt`(击退中的实体不叠加普通移动)。返回本 tick 移动了的 entity_id 列表(供 web_server 收集广播)。**这是服务端权威移动的核心**:服务端记住方向后每 tick 都推进,不依赖客户端输入是否到达,无累积误差。
 - `apply_facing(entity_id, facing)` — 能力校验:can_move=False 直接拒(木桩不转向)。**输入锁定校验:调 `_is_input_locked`,hurt/dead/attacking 期间锁朝向**。只改 facing,弧度归一到 [0, 2*PI)。
@@ -416,3 +416,6 @@ hurt 定时器到期
 - **AI 激活距离已实现**:shared_config/constants.json 新增 AI_ACTIVATE_DISTANCE=1500px;EnemyMgr.update 在附近无玩家时跳过 AI 并停止 AI 移动,玩家靠近后再恢复
 - **视锥总开关已实现**:shared_config/constants.json 新增 VISION_ENABLED(默认 true);config_loader.is_vision_enabled() 读取;false 时 find_nearest_entity_in_sight 跳过角度/半径过滤(搜索半径放宽到 AI_ACTIVATE_DISTANCE)、chase 不再因 max_chase_distance/脱离追逐视野放弃追击;客户端 Role._setup_enemy 同步不挂载 VisionFan(AI_ACTIVATE_DISTANCE 激活距离仍生效)
 - **AI 状态同步已实现**:EntityInfo 加 ai_state 字段(proto 同步加,GameState 快照带初始值);EnemyAIMachine.change_state 状态真正切换(old != new)时触发钩子(重入不广播);EnemyMgr.set_ai_state_change_hook 注入所有状态机;GameServer._on_ai_state_changed 同步 EntityInfo.ai_state + 广播 AiStateChanged(客户端据此切换视锥形态 normal/chase,详见 tools/视锥渲染方案.md)
+## 生存 Run 扩展（PLAN-20260818-003）
+
+`GameRoom.survival_run` 是共享房间内唯一的生存局状态入口，持有计时、波次、刷怪预算、敌人目标/返程、经验球、玩家等级、奖励队列、暂停和结算统计。实体仍由 GameRoom 管理；距离超过 1500px 时只停止普通 AI 并返程，1200px 内恢复，不重建敌人。
