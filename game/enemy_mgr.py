@@ -226,6 +226,14 @@ class EnemyMgr:
             # apply_xxx 虽会被 _is_input_locked 拒绝,但决策逻辑与日志不该再跑。
             if entity.state == "dead":
                 continue
+            # returning 状态由 SurvivalRun 的牵引返程逻辑权威持有；返程期间
+            # 普通战斗 AI 不得覆盖敌人的目标或移动方向。
+            # returning 是 Run 的服务端专用状态：敌人仍保留原实体和属性，
+            # 这里只跳过普通战斗决策，返程移动由 SurvivalRun 统一驱动。
+            if entity.ai_state == "returning":
+                continue
+            # 只有未处于 returning 的敌人才进入普通 AI；该判断位于死亡过滤之后、
+            # 激活距离判断之前，确保返程状态不会被“远离玩家停 AI”覆盖。
             # 附近没有玩家时不跑 AI:顺便停掉 AI 驱动的移动,等玩家靠近后再恢复。
             if not self._is_player_nearby(entity, player_entities, AI_ACTIVATE_DISTANCE):
                 room.apply_move_dir(entity_id, 0, 0, False, dt)

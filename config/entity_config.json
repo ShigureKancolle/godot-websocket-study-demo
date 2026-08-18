@@ -16,7 +16,7 @@
             "can_attack": true,
             "can_be_hurt": true,
             "can_disconnect": true,
-            "can_die": false
+            "can_die": true
         },
         "body_shape": "circle",
         "body_params": {"radius": 24.0},
@@ -103,5 +103,24 @@
             "defense": 2,
             "look_around_fact_speed": 1
         }
+    },
+
+    "xp_orb": {
+        "_desc": "经验球：服务端拥有的可吸收掉落物，不参与战斗",
+        "capabilities": {
+            "can_move": false,
+            "can_attack": false,
+            "can_be_hurt": false,
+            "can_disconnect": false,
+            "can_die": false
+        },
+        "body_shape": "circle",
+        "body_color": "#ffff00",
+        "body_params": {"radius": 8.0},
+        "hit_layer": 0,
+        "attack_mask": 0,
+        "speed": 0.0,
+        "dead_duration_ms": 0,
+        "combat_stats": {"max_hp": 0, "attack_power": 0, "defense": 0}
     }
 }

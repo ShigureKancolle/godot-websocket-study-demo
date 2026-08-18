@@ -97,6 +97,7 @@ def register(server: "GameServer") -> None:
 
         # add_entity 内部会强制覆盖 entity_id 为 ctx.player_id(不变式)
         stored = server.room.add_entity(ctx.player_id, entity_info)
+        server.room.add_survival_player(ctx.player_id)
         # 显式退出房间后连接仍保留;重新进入时覆盖连接表,确保广播不会漏掉这个客户端。
         server.players[ctx.player_id] = ctx.websocket
 
@@ -133,6 +134,17 @@ def register(server: "GameServer") -> None:
         await bus.send("StatsInit", {
             "entries": combat_list
         }, websocket=ctx.websocket)
+
+        survival_state = server.room.get_survival_player(ctx.player_id)
+        if survival_state is not None:
+            await bus.send("SurvivalState", {
+                "elapsed_seconds": server.room.survival_run.elapsed,
+                "wave": server.room.survival_run.wave,
+                "paused": server.room.survival_run.paused,
+                "level": survival_state.level,
+                "experience": survival_state.experience,
+                "next_experience": survival_state.next_experience,
+            }, websocket=ctx.websocket)
 
         # 给「其他人」发新玩家的战斗属性(StatsChanged),让它们知道新玩家血量/属性
         # (新玩家自己已经通过上面的 StatsInit 拿到了,不用再发)
@@ -237,3 +249,23 @@ def register(server: "GameServer") -> None:
             "entity_id": ctx.player_id,
             "atk_id": data.get("atk_id", 0),
         })
+
+    @bus.onproto("ChooseReward")
+    async def on_choose_reward(data: dict, ctx):
+        """应用一项待选奖励。
+
+        这是客户端输入而非状态变更；SurvivalRun 在服务端校验玩家队列、索引
+        和过期/重复请求，handler 只转发结果并广播新的权威快照。
+        """
+        if not server.room.survival_run.choose_reward(ctx.player_id, int(data.get("index", -1))):
+            return
+        state = server.room.get_survival_player(ctx.player_id)
+        if state is not None:
+            await server.broadcast("SurvivalState", {
+                "elapsed_seconds": server.room.survival_run.elapsed,
+                "wave": server.room.survival_run.wave,
+                "paused": server.room.survival_run.paused,
+                "level": state.level,
+                "experience": state.experience,
+                "next_experience": state.next_experience,
+            })

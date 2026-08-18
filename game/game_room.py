@@ -78,6 +78,7 @@ GameRoom 自身不做任何网络 I/O，也不知道 WebSocket 存在。
 import math
 import enum
 import logging
+import re
 from dataclasses import dataclass, field, asdict
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
@@ -85,6 +86,7 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 import game.collision as collision
 import game.entity_config as entity_config
 import config.config_loader as config_loader
+import game.survival_run as survival_run
 import typing
 if typing.TYPE_CHECKING:
     import game.enemy_mgr as enemy_mgr
@@ -149,6 +151,16 @@ class CombatComponent:
     attack_power: int = 0
     defense: int = 0
     look_around_fact_speed: float = 0.5  # 朝向转转转速(弧度/秒)
+
+
+@dataclass
+class SurvivalPlayer:
+    """GameRoom 持有的玩家 Run 进度；客户端只能通过快照读取。"""
+    entity_id: str
+    level: int = 1
+    experience: int = 0
+    next_experience: int = 10
+    dead: bool = False
 
 
 @dataclass
@@ -237,6 +249,11 @@ class GameRoom:
         # (Python 没有真正的私有,下划线只是约定)
         self._entities: Dict[str, EntityInfo] = {}
         self._combats: Dict[str, CombatComponent] = {}
+        # SurvivalRun 与实体表同属 GameRoom；Run 只能通过本对象读写实体和战斗组件。
+        self._survival_players: Dict[str, SurvivalPlayer] = {}
+        self.survival_run = survival_run.SurvivalRun(self)
+        # 每种敌人独立的下一个 ID 候选；生命周期绑定单个 GameRoom，一局内不复用。
+        self._enemy_next_sequence: Dict[str, int] = {}
         # 击退状态表:entity_id -> KnockbackState(服务端瞬态,客户端不需要)
         # 和 _combats 一样独立成表,不进 EntityInfo(避免污染 proto 快照广播)
         self._knockbacks: Dict[str, KnockbackState] = {}
@@ -333,6 +350,38 @@ class GameRoom:
     def get_combat(self, entity_id) -> Optional[CombatComponent]:
         return self._combats.get(entity_id)
 
+    def get_survival_player(self, entity_id: str) -> Optional[SurvivalPlayer]:
+        """读取单局进度，统一保证升级/经验逻辑不在网络 handler 中散落。"""
+        return self._survival_players.get(entity_id)
+
+    def add_survival_player(self, entity_id: str) -> SurvivalPlayer:
+        """为进入房间的玩家建立本局进度；新一局进入时从初始值开始。"""
+        state = SurvivalPlayer(entity_id)
+        self._survival_players[entity_id] = state
+        return state
+
+    def apply_survival_reward(self, entity_id: str, reward_id: str, value: float) -> bool:
+        """在 GameRoom 的战斗组件上应用已通过 Run 校验的奖励。
+
+        奖励不能由客户端直接写入；范围奖励暂只确认合法性，待现有攻击配置
+        提供统一范围字段后再接入，避免在本 MVP 中另造一套攻击状态。
+        """
+        combat = self._combats.get(entity_id)
+        if combat is None:
+            return False
+        if reward_id == "attack_percent":
+            combat.attack_power = int(combat.attack_power * (1.0 + value))
+        elif reward_id == "max_hp":
+            combat.max_hp += int(value)
+            combat.cur_hp += int(value)
+        elif reward_id == "defense":
+            combat.defense += int(value)
+        elif reward_id == "range_percent":
+            return True
+        else:
+            return False
+        return True
+
     def snapshot_combats(self) -> List[CombatComponent]:
         # StatsInit 用,返回 list(和 snapshot() 对称,调用方用 asdict 转 dict)
         return list(self._combats.values())
@@ -391,6 +440,7 @@ class GameRoom:
             这与 add_entity 的「重复加入报错」相反——
             加入重复是 bug,离开重复是容错,语义不同。
         """
+        # 实体离房时同时移除 Run 进度，避免断线玩家的奖励队列进入下一局。
         removed = self._entities.pop(entity_id, None)
         if removed is not None:
             # 连带清理战斗组件(和 _entities 同步,避免遗留幽灵 combat)
@@ -399,6 +449,7 @@ class GameRoom:
             self._knockbacks.pop(entity_id, None)
             # 清理敌人 AI 状态(如果是敌人;非敌人 on_enemy_removed 是 no-op,安全)
             self._enemy_mgr.on_enemy_removed(entity_id)
+            self._survival_players.pop(entity_id, None)
             logger.info(f"实体离开房间: type={removed.entity_type} id={entity_id}")
         return removed
 
@@ -1254,7 +1305,7 @@ class GameRoom:
         创建敌人实体的便捷方法(语法糖)
 
         做三件事:
-            1. 分配 entity_id(格式 "enemy:{type}_{序号}",序号按该类型现有数量推算)
+            1. 分配 entity_id(格式 "enemy:{type}_{序号}")，序号单调递增且一局内不复用
             2. 构造 EntityInfo 并设好位置,调 add_entity 入房间
                (add_entity 内部会按 entity_type 自动建 CombatComponent)
             3. 调 EnemyMgr.on_enemy_created 挂上 AI 状态(为寻路预留)
@@ -1270,10 +1321,28 @@ class GameRoom:
             add_entity 内部将来若要广播快照/触发 on_join 回调,位置必须是正确的。
             先 add 再设位置会让"加入瞬间"的位置是 (0,0),埋坑。
         """
-        # 序号:统计该类型当前已有数量 +1 作为序号
-        # 不用单独维护计数器:计数器在敌人增删后会错位,用现有数量推算天然正确
-        count = sum(1 for e in self._entities.values() if e.entity_type == entity_type)
-        entity_id = f"enemy:{entity_type}_{count + 1}"
+        # 热更可能让旧 GameRoom 没有新字段；此时从现存同类型敌人的合法后缀
+        # 恢复下一个候选。扫描只接受完整的 enemy:{type}_{数字} 格式，其他 ID 忽略。
+        if not hasattr(self, "_enemy_next_sequence"):
+            self._enemy_next_sequence = {}
+        if entity_type not in self._enemy_next_sequence:
+            prefix = f"enemy:{entity_type}_"
+            max_suffix = 0
+            for existing_id, existing in self._entities.items():
+                if existing.entity_type != entity_type or not existing_id.startswith(prefix):
+                    continue
+                match = re.fullmatch(re.escape(prefix) + r"(\d+)", existing_id)
+                if match is not None:
+                    max_suffix = max(max_suffix, int(match.group(1)))
+            self._enemy_next_sequence[entity_type] = max_suffix + 1
+
+        # 候选与现存实体冲突时继续向前；写回的是下一个候选，即使实体暂未移除
+        # （dead 状态仍在表中）也不会产生重复 ID。
+        sequence = max(1, int(self._enemy_next_sequence[entity_type]))
+        while f"enemy:{entity_type}_{sequence}" in self._entities:
+            sequence += 1
+        entity_id = f"enemy:{entity_type}_{sequence}"
+        self._enemy_next_sequence[entity_type] = sequence + 1
 
         enemy = EntityInfo(
             entity_id=entity_id,    # add_entity 会再强制覆盖一次,这里只是占位

@@ -489,6 +489,11 @@ class GameServer:
         # 取出并清空(下一 tick 重新收集新的输入)
         pending = self._pending_inputs
         self._pending_inputs = {}
+        # A solo level-up pauses the whole Run, including movement and attacks.
+        if self.room.survival_run.should_pause():
+            # 单人升级暂停必须阻断本 tick 的移动/攻击输入；多人升级不进入此分支，
+            # 各玩家的奖励队列由 SurvivalRun 独立维护。
+            pending = {}
 
         # 收集本 tick 要广播的消息:List[(protoname, protodata)]
         broadcasts = []
@@ -523,6 +528,31 @@ class GameServer:
                 # 完整流程(状态变更+广播 AttackStart+注册判定帧定时器+命中扣血+广播 AttackEnd)
                 # 在 _trigger_attack 里,由 GameRoom 通过 attack_trigger 钩子转调
                 self.room.trigger_attack(a["entity_id"], a["atk_id"])
+
+        # SurvivalRun is owned by GameRoom and is advanced before ordinary AI.
+        # It may spawn enemies and put distant enemies into returning state.
+        self.room.survival_run.update(dt)
+        run = self.room.survival_run
+        # Run 先写入 GameRoom 权威状态，再由本层把快照/候选广播给客户端；
+        # 客户端收到的 SurvivalState 和 LevelUpChoices 都不反向驱动服务器。
+        for player in run.active_players():
+            state = self.room.get_survival_player(player.entity_id)
+            if state is not None:
+                self._queue_broadcast("SurvivalState", {
+                    "elapsed_seconds": run.elapsed,
+                    "wave": run.wave,
+                    "paused": run.paused,
+                    "level": state.level,
+                    "experience": state.experience,
+                    "next_experience": state.next_experience,
+                })
+                queues = run.pending_rewards.get(player.entity_id, [])
+                if queues:
+                    self._queue_broadcast("LevelUpChoices", {
+                        "player_id": player.entity_id,
+                        "reward_ids": [c.reward_id for c in queues[0]],
+                        "labels": [c.label for c in queues[0]],
+                    })
 
         # ② 木桩回血
         stakes = self.room.get_stakes()
@@ -630,6 +660,11 @@ class GameServer:
                 # 注:hit_cb/end_cb 里也用 _queue_broadcast 而非 await broadcast——
                 # timer 回调虽然是独立协程,但仍不应被 I/O 阻塞(回调链可能很长)
                 async def hit_cb(_shape=shape, _shape_idx=shape_idx):
+                    if self.room.survival_run.should_pause():
+                        return
+                    attacker_entity = self.room.get_entity(attacker_id)
+                    if attacker_entity is not None and attacker_entity.ai_state == "returning":
+                        return
                     hurt_list = self.room.get_attack_hits(_shape, attacker_id)
                     # 击退:只在连段的「最后一段」触发,把目标推出攻击范围。
                     # 动机:攻击间隔(583ms)比 hurt 硬直(666ms)短,不击退会被连击到死。
@@ -659,6 +694,8 @@ class GameServer:
                             if knockback_distance > 0:
                                 self.room.apply_knockback(hurt_id, attacker_id, knockback_distance)
                         elif result == game_room.HurtResult.DEAD:
+                            # 死亡回调同时驱动 Run 结算或经验球事件；实体的延迟移除
+                            # 仍交给既有 timer，避免客户端在死亡动画前丢失实体。
                             # 死亡:启 dead timer(延迟移除实体,让客户端播死亡动画)
                             # 取死亡者类型的死亡动画时长(从 entity_config 查)
                             dead_entity = self.room.get_entity(hurt_id)
@@ -671,6 +708,17 @@ class GameServer:
                                 "attacker_id": attacker_id,
                                 "atk_id": atk_id,
                             })
+                            if dead_entity is not None and dead_entity.entity_type == "player":
+                                self.room.survival_run.on_player_dead(hurt_id)
+                                if self.room.survival_run.ended:
+                                    self._queue_broadcast("SurvivalResult", self.room.survival_run.result())
+                            elif dead_entity is not None:
+                                orb = self.room.survival_run.on_enemy_dead(hurt_id, attacker_id)
+                                if orb is not None:
+                                    self._queue_broadcast("ExperienceOrb", {
+                                        "orb_id": orb.entity_id, "x": orb.x,
+                                        "y": orb.y, "value": orb.value,
+                                    })
                         # FAILED:实体不存在/不能被攻击/无战斗组件,不做任何后续(防御性,get_attack_hits 已过滤)
                         # 广播 HpChanged(含 damage 给飘字,cur_hp 给血条)
                         # cur_hp 从 combat 取(apply_hurt 已扣过血)
