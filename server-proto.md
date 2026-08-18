@@ -1,6 +1,8 @@
 # 服务端 Proto 和契约 (server-proto)
 
 覆盖:`server/proto/*`
+
+EntityRelocated(entity_id,x,y) 是服务端重定位到客户端的 S2C 控制事件。
 职责:protobuf 消息定义、消息语义契约(messages.json)、编译脚本、生成代码
 
 ## 文件清单
@@ -153,6 +155,14 @@ proto 只描述消息"长什么样",契约描述消息"怎么用":
 
 数据流为：GameRoom/Run 状态变更 → WebServer 广播 S2C → ClientStateMirror 发出信号 → HUD 展示；选择则反向为 HUD → ChooseReward C2S → handler/Run 校验 → GameRoom 应用奖励 → 新快照回传。协议源文件的字段注释和 oneof 23--27 tag 必须与双端保持一致，生成的 Python/GDScript 文件只能由既有工具产生。
 
+### EntitySpawn 增量出生（PLAN-20260818-008）
+
+### MovementBatch 批量移动同步（PLAN-20260818-012）
+
+`MovementBatch` 使用 oneof tag 29，携带服务端 tick 序号和本 tick 所有移动/停止实体的坐标。它替代高频 S2C `PlayerMove` 位置广播；C2S `PlayerMove` 仍只提交方向请求，GameRoom 仍是唯一权威状态。
+
+`EntitySpawn` 使用 tag 28，S2C 单条消息同时携带 `EntityInfo` 和 `CombatStatsEntry`。它只用于已在房间内的实体出生：GameRoom 完成实体、战斗组件和 AI 挂载后由 WebServer 广播；客户端先原子写入两个镜像，再由 `entity_updated`/`stats_changed` 驱动 Role，避免刷怪时发送全量 `StatsInit + GameState`。新玩家进房和重连仍保留全量初始化流程。
+
 ### PLAN-20260818-004 验证记录
 
-Godobuf 使用项目内 `godobuf_cmdln.gd` 和 Godot 4.6.3 headless 成功生成 `client/Script/gdproto/game.gd`；生成文件包含五个生存消息及 23--27 标签。Godot headless editor 检查、服务端 py_compile、protobuf 编译和 SurvivalRun smoke 均通过。配置同步脚本成功，抽查的 constants/entity 配置在 shared/server/client 三处哈希一致。
+服务端 protobuf 已通过 `python server/proto/compile_proto.py` 生成。客户端正规生成入口为 `godot --headless --path client --script res://addons/godobuf/godobuf_cmdln.gd --input=res://Script/proto/game.proto --output=res://Script/gdproto/game.gd`；当前执行环境未安装 Godot（`where.exe godot`、`where.exe godot4` 均无结果），因此客户端生成物与 Godot headless 检查待在具备 Godot 的环境执行，禁止手工修改生成文件。

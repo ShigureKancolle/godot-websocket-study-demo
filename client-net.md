@@ -1,6 +1,8 @@
 # 客户端网络层 (client-net)
 
 覆盖:`client/Script/Net/*` + `client/Script/proto/*` + `client/Script/gdproto/*`
+
+StateMirror 单独处理 EntityRelocated，更新权威坐标并发出 entity_relocated 信号。
 职责:WebSocket 连接管理、消息总线(序列化/路由)、只读状态镜像、契约方向校验
 
 ## 文件清单
@@ -119,7 +121,7 @@ handler 接收 `data: Dictionary`(godobuf 反序列化的原始 dict),内部调 
 
 - `_on_game_state(data)` — 整体替换镜像(读 `entities` 字段),逐个 `from_dict` 转 ClientEntityInfo 后存,emit state_replaced
 - `_on_player_join(data)` — 增量添加实体(读 `entity_info` 字段并 `from_dict`),emit entity_updated(兼容本地 entity_id 提取)
-- `_on_player_move(data)` — 取出 ClientEntityInfo,改 x/y;并从 moving 字段推断 state(moving=true→"run", false→"idle",和服务端 apply_move_dir 一致)写入 `entity.state`,emit entity_updated。**注:这里读的是 S2C 的 x/y 字段**(服务端 tick_movement 算出的坐标),不读 C2S 的 dir_x/dir_y(那是客户端发出去的)。**防御:锁定状态(attacking/hurt/dead)不覆盖 state**——击退期间服务端仍每 tick 广播被推走的位置,若不防御会把 hurt 掐成 run/idle,受击动画中断、本地玩家提前恢复预测(和服务端 `_INPUT_LOCKED_STATES` 对齐)
+- `_on_player_move(data)` — 取出 ClientEntityInfo,改 x/y/moving;并从 moving 字段推断 state(moving=true→"run", false→"idle",和服务端 apply_move_dir 一致)写入 `entity.state`,emit entity_updated。**注:这里读的是 S2C 的 x/y/moving 字段**(服务端 tick_movement 算出的坐标),不读 C2S 的 dir_x/dir_y(那是客户端发出去的)。**防御:锁定状态(attacking/hurt/dead)不覆盖 state**——击退期间服务端仍每 tick 广播被推走的位置,若不防御会把 hurt 掐成 run/idle,受击动画中断、本地玩家提前恢复预测(和服务端 `_INPUT_LOCKED_STATES` 对齐)
 - `_on_player_facing(data)` — 取出 ClientEntityInfo,改 facing,emit entity_updated。复用同一信号,Role.on_entity_updated 里判断 facing 字段转发给 PlayerVisual
 - `_on_player_leave(data)` — 移除实体,emit entity_removed
 - `_on_attack_start(data)` — 取出攻击者 ClientEntityInfo,设 `entity.state = "attacking"` + `entity.atk_id = atk_id`(和服务端 apply_attack_start 对齐),emit entity_updated
@@ -214,3 +216,13 @@ WebScoketMgr 需要 _process 轮询,用 Node + autoload。
 `ClientStateMirror` 只接收并转发 Run 状态、经验球、升级候选和结算事件，不计算经验、等级或暂停。数据流为 S2C → MessageBus → Mirror → 信号 → HUD；HUD 的选择沿 C2S → handler → SurvivalRun 校验 → GameRoom 应用奖励 → 权威快照/事件回传。奖励选择只是向服务端发送请求，服务端拒绝重复、越界或过期选择时客户端不得本地应用。
 
 协议职责：`SurvivalState` 镜像计时/波次/等级，`ExperienceOrb` 只驱动表现，`LevelUpChoices` 只展示当前玩家队列，`SurvivalResult` 只展示服务端结算。客户端不会创建 Run、推进球或修改任何镜像状态。
+
+## EntitySpawn 增量出生（PLAN-20260818-008）
+
+## MovementBatch 批量镜像（PLAN-20260818-012）
+
+StateMirror 收到 tag 29 的 `MovementBatch` 后先原子写入整个批次，再逐实体发出 `entity_updated`。批次只更新坐标与 moving 推导状态，`attacking`、`hurt`、`dead` 锁定状态不会被移动快照覆盖。
+
+`EntityInfo.moving` 是服务端字段到客户端镜像的独立布尔值：全量 `from_dict`、单条 `PlayerMove` 和批量 `MovementBatch` 都更新它；`state` 仍受战斗锁定保护。Role 读取该镜像字段决定停止/锁定时的权威收敛，数据流为服务端 tick → 协议字段 → StateMirror → Role。
+
+服务端 GameRoom 创建实体并完成战斗组件后发送单条 `EntitySpawn`（`EntityInfo + CombatStatsEntry`）。StateMirror 幂等覆盖同 ID 的 `_entities`/`_combats`，然后分别发出 `entity_updated` 和 `stats_changed`，不发 `state_replaced`；这样已有 Role 不会因持续刷怪而全部销毁重建。`GameState + StatsInit` 仍只承担新玩家进房/重连的全量初始化。

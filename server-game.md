@@ -1,6 +1,8 @@
 # 服务端游戏逻辑层 (server-game)
 
 覆盖:`server/game/*` + `server/config/*`
+
+生存刷怪上限为当前活跃玩家数×5。追逐寻路终点始终是玩家真实坐标，facing 不参与目标点计算；远距离重定位只使用非零 move_dir，候选点距所有活跃玩家至少 850px。
 职责:唯一游戏状态持有者 GameRoom + 消息处理器 handlers + 配置加载层
 
 ## 文件清单
@@ -418,4 +420,16 @@ hurt 定时器到期
 - **AI 状态同步已实现**:EntityInfo 加 ai_state 字段(proto 同步加,GameState 快照带初始值);EnemyAIMachine.change_state 状态真正切换(old != new)时触发钩子(重入不广播);EnemyMgr.set_ai_state_change_hook 注入所有状态机;GameServer._on_ai_state_changed 同步 EntityInfo.ai_state + 广播 AiStateChanged(客户端据此切换视锥形态 normal/chase,详见 tools/视锥渲染方案.md)
 ## 生存 Run 扩展（PLAN-20260818-003）
 
-`GameRoom.survival_run` 是共享房间内唯一的生存局状态入口，持有计时、波次、刷怪预算、敌人目标/返程、经验球、玩家等级、奖励队列、暂停和结算统计。实体仍由 GameRoom 管理；距离超过 1500px 时只停止普通 AI 并返程，1200px 内恢复，不重建敌人。
+## 前方重部署与 AI 路径有效性（PLAN-20260818-013）
+
+远距离敌人由 `SurvivalRun` 根据玩家非零 `move_dir` 选择外围候选点，通过 `GameRoom.relocate_entity()` 权威改坐标；候选必须可行且距所有活跃玩家达到 `ENEMY_RELOCATE_SAFE_DISTANCE`。实体 ID、HP、AI 和统计保持不变，重定位通过可靠 `EntityRelocated` FIFO 事件广播并清理 EnemyMgr 的旧路径。
+
+`GameRoom.survival_run` 是房间内唯一的生存局状态入口，持有计时、波次、刷怪预算、敌人目标/返程、经验球、玩家等级、奖励队列、暂停和结算统计。实体仍由 GameRoom 管理；距离超过 1500px 时停止普通 AI 并返程，1200px 内恢复，不重建敌人。
+
+## 生存敌群重定位与路径预算（PLAN-20260818-010）
+
+距离过远且玩家具有非零移动方向时，服务端按每 tick 数量和冷却把同一实体重定位到可通行外围点；候选点受地形阻挡或任一活跃玩家安全距离不足则保留原地，不覆盖生命、战斗属性、统计或 AI 对象。
+
+生存模式刷怪上限为活跃玩家数×5。重定位使用 `ENEMY_RELOCATE_BASE_DISTANCE` 和 `ENEMY_RELOCATE_SAFE_DISTANCE`，并保留地形可行性及所有活跃玩家安全距离检查。
+
+ChaseState 先检查玩家真实坐标的直线地形可达性，受阻才将 A* 请求交给 EnemyMgr 全局预算队列。每 tick 只执行配置额度的任务；等待时保留旧路径，没有旧路径则停下，并用每敌人冷却和 pending 集合防止重复排队。慢 tick 仅在超过 `SLOW_TICK_WARNING_MS` 时记录耗时、活跃敌数和本 tick A* 数量。

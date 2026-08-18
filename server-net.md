@@ -1,6 +1,8 @@
 # 服务端网络层 (server-net)
 
 覆盖:`server/main.py` + `server/net/*` + `server/tools/hotreload.py` + `server/tools/console.py` + `server/hotreload_config.py`
+
+EntityRelocated 属于可靠控制事件，进入普通发送 FIFO，不使用 latest-only MovementBatch 槽位。
 职责:服务端入口装配、WebSocket 连接管理、消息总线(序列化/路由)、契约方向校验、热更、交互控制台
 
 ## 文件清单
@@ -296,6 +298,19 @@ start_console 之前写在 web_server.py 里,但它和 WebSocket 服务逻辑无
 - **敌人攻击已接入**:`_trigger_attack` 抽成方法并注册给 GameRoom 作为 `attack_trigger` 钩子,玩家(经 pending)和敌人(AI 状态机直接调 `room.trigger_attack`)走同一条完整攻击流程(状态变更+广播+判定帧定时器+命中扣血),修复了敌人 AI 直接调 apply_attack_start 导致"只改状态不发动"的问题
 - **AttackHit 加 hurt_duration 字段**:客户端当前不读,留作未来预演/调试
 - ATTACK_CONFIG 等攻击配置已从 web_server.py 迁回 game_room.py(配置属 game 层)
+
+## EntitySpawn 增量广播（PLAN-20260818-008）
+
+`GameRoom.create_enemy` 完成实体、CombatComponent 和 AI 初始化后，通过线程安全的实体出生钩子进入事件循环；`_broadcast_entity_spawn` 发送单条 EntitySpawn，原子包含 EntityInfo 与初始 CombatStatsEntry。刷怪不再发送 StatsInit + GameState 全量重建，只有新玩家进房/重连继续使用全量初始化。
 - handler 已拆到 game/handlers/,web_server.py 只管网络层
 - 热更已实现:控制台 `reload()` 命令,reload 5 模块+重新注册 handler
 - 控制台已拆分到 tools/console.py
+## 生存 tick 性能诊断（PLAN-20260818-010）
+
+## 批量移动发送（PLAN-20260818-012）
+
+发送器在控制消息连续发送达到 burst 上限后优先发送等待中的 MovementBatch，避免 SurvivalState 等高频控制事件无限饿死移动快照；诊断记录移动等待时长及 A*/重部署相关计数。
+
+每个 tick 最多构建一条 `MovementBatch`。控制消息继续进入 FIFO 优先队列，移动消息使用可覆盖的 latest slot；发送诊断提供控制队列深度、移动槽覆盖次数、批次数和批内实体数。Pong 走高优先级单播，并与同一 websocket 的广播写入串行化。
+
+`EnemyMgr` 维护房间级 A* 请求队列，每 tick 按 `ENEMY_MAX_PATH_TASKS_PER_TICK` 执行；`GameServer._process_tick` 在超过 `SLOW_TICK_WARNING_MS` 时才记录耗时、活跃敌人数和实际 A* 数，正常 tick 不输出日志。该诊断只读服务端权威状态，不增加协议字段。

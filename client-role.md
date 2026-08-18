@@ -1,6 +1,8 @@
 # 客户端角色组件 (client-role)
 
 覆盖:`client/Script/role/*` + `client/Script/statemachine/*` + `client/Script/dead_man_scene.gd`
+
+Role.on_entity_relocated 同帧写入 target_pos 与 position，敌人重定位不走 lerp。
 职责:组件化实体容器、视觉表现、本地玩家控制、动画状态机、场景管理 Role 实例
 
 ## 文件清单
@@ -116,27 +118,25 @@ Role 本身只是"位置容器":有坐标、能挂子节点。它不知道自己
 - 攻击弧光:**state 进入 "attacking" 瞬间**(was_attacking 判定防重复触发)调 `_trigger_attack_fan` → `AttackFan.show_attack(atk_id, 0, facing, identity)`
 - 动画状态:`info.state` 非空则转发给 `AnimStateMachine.update_state`(木桩没挂状态机时跳过)
 
-### 位置同步(服务端权威,本地预测+软对账 / 远程 lerp)
+### 位置同步(服务端权威,本地预测+相对锚点对账 / 远程 lerp)
 本地玩家与远程实体共用 `target_pos`(服务端权威位置),但表现策略不同:
 
-- **本地玩家**:半预测 + 软对账
+- **本地玩家**:半预测 + 相对位移锚点对账
   - LocalPlayerController 发方向后立即本地预测推进(`position += dir * speed * delta`)
-  - Role._process 每帧把预测位置记入 `_pred_history`(预测轨迹,窗口 1000ms)
-  - 收到服务端广播时,`_reconcile_prediction` 回溯「RTT + 半个 tick」前的预测位置,
-    与服务端权威 `target_pos` 比较:
-    - 误差 ≤ 15px:预测正确,忽略(不回正 → 不拉扯)
-    - 误差 > 15px:真脱节(服务端因碰撞/attacking 锁定没推进),`position.lerp(target_pos, 0.35)` 平滑回正 + 清空历史
-  - **变向宽限**:LocalPlayerController 检测到方向突变(夹角>60° 或 移动→停止)时记录时刻 `_last_dir_change_ms`;变向后 `RTT + 1.5×tick + 30ms` 的宽限窗口内 `_reconcile_prediction` 跳过回正(轨迹照常记录)——服务端要等「输入排队 ≤1 tick + tick 处理 + 半程 RTT 回传」才按新方向推进,这期间广播的仍是旧方向轨迹,回正会把玩家"折回"旧方向。窗口外恢复正常对账,真脱节仅延迟一个窗口仍会被回正
-  - 回溯时刻为什么是「RTT + 半个 tick」而非「RTT」:服务端收到输入后要在 pending 里排队等下一个 tick(平均半个 tick)才生效,推进起步比客户端预测晚这一段,回溯要覆盖它,否则匀速移动也有 speed×tick/2≈5px 的稳态误差
+  - Role 保存客户端/服务端共同同步锚点，只比较锚点后的相对位移；固定传输领先量不作为误差
+  - 相对漂移超过 24px 且连续 3 个 MovementBatch 才校正，目标为 `target_pos + anchor_lead`，不会对每个滞后绝对坐标直接拉回
+  - **变向宽限**使用固定 tick 调度余量，不读取 RTT；停止、碰撞、受击和攻击锁定走绝对权威收敛
+  - 变向宽限结束后的首个 MovementBatch 会重建共同锚点，清除旧方向漂移计数，避免把方向变化造成的领先向量误判为脱节
   - 效果:位置由本地方向自推进,无"追-停"顿挫、无 RTT 输入滞后;服务端坐标只做校验
 
 - **硬直(hurt)期间(含击退)**:本地玩家停止预测,改为 lerp 跟随服务端位置
-  - 硬直中 LocalPlayerController 已因 state=="hurt" 停预测,若仍靠软对账,
-    单 tick 击退位移(~3px)小于 15px 阈值不会触发回正 → 本地玩家视觉上不会被推走
+  - 硬直中 LocalPlayerController 已因 state=="hurt" 停预测，Role 直接向绝对权威位置收敛
   - Role 缓存 `_state`(on_entity_updated 更新),`_process` 里 `_state=="hurt"` 时
     `position = position.lerp(target_pos, delta*LERP_FACTOR)`(和远程一样跟随),
     `_update_position` 跳过软对账、`_record_prediction` 停止
   - 硬直结束(HurtEnd → state="idle")后恢复预测,此时 position 已跟上服务端,衔接平滑
+
+- **停止及战斗锁定**:服务端 `moving=false` 或状态为 `attacking`/`hurt`/`dead` 后，本地每帧持续向 `target_pos` 收敛，即使停止后没有新的 MovementBatch 也不会停在半途。
 
 - **远程实体(敌人/其他玩家)**:插值模式
   - 服务端 30Hz 给出 target_pos,客户端 60Hz lerp 向它平滑过渡
@@ -154,20 +154,19 @@ Role 本身只是"位置容器":有坐标、能挂子节点。它不知道自己
 > | 纯 snap(position=target_pos) | 30Hz 广播每 33ms 跳 10px → 步进抖动 |
 > | 限速线性追赶(speed×1.2) | 追到位→停等→等广播;30Hz 广播到达不均匀(局域网 tick 也有 10-20ms 抖动)→ 本地玩家"走走停停"顿挫;方向切换追着旧方向坐标滑一段再折回 → 回跳 |
 > | 预测+软对账(初版) | Windows 15.6ms 定时粒度下服务端 tick 实际约 47ms + 固定 dt 积分 → 服务端移速只有 71% → 匀速移动周期性回拉;变向时服务端推进滞后(排队等 tick + RTT)未被对账覆盖 → 变向折回 |
-> | 预测+软对账(当前) | ✅ 服务端实测 dt 积分 + timeBeginPeriod(1) 提频(移速与墙钟一致);客户端对账回溯修正为 RTT+半个 tick;变向/急停后宽限窗口内跳过回正。本地方向自推进无停等,服务端坐标只做校验,误差>15px 才 lerp 平滑回正 |
+> | 预测+相对锚点对账(当前) | ✅ 稳定直行比较共同锚点后的位移差，连续 3 个批次超过 24px 才校正并保留锚点领先量；停止、碰撞、受击、攻击锁定仍绝对权威收敛，RTT 只作诊断 |
 
 新增字段/常量:
 - `target_pos: Vector2` — 服务端权威位置(从 entity_updated 信号拿到,只读)
 - `_is_local: bool` — 是否本地玩家(setup 时判断,决定预测对账还是 lerp)
 - `_state: String` — 最近一次从服务端同步到的动画状态(缓存,hurt 硬直判断用)
 - `_position_initialized: bool` — 位置是否已初始化(首次直接 snap)
-- `_pred_history: Array` — 本地预测轨迹历史(条目 [time_ms, x, y]),供软对账回溯
-- `PRED_HISTORY_WINDOW_MS = 1000` / `PRED_HISTORY_MAX_ENTRIES = 200` — 轨迹窗口/上限
-- `RECONCILE_THRESHOLD = 15.0` — 软对账阈值(需盖住 RTT 偏差引起的回溯偏移,speed×偏差≈9px)
+- `_sync_anchor_local/server`、`_sync_anchor_valid` — 客户端/服务端共同同步锚点及有效标记
+- `RELATIVE_DRIFT_THRESHOLD = 24.0` / `RELATIVE_DRIFT_BATCHES = 3` — 相对漂移阈值和连续批次数
 - `RECONCILE_LERP = 0.35` — 回正插值系数(平滑回正,不硬跳)
 - `LERP_FACTOR = 15.0` — 远程实体 lerp 因子系数
-- `SERVER_TICK_MS = 33.0` — 服务端 tick 周期(和服务端 TICK_INTERVAL_MS 对齐),对账回溯修正 + 宽限窗口计算用
-- `DIR_CHANGE_GRACE_TICKS = 1.5` / `DIR_CHANGE_GRACE_MARGIN_MS = 30.0` — 变向宽限窗口 = RTT + 1.5×tick + 30ms
+- `SERVER_TICK_MS = 33.0` — 服务端 tick 周期(和服务端 TICK_INTERVAL_MS 对齐),固定调度宽限窗口计算用
+- `DIR_CHANGE_GRACE_TICKS = 1.5` / `DIR_CHANGE_GRACE_MARGIN_MS = 30.0` — 固定变向宽限窗口
 - `_last_dir_change_ms`(LocalPlayerController) — 最近一次方向突变(夹角>60° 或 移动→停止)的时刻,`get_last_dir_change_ms()` 暴露给 Role 对账做宽限判断;`DIR_CHANGE_DOT_THRESHOLD = 0.5` 是变向夹角阈值(点积)
 
 ## PlayerVisual.gd — 视觉组件
@@ -327,9 +326,9 @@ PlayerVisual 的 AnimatedSprite2D 播放对应动画
 3. **本地预测**:发完方向后立即 `position += dir * speed * delta` 推进自己(不等服务端回传,消除延迟感)
 4. 服务端 apply_move_dir 只记住方向(不推进位移),tick_movement 每 tick 持续推进;apply_facing / apply_attack_start 更新权威状态,广播给所有人(含自己)
 5. StateMirror 收到 → `entity_updated` 信号 → Role.on_entity_updated → 更新 target_pos(不直接改 position)
-6. Role 软对账:收到广播回溯 RTT 前预测位置,与服务端位置误差小则忽略,大则 lerp 平滑回正(撞墙/hurt 锁定导致服务端没推进,预测跑偏了)
+6. Role 以客户端/服务端共同锚点比较相对位移；连续三个批次超过 24px 才保留锚点领先量平滑回正，停止、撞墙、hurt 或攻击锁定直接向绝对权威位置收敛
 
-**为什么本地预测不违反服务器权威**:预测是临时手段,服务端回传后 Role 软对账。两端用同一个 speed(entity_config.json),服务端 tick_movement 每 tick 按 dir * speed * TICK_INTERVAL 推进,客户端每帧按 dir * speed * delta 预测,1 秒总位移一致,误差很小。只有服务端拒绝了移动(如 hurt/attacking/撞墙)时,误差超过阈值才平滑回正(lerp,不是硬 snap)。
+**为什么本地预测不违反服务器权威**:预测是临时手段,服务端回传后 Role 用锚点对账。两端用同一个 speed(entity_config.json),服务端 tick_movement 每 tick 按 dir * speed * TICK_INTERVAL 推进,客户端每帧按 dir * speed * delta 预测,1 秒总位移一致,相对误差很小。只有服务端拒绝移动或真实阻挡持续造成相对漂移时才平滑回正；受击/攻击锁定走绝对权威目标。
 
 ### 攻击流程
 1. 检查 `mirror.get_entity(mirror.local_entity_id()).state`,若已是 `"attacking"` 则跳过(防连点)
@@ -411,7 +410,7 @@ DeadManScene.tscn 里有个 E_Back 按钮用于返回 MainScene。Role 实例用
 
 ## 当前状态
 - 统一 Entity 模型 + 强类型 ClientEntityInfo 重构完成:Role 按 EntityType 枚举分发,玩家/木桩统一在 `_entities` 表管理,字段访问全用强类型属性
-- **服务端权威移动 + 本地预测软对账已实现**:LocalPlayerController 发方向(dir_x/dir_y)+ 本地预测(position += dir * speed * delta);Role 记预测轨迹 + 软对账(回溯 RTT+半个 tick 前预测位置,误差>15px 才 lerp 平滑回正;变向/急停后宽限窗口内跳过回正)/ 远程 lerp 插值(30Hz→60Hz 平滑);服务端 apply_move_dir 只记方向 + tick_movement 按实测 dt 持续推进,解决"丢 tick → 误差累积 → 拉回"和"Windows 定时粒度 → 移速漂移 → 周期性回拉"问题;本地玩家不再"限速追赶"(那会追到位→停等→广播抖动顿挫)
+- **服务端权威移动 + 本地预测相对锚点对账已实现**:LocalPlayerController 发方向并本地预测;Role 比较锚点后的相对位移，连续漂移才保留领先量平滑回正，停止/碰撞/受击/攻击锁定走绝对权威，RTT 仅诊断；远程实体继续 30Hz→60Hz 插值。
 - 玩家同步闭环已跑通:两个客户端能互相看到对方移动+朝向(本地蓝箭头/远程棕箭头)
 - 攻击流程已实现:LocalPlayerController 发 AttackStart,StateMirror 处理 AttackHit/AttackEnd,AnimStateMachine 支持 attack/hurt 状态
 - **hurt 硬直已实现**:StateMirror 处理 AttackHit(进 hurt)+ HurtEnd(恢复 idle),纯服务端权威恢复(路径X);AnimStateMachine 的 change_state 加 `_reenter_state` 重入机制,HurtState override 后调 replay_cur_anim() 实现连击重启动画;StateBase 加 `_reenter_state` 虚方法(基类默认空)
@@ -425,5 +424,19 @@ DeadManScene.tscn 里有个 E_Back 按钮用于返回 MainScene。Role 实例用
 - **攻击扇形弧光已实现**:新建 AttackFan.gd(Polygon2D,玩家/敌人都挂)——按攻击形状配置(radius/angle/hit_time/duration)渲染扇形范围,顶点色渐变(圆心透明→弧上峰值,"剑气外放"),颜色按身份(本人淡蓝白/队友绿/敌人红),0.15s 膨胀+保持到命中时刻最亮+淡出(零贴图);Role.on_entity_updated 检测 state 进入 attacking 瞬间触发(was_attacking 防重复);命中时刻发 hit_moment 信号
 - **屏幕震动 + 攻击后坐已实现**:CameraFollow.gd 加 shake()(攻击命中时刻随机偏移 3px 衰减归零,只震本机);本地玩家攻击时 Role 设 _recoil_offset(朝向反方向 12px)只偏移 PlayerVisual 子节点并衰减回零,Role.position(预测/权威)不动、不污染软对账
 ## 生存实体表现（PLAN-20260818-003）
+
+## EntitySpawn 与 CameraFollow（PLAN-20260818-008）
+
+## 本地预测对账解耦（PLAN-20260818-012）
+
+## 生存敌人重部署同步（PLAN-20260818-013）
+
+敌人重部署位置来自服务端 MovementBatch；客户端 Role 不区分普通移动与重部署，继续通过镜像目标位置表现，避免客户端形成第二套位置权威。
+
+本地移动输入只在起步、停止或方向变化时发送。Role 以客户端/服务端共同同步锚点比较相对位移，连续三个批次超过 24px 才校正，并将锚点领先量保留在校正目标中；停止、碰撞、受击和攻击锁定仍向绝对权威位置收敛。诊断接口记录锚点状态、连续漂移批数、最大相对误差和实际回正次数，不读取实时 RTT。
+
+Role 读取的 `moving` 来自 `ClientEntityInfo` 镜像字段；该字段由全量 EntityInfo、单条 PlayerMove 和 MovementBatch 统一写入。StateMirror 只锁定动画 `state`，不丢失 moving，因此停止批次和战斗锁定后的持续权威收敛不会依赖下一条移动消息。
+
+刷怪使用 `EntitySpawn` 单实体增量，不再触发 `state_replaced` 全量重建 Role。CameraFollow 监听 `state_replaced`、`entity_updated` 和 `entity_removed`，只跟随最新的本地镜像对象；ready 或重连时本地 ID 尚未出现，则每帧做一次 O(1) 镜像查表兜底。相机位置始终来自服务端镜像，不在客户端取得位置权威。
 
 敌人的 `ai_state=returning` 仅作为服务端镜像状态，客户端负责表现返程移动；实体 ID 生命周期由快照/移除事件驱动，不因离开激活距离而重建或清血。

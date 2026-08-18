@@ -79,6 +79,8 @@ d:\work2\godot_demo\
 | [client-ui.md](file:///d:/work2/godot_demo/docs/client-ui.md) | Script/UI/* + Scene + prefab + signal + init | UI 层、场景跳转、信号管理 |
 | [client-hud.md](file:///d:/work2/godot_demo/docs/client-hud.md) | Script/UI/hud/* + prefab/hud/* | 局内 HUD 预制体、纯客户端显示控制、服务端协议数据需求 |
 
+GameScene 诊断 Label 位于 `client/Scene/GameScene.tscn` 的 `UILayer`，EntitySpawn 增量协议由 server-proto/client-net/client-role 文档共同维护。
+
 ## 全局架构
 ```
 客户端 (Godot)                          服务端 (Python)
