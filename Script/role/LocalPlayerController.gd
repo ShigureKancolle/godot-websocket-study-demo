@@ -172,6 +172,10 @@ func _process(delta: float) -> void:
 	var player: ClientEntityInfo = mirror.get_entity(mirror.local_entity_id())
 	if player == null:
 		return  # 镜像还没拿到本地玩家信息(PlayerJoin 未到),跳过
+	# 单人升级暂停由服务端 SurvivalState 权威下发；暂停期间停止发送
+	# 输入和本地预测，避免客户端视觉位置继续领先于服务端。
+	if bool(mirror.survival_state().get("paused", false)):
+		return
 	var my_state: String = player.state
 	# 输入锁定状态:attacking/hurt/dead 期间禁止移动/朝向/攻击
 	# 和服务端 _INPUT_LOCKED_STATES 对齐。hurt 期间不锁会导致:
@@ -187,7 +191,7 @@ func _process(delta: float) -> void:
 		# 但为了契约一致性,客户端仍然填上 entity_id 字段
 		MessageBus.instance().send("game.AttackStart", {
 			"entity_id": mirror.local_entity_id(),
-			"atk_id": 1001
+			"atk_id": 1003
 		})
 
 		# 预判玩家状态为攻击中,不发移动和朝向消息

@@ -185,6 +185,10 @@ var _combats: Dictionary[String, ClientCombatStats] = {}
 # 渲染层用它区分「自己」和「别人」(比如自己的角色高亮显示)
 # 为什么放这里而不是放某个场景脚本:entity_id 是跨场景的状态,放镜像里最合适
 var _local_entity_id: String = ""
+# 最近一次服务端 Run 快照/候选/结算，供场景晚于网络消息创建时补刷 UI。
+var _survival_state: Dictionary = {}
+var _last_level_up_choices: Dictionary = {}
+var _last_survival_result: Dictionary = {}
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +219,21 @@ func clear() -> void:
 	_entities.clear()
 	_combats.clear()
 	_local_entity_id = ""
+	_survival_state.clear()
+	_last_level_up_choices.clear()
+	_last_survival_result.clear()
+
+func survival_state() -> Dictionary:
+	"""返回最近的服务端 Run 快照副本，客户端不得据此反写权威状态。"""
+	return _survival_state.duplicate()
+
+func last_level_up_choices() -> Dictionary:
+	"""返回最近的服务端升级候选副本。"""
+	return _last_level_up_choices.duplicate()
+
+func last_survival_result() -> Dictionary:
+	"""返回最近的服务端结算副本。"""
+	return _last_survival_result.duplicate()
 
 
 ## 获取单个实体的战斗属性。不存在则返回 null。
@@ -710,11 +729,13 @@ func _on_map_info(data: Dictionary) -> void:
 
 func _on_survival_state(data: Dictionary) -> void:
 	# Run 状态是服务端快照；镜像只复制并发信号，不在客户端计算暂停、经验或等级。
-	survival_state_updated.emit(data.duplicate())
+	_survival_state = data.duplicate()
+	survival_state_updated.emit(_survival_state.duplicate())
 
 func _on_level_up_choices(data: Dictionary) -> void:
 	# 奖励队列归服务端所有，客户端只展示当前玩家的可选项。
-	level_up_choices_received.emit(data.duplicate())
+	_last_level_up_choices = data.duplicate()
+	level_up_choices_received.emit(_last_level_up_choices.duplicate())
 
 func _on_experience_orb(data: Dictionary) -> void:
 	# 经验球事件用于表现层跟随；实际吸收和加经验由服务端确认。
@@ -722,4 +743,5 @@ func _on_experience_orb(data: Dictionary) -> void:
 
 func _on_survival_result(data: Dictionary) -> void:
 	# 结算数据不可由客户端推导，直接转发服务端封存的最终统计。
-	survival_result_received.emit(data.duplicate())
+	_last_survival_result = data.duplicate()
+	survival_result_received.emit(_last_survival_result.duplicate())

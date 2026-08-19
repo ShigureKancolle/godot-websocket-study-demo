@@ -12,26 +12,21 @@ extends Control
 
 signal survival_reward_requested(index: int)
 signal survival_result_shown(result: Dictionary)
+signal result_return_requested
 
 var survival_state: Dictionary = {}
 var pending_reward_choices: Dictionary = {}
+var _choice_panel: VBoxContainer
+var _result_panel: VBoxContainer
 
 func apply_survival_state(state: Dictionary) -> void:
 	# 仅更新展示数据；权威值来自 ClientStateMirror，客户端不推进 Run 计时或经验。
 	survival_state = state.duplicate()
 
-func show_level_up_choices(choices: Dictionary) -> void:
-	# 保存当前待选项供 UI 绘制，点击后仍需通过信号发送服务端请求。
-	pending_reward_choices = choices.duplicate()
-
 func request_survival_reward(index: int) -> void:
 	# 数据流：UI 点击 -> 上层发送 ChooseReward(C2S) -> 服务端校验 ->
 	# SurvivalState/LevelUpChoices 回传；HUD 不直接改等级或奖励。
 	survival_reward_requested.emit(index)
-
-func show_survival_result(result: Dictionary) -> void:
-	# 结算面板只显示服务端统计；不在本地重新计算生存时间或击杀数。
-	survival_result_shown.emit(result.duplicate())
 
 # 聊天框提交(回车或点发送按钮),由上层决定走 game.ChatMessage 还是本地测试
 signal chat_submitted(text: String)
@@ -92,6 +87,7 @@ func _ready() -> void:
 	$ChatPanel/VBox/InputRow/InputLine.text_submitted.connect(_on_input_submitted)
 	$Radar.visible = radar_visible
 	$Radar.draw.connect(_draw_radar)
+	_build_survival_panels()
 
 
 func _process(delta: float) -> void:
@@ -184,11 +180,116 @@ func set_local_hp(cur_hp: int, max_hp: int) -> void:
 	bar.value = clampi(cur_hp, 0, maxi(max_hp, 1))
 
 
-# 设置本地玩家能量(绿条,具体语义由服务端定:能量/护盾/耐力等)
+# 设置绿色经验条(保留旧方法名，调用方应优先使用 set_local_experience)
 func set_local_energy(cur: int, max_value: int) -> void:
+	# 兼容旧 API 名称：现有绿色“能量槽”只显示服务端经验。
 	var bar: ProgressBar = $PlayerStatus/EnergyBar
 	bar.max_value = maxi(max_value, 1)
 	bar.value = clampi(cur, 0, maxi(max_value, 1))
+
+
+func set_local_experience(cur: int, next_value: int) -> void:
+	"""显示服务端下发的当前经验/升级阈值，不在客户端计算经验。"""
+	set_local_energy(cur, next_value)
+
+
+func _build_survival_panels() -> void:
+	# 面板由 HUD 自己创建，保持预制体只负责基础布局，场景适配层只注入数据。
+	_choice_panel = VBoxContainer.new()
+	_choice_panel.name = "LevelUpChoices"
+	_choice_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_choice_panel.set_anchors_preset(Control.PRESET_CENTER)
+	_choice_panel.position = Vector2(-210, -90)
+	_choice_panel.size = Vector2(420, 180)
+	_choice_panel.add_theme_constant_override("separation", 8)
+	_choice_panel.visible = false
+	add_child(_choice_panel)
+	var choice_title := Label.new()
+	choice_title.name = "Title"
+	choice_title.text = "选择升级"
+	choice_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_choice_panel.add_child(choice_title)
+	for index in 3:
+		var button := Button.new()
+		button.name = "Choice%d" % index
+		button.mouse_filter = Control.MOUSE_FILTER_STOP
+		button.custom_minimum_size = Vector2(420, 38)
+		button.pressed.connect(_on_choice_pressed.bind(index))
+		_choice_panel.add_child(button)
+
+	_result_panel = VBoxContainer.new()
+	_result_panel.name = "SurvivalResult"
+	_result_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_result_panel.set_anchors_preset(Control.PRESET_CENTER)
+	_result_panel.position = Vector2(-190, -130)
+	_result_panel.size = Vector2(380, 260)
+	_result_panel.add_theme_constant_override("separation", 10)
+	_result_panel.visible = false
+	add_child(_result_panel)
+	var result_title := Label.new()
+	result_title.name = "Title"
+	result_title.text = "游戏结束"
+	result_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_result_panel.add_child(result_title)
+	var result_text := Label.new()
+	result_text.name = "Stats"
+	result_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_result_panel.add_child(result_text)
+	var back_button := Button.new()
+	back_button.text = "返回大厅"
+	back_button.pressed.connect(func(): result_return_requested.emit())
+	_result_panel.add_child(back_button)
+
+
+func show_level_up_choices(choices: Dictionary) -> void:
+	pending_reward_choices = choices.duplicate()
+	if _choice_panel == null:
+		return
+	_choice_panel.visible = true
+	_result_panel.visible = false
+	var labels: Array = choices.get("labels", [])
+	for index in 3:
+		var button: Button = _choice_panel.get_node("Choice%d" % index)
+		button.text = str(labels[index]) if index < labels.size() else ""
+		button.disabled = index >= labels.size()
+
+
+func _on_choice_pressed(index: int) -> void:
+	# 立即锁定按钮，避免网络往返期间重复发送同一个选择；奖励仍只由
+	# 服务端应用，候选面板关闭等待下一条权威 LevelUpChoices 空事件。
+	for child in _choice_panel.get_children():
+		if child is Button:
+			child.disabled = true
+	request_survival_reward(index)
+
+
+func clear_level_up_choices() -> void:
+	"""收到服务端空候选确认后关闭选择面板，清除客户端暂存。"""
+	pending_reward_choices.clear()
+	if _choice_panel != null:
+		_choice_panel.visible = false
+
+
+func show_survival_result(result: Dictionary) -> void:
+	# 结算面板只显示服务端统计；不在本地重新计算生存时间或击杀数。
+	if _choice_panel != null:
+		_choice_panel.visible = false
+	if _result_panel != null:
+		_result_panel.visible = true
+		_result_panel.get_node("Stats").text = "存活时间：%d 秒\n波次：%d\n击杀：%d\n伤害：%d" % [
+			int(result.get("survival_seconds", 0)), int(result.get("wave", 0)),
+			int(result.get("kills", 0)), int(result.get("damage", 0))]
+	survival_result_shown.emit(result.duplicate())
+
+
+func clear_survival_ui() -> void:
+	"""切换场景时清除本局候选和结算显示，避免下一局复用旧数据。"""
+	survival_state.clear()
+	pending_reward_choices.clear()
+	if _choice_panel != null:
+		_choice_panel.visible = false
+	if _result_panel != null:
+		_result_panel.visible = false
 
 
 # ---------------- 限时状态 / 永久 buff(血条上方图标) ----------------

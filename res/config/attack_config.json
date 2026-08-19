@@ -18,6 +18,20 @@
 		]
 	},
 
+	"1003": {
+		"_desc": "扇形一刀(唯一一段=最后一段,命中击退 80px)",
+		"shape_list": [
+			{
+				"shape": "sector",
+				"params": {"radius": 70.0, "angle": 120.0},
+				"duration": 583,
+				"hit_time": 83,
+				"damage_multiplier": 2,
+				"knockback_distance": 80.0
+			}
+		]
+	},
+
 	"1002": {
 		"_desc": "扇形两刀(当前两个 shape 配置相同;第二段为最后一段,命中击退 80px)",
 		"shape_list": [
