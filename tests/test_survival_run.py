@@ -2,6 +2,7 @@
 """PLAN-20260818-004 生存敌人上限、追逐目标和重定位事件的回归测试。"""
 
 import math
+import asyncio
 import sys
 import unittest
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ sys.path.insert(0, __import__("pathlib").Path(__file__).resolve().parents[1].as_
 import game.game_room as game_room
 import game.survival_run as survival_run
 import game.ai.states.chase_state as chase_state
+import net.web_server as web_server
 
 
 def entity(eid, etype="player", x=0.0, y=0.0, **kwargs):
@@ -100,6 +102,60 @@ class SurvivalRunTests(unittest.TestCase):
         second = room.consume_relocations()
         self.assertEqual(first, [{"entity_id": "enemy:1", "x": 900.0, "y": 0.0}])
         self.assertEqual(second, [])
+
+    def test_run_finish_snapshots_recipients_before_removing_members(self):
+        """结算只发给旧局成员，连接仍留在 sessions 等待下一次 EnterRoom。"""
+        server = web_server.GameServer()
+        old_room = server.room
+        old_room.add_entity("player:p1", game_room.EntityInfo("", "player"))
+        old_room.add_survival_player("player:p1")
+        websocket = object()
+        server.players["player:p1"] = websocket
+        server.sessions["player:p1"] = {"websocket": websocket}
+
+        server._finish_survival_run(old_room.survival_run)
+
+        queued_name, queued_data, recipients = server._send_queue.get_nowait()
+        self.assertEqual(queued_name, "SurvivalResult")
+        self.assertEqual(recipients, {"player:p1": websocket})
+        self.assertNotIn("player:p1", server.players)
+        self.assertIn("player:p1", server.sessions)
+        self.assertIsNot(server.room, old_room)
+
+    def test_solo_level_up_pause_blocks_ai_and_movement(self):
+        """单人有待选奖励时，权威 tick 只同步 UI，不推进世界。"""
+        server = web_server.GameServer()
+        server.room.add_entity("player:p1", game_room.EntityInfo("", "player", moving=True))
+        server.room.add_survival_player("player:p1")
+        server.room.survival_run.pending_rewards["player:p1"] = [[
+            survival_run.RewardChoice("defense", "防御 +10", 10)
+        ]]
+        enemy_mgr = server.room.get_enemy_manager()
+        with patch.object(enemy_mgr, "update") as ai_update, \
+                patch.object(server.room, "tick_movement", return_value=[] ) as move_tick:
+            asyncio.run(server._process_tick(0.1))
+        self.assertTrue(server.room.survival_run.paused)
+        self.assertEqual(server.room.survival_run.elapsed, 0.0)
+        ai_update.assert_not_called()
+        move_tick.assert_not_called()
+
+    def test_multiplayer_level_up_does_not_pause_world(self):
+        """多人模式即使一人有候选，AI 和移动仍继续推进。"""
+        server = web_server.GameServer()
+        for player_id in ("player:p1", "player:p2"):
+            server.room.add_entity(player_id, game_room.EntityInfo("", "player"))
+            server.room.add_survival_player(player_id)
+        server.room.survival_run.pending_rewards["player:p1"] = [[
+            survival_run.RewardChoice("defense", "防御 +10", 10)
+        ]]
+        enemy_mgr = server.room.get_enemy_manager()
+        with patch.object(enemy_mgr, "update") as ai_update, \
+                patch.object(server.room, "tick_movement", return_value=[] ) as move_tick:
+            asyncio.run(server._process_tick(0.1))
+        self.assertFalse(server.room.survival_run.paused)
+        self.assertGreater(server.room.survival_run.elapsed, 0.0)
+        ai_update.assert_called_once()
+        move_tick.assert_called_once()
 
 
 if __name__ == "__main__":

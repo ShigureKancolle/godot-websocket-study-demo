@@ -179,6 +179,10 @@ def register(server: "GameServer") -> None:
         # 实体不在房间就忽略:可能是未加入就发移动,或已离开(网络消息乱序)
         if not server.room.has_entity(ctx.player_id):
             return
+        # 单人升级暂停由服务端最终门禁；暂停期间不接受移动输入，避免
+        # pending 队列在恢复时把旧意图重新写入 GameRoom。
+        if server.room.survival_run.should_pause():
+            return
 
         # 存入 pending,不立即 apply_move_dir 也不立即广播
         # tick 机制:同一 tick 内多次 PlayerMove 只保留最后一次(覆盖)
@@ -194,6 +198,9 @@ def register(server: "GameServer") -> None:
         """处理玩家朝向——高频输入,存入 pending,等 tick 统一处理"""
         # 实体不在房间就忽略(和 on_player_move 一致的容错策略)
         if not server.room.has_entity(ctx.player_id):
+            return
+        # 和移动一致，暂停期间朝向请求也必须被服务端拒绝。
+        if server.room.survival_run.should_pause():
             return
 
         # 存入 pending,不立即 apply_facing 也不立即广播
@@ -241,6 +248,9 @@ def register(server: "GameServer") -> None:
         # 实体不在房间就忽略(和 on_player_move 一致的容错策略)
         if not server.room.has_entity(ctx.player_id):
             return
+        # 攻击请求在暂停期间拒绝；ChooseReward 是唯一允许的输入。
+        if server.room.survival_run.should_pause():
+            return
 
         # 存入 pending,不立即 apply_attack_start 也不立即广播
         # 和 PlayerMove 一样走 tick 节流
@@ -261,11 +271,27 @@ def register(server: "GameServer") -> None:
             return
         state = server.room.get_survival_player(ctx.player_id)
         if state is not None:
+            run = server.room.survival_run
             await server.broadcast("SurvivalState", {
-                "elapsed_seconds": server.room.survival_run.elapsed,
-                "wave": server.room.survival_run.wave,
-                "paused": server.room.survival_run.paused,
+                "elapsed_seconds": run.elapsed,
+                "wave": run.wave,
+                "paused": run.paused,
                 "level": state.level,
                 "experience": state.experience,
                 "next_experience": state.next_experience,
             })
+            # 选择成功后用空候选事件通知客户端关闭旧面板；若仍有连续升级，
+            # 发送队列首项，客户端只显示服务端确认的下一组三选一。
+            choices = run.pending_rewards.get(ctx.player_id, [])
+            if choices:
+                await server.broadcast("LevelUpChoices", {
+                    "player_id": ctx.player_id,
+                    "reward_ids": [c.reward_id for c in choices[0]],
+                    "labels": [c.label for c in choices[0]],
+                })
+            else:
+                await server.broadcast("LevelUpChoices", {
+                    "player_id": ctx.player_id,
+                    "reward_ids": [],
+                    "labels": [],
+                })

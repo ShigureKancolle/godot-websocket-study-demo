@@ -308,6 +308,16 @@ class TimerManager:
             dead_timer.cancel()
             logger.debug(f"玩家 {player_id} 的 dead 定时器已取消")
 
+    def cancel_all(self) -> None:
+        """取消当前房间全部攻击、受击和死亡定时器。
+
+        Run 结束时由 GameServer 调用，确保旧房间的异步回调不会在新 Run
+        创建后继续写入状态。逐个调用已有幂等 cancel，避免重复维护三类表。
+        """
+        player_ids = set(self._timers) | set(self._hurt_timers) | set(self._dead_timers)
+        for player_id in player_ids:
+            self.cancel(player_id)
+
     def cleanup_done(self, player_id: str) -> None:
         """
         清理该玩家已结束的定时器(自然结束的 task 引用)

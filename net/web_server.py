@@ -97,6 +97,8 @@ class GameServer:
         # 用 game_room.GameRoom() 而非 GameRoom()，热更见文件头注释
         self.room = game_room.GameRoom()
         self.timer_mgr = timer_mgr.TimerManager()
+        self._run_generation = 1
+        self._finished_generation = 0
 
         # 把"完整攻击发动流程"注册给 GameRoom 作为钩子。
         # 这样玩家(经 pending_inputs)和敌人(AI 直接调用)都走 room.trigger_attack(),
@@ -246,7 +248,9 @@ class GameServer:
             finally:
                 await self.cleanup_player(player_id)
 
-    async def broadcast(self, protoname: str, protoprama: dict, exclude_player: Optional[str] = None):
+    async def broadcast(self, protoname: str, protoprama: dict,
+                        exclude_player: Optional[str] = None,
+                        recipients: Optional[Dict[str, websockets.WebSocketServerProtocol]] = None):
         """
         广播消息给所有玩家（服务器端专用）
 
@@ -256,7 +260,10 @@ class GameServer:
             exclude_player: 排除的玩家ID（通常是发送者自己）
         """
         disconnected = set()
-        for pid, ws in self.players.items():
+        # recipients 是发送队列在收尾时保存的连接快照；提供后不再读取
+        # self.players，避免结算排队期间成员资格变化导致漏发或串到新局。
+        target_players = self.players if recipients is None else recipients
+        for pid, ws in target_players.items():
             if exclude_player and pid == exclude_player:
                 continue
             try:
@@ -284,8 +291,9 @@ class GameServer:
                 logger.error(f"向客户端 {pid} 发送消息失败: {e}")
                 disconnected.add(pid)
 
-        for pid in disconnected:
-            await self.cleanup_player(pid)
+        if recipients is None:
+            for pid in disconnected:
+                await self.cleanup_player(pid)
 
     async def _send_serialized(self, protoname: str, protodata: dict, websocket) -> None:
         """串行化同一 websocket 的写入，防止 Pong 与广播并发调用底层 send。"""
@@ -320,7 +328,8 @@ class GameServer:
     # _sender_loop 独立协程从队列取消息,调真正的 broadcast 发出去。
     # 这样 tick 不会被网络 I/O 阻塞,保证 30Hz 严格稳定。
 
-    def _queue_broadcast(self, protoname: str, protodata: dict) -> None:
+    def _queue_broadcast(self, protoname: str, protodata: dict,
+                         recipients: Optional[Dict[str, websockets.WebSocketServerProtocol]] = None) -> None:
         """把广播消息塞进发送队列(不阻塞,立即返回)
 
         逻辑层(tick / timer 回调)用这个替代 await self.broadcast(...)。
@@ -332,7 +341,7 @@ class GameServer:
             self._latest_movement = protodata
             protodata["_queued_at"] = time.monotonic()
         else:
-            self._send_queue.put_nowait((protoname, protodata))
+            self._send_queue.put_nowait((protoname, protodata, recipients))
         self._send_wakeup.set()
 
     def _on_entity_spawned(self, entity_info) -> None:
@@ -414,9 +423,9 @@ class GameServer:
             try:
                 if (not self._send_queue.empty() and
                         (self._latest_movement is None or self._control_burst < self._max_control_burst)):
-                    protoname, protodata = self._send_queue.get_nowait()
+                    protoname, protodata, recipients = self._send_queue.get_nowait()
                 elif self._latest_movement is not None:
-                    protoname, protodata = "MovementBatch", self._latest_movement
+                    protoname, protodata, recipients = "MovementBatch", self._latest_movement, None
                     self._latest_movement = None
                 else:
                     # 先清除事件，再重新检查生产者写入；这样生产者在第一次空检查
@@ -426,7 +435,7 @@ class GameServer:
                         continue
                     await self._send_wakeup.wait()
                     continue
-                await self.broadcast(protoname, protodata)
+                await self.broadcast(protoname, protodata, recipients=recipients)
                 if protoname == "MovementBatch":
                     queued_at = protodata.pop("_queued_at", None)
                     if queued_at is not None:
@@ -555,7 +564,8 @@ class GameServer:
         pending = self._pending_inputs
         self._pending_inputs = {}
         # A solo level-up pauses the whole Run, including movement and attacks.
-        if self.room.survival_run.should_pause():
+        run_was_paused = self.room.survival_run.should_pause()
+        if run_was_paused:
             # 单人升级暂停必须阻断本 tick 的移动/攻击输入；多人升级不进入此分支，
             # 各玩家的奖励队列由 SurvivalRun 独立维护。
             pending = {}
@@ -598,6 +608,9 @@ class GameServer:
         # It may spawn enemies and put distant enemies into returning state.
         self.room.survival_run.update(dt)
         run = self.room.survival_run
+        if run.ended and self._finished_generation != self._run_generation:
+            self._finish_survival_run(run)
+            return
         # 重定位是可靠控制事件，先入 FIFO，再发移动快照，客户端收到后直接 snap。
         for relocation in self.room.consume_relocations():
             self._queue_broadcast("EntityRelocated", relocation)
@@ -621,6 +634,12 @@ class GameServer:
                         "reward_ids": [c.reward_id for c in queues[0]],
                         "labels": [c.label for c in queues[0]],
                     })
+
+        if run_was_paused:
+            # 暂停期间仍需维持上面的权威状态/候选同步，但不得推进任何
+            # 世界状态：木桩回血、敌人 AI、普通移动和经验球都在此处短路。
+            # 伤害回调另有 should_pause 门禁，输入也在 handler 层拒绝。
+            return
 
         # ② 木桩回血
         stakes = self.room.get_stakes()
@@ -792,7 +811,11 @@ class GameServer:
                             if dead_entity is not None and dead_entity.entity_type == "player":
                                 self.room.survival_run.on_player_dead(hurt_id)
                                 if self.room.survival_run.ended:
-                                    self._queue_broadcast("SurvivalResult", self.room.survival_run.result())
+                                    # 当前命中回调还要读取旧房间的 HpChanged 数据；
+                                    # 延迟到本协程返回后再替换 GameRoom，避免同一
+                                    # 命中帧后半段误读新房间。
+                                    asyncio.get_running_loop().call_soon(
+                                        self._finish_survival_run, self.room.survival_run)
                             elif dead_entity is not None:
                                 orb = self.room.survival_run.on_enemy_dead(hurt_id, attacker_id)
                                 if orb is not None:
@@ -865,6 +888,48 @@ class GameServer:
                 "entity_id": dead_id,
             })
         return dead_end
+
+    def _configure_room(self, room: game_room.GameRoom) -> None:
+        """装配新 GameRoom 的网络/地图钩子，保持状态层不依赖 GameServer。"""
+        room.set_attack_trigger(self._trigger_attack)
+        room.set_entity_spawn_hook(self._on_entity_spawned)
+        room.get_enemy_manager().set_ai_state_change_hook(self._on_ai_state_changed)
+        import game.map_generator as map_generator
+        import game.pathfinder as pathfinder
+        generator = map_generator.ChunkGenerator(seed=self.map_seed)
+        self._pathfinder = pathfinder.Pathfinder(generator)
+        room.set_pathfinder(self._pathfinder)
+
+    def _finish_survival_run(self, run) -> None:
+        """封存并销毁旧 Run，再建立可供下一次 EnterRoom 使用的新房间。
+
+        结算消息先按旧成员 websocket 快照入可靠发送 FIFO，随后从
+        self.players 移除房间资格但保留 self.sessions 连接；旧实体、输入和定时器全部清理。新房间使用新的代次，防止旧回调
+        或重复死亡路径再次触发结算。
+        """
+        # 延迟收尾回调可能在房间替换后才执行；旧 Run 绝不能触碰新房间。
+        if run is not self.room.survival_run:
+            return
+        if self._finished_generation == self._run_generation:
+            return
+        self._finished_generation = self._run_generation
+        result = run.result()
+        # 结算接收者必须在旧局收尾瞬间固定；随后 players 会移除这些成员，
+        # 但发送队列仍持有 websocket 快照，不会把结算发给大厅或新局。
+        old_players = dict(self.players)
+        self._queue_broadcast("SurvivalResult", result, recipients=old_players)
+        for player_id in old_players:
+            self.players.pop(player_id, None)
+        self.timer_mgr.cancel_all()
+        self._pending_inputs.clear()
+        run.clear()
+        old_room = self.room
+        for entity in list(old_room.snapshot()):
+            old_room.remove_entity(entity.entity_id)
+        self.room = game_room.GameRoom()
+        self._run_generation += 1
+        self._configure_room(self.room)
+        logger.info("生存 Run 已结算并销毁，等待玩家重新 EnterRoom 创建新局")
         
 
     async def cleanup_player(self, player_id: str):
