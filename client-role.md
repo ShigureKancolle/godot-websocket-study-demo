@@ -326,7 +326,7 @@ PlayerVisual 的 AnimatedSprite2D 播放对应动画
 3. **本地预测**:发完方向后立即 `position += dir * speed * delta` 推进自己(不等服务端回传,消除延迟感)
 4. 服务端 apply_move_dir 只记住方向(不推进位移),tick_movement 每 tick 持续推进;apply_facing / apply_attack_start 更新权威状态,广播给所有人(含自己)
 5. StateMirror 收到 → `entity_updated` 信号 → Role.on_entity_updated → 更新 target_pos(不直接改 position)
-6. Role 以客户端/服务端共同锚点比较相对位移；连续三个批次超过 24px 才保留锚点领先量平滑回正，停止、撞墙、hurt 或攻击锁定直接向绝对权威位置收敛
+6. Role 以客户端/服务端共同锚点比较相对位移；连续三个批次超过 24px 才保留锚点领先量平滑回正，停止、撞墙、hurt、攻击锁定或服务端 `SurvivalState.paused=true` 时直接停止本地输入预测并向绝对权威位置收敛
 
 **为什么本地预测不违反服务器权威**:预测是临时手段,服务端回传后 Role 用锚点对账。两端用同一个 speed(entity_config.json),服务端 tick_movement 每 tick 按 dir * speed * TICK_INTERVAL 推进,客户端每帧按 dir * speed * delta 预测,1 秒总位移一致,相对误差很小。只有服务端拒绝移动或真实阻挡持续造成相对漂移时才平滑回正；受击/攻击锁定走绝对权威目标。
 

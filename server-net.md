@@ -52,9 +52,11 @@ EntityRelocated 属于可靠控制事件，进入普通发送 FIFO，不使用 l
 - `_on_entity_spawned(entity_info)` — 实体创建钩子(注册给 GameRoom 的 `entity_spawn_hook`,由 `room.create_enemy` 回调)。GM 控制台在独立线程调 create_enemy,本方法会从该线程进入,所以用 `loop.call_soon_threadsafe` 投递回事件循环线程执行真正广播(start 前 loop 未建立时直接同步广播,此时无并发安全)
 - `_broadcast_entity_spawn(entity_info)` — 在事件循环线程内执行:先 `_queue_broadcast("StatsInit", ...)` 再 `_queue_broadcast("GameState", ...)`(全量快照)。**先 StatsInit 再 GameState**:客户端 _create_role 创建 Role 时会查 mirror.get_combat() 初始化血条,先发 StatsInit 让新敌人战斗属性先进 _combats,再发 GameState 触发 state_replaced 重建 Role,创建时就能取到 combat、血条当前值正确。用全量快照而非复用 EnterRoom:EnterRoom 语义是进入房间,复用会把客户端 _local_entity_id 覆盖成敌人 id,破坏本地玩家识别
 - `_sender_loop()` — 独立协程,从 _send_queue 取消息调 broadcast 发出。和 _tick_loop 并行
+- 生存结算消息在入队时保存旧房间 `players` 的 websocket 快照；收尾随后移除这些连接的房间资格，但 sender 按快照完成一次 `SurvivalResult` 发送。`sessions` 保留连接，未重新 `EnterRoom` 的大厅客户端不会收到新局广播。
 - `add_pending_input(entity_id, action, data)` — 存入 pending,等 tick 处理(同一 tick 内同动作覆盖=节流)
 - `_tick_loop()` — asyncio task,启动 _sender_loop + 每 TICK_INTERVAL_MS 毫秒调 _process_tick(dt),退出时 cancel sender。**dt 用 time.monotonic() 实测两次 tick 的真实间隔(钳制到 [0, MAX_TICK_DT])**——sleep 实际唤醒间隔受系统定时粒度影响(Windows 默认 15.6ms 粒度下 33ms 请求约 47ms 才醒),用固定值当 dt 积分会让服务端移速系统性偏慢,客户端预测对账累积超阈值 → 周期性回拉(拉扯根因)
 - `_process_tick(dt)` — 取出 pending → apply_move_dir(只记方向)/apply_facing/room.trigger_attack(attackstart) → 木桩回血 → 敌人 AI tick(dt) → **tick_movement(dt) 持续推进所有 moving=True 实体位移** → 收集广播 → _queue_broadcast 塞队列
+- 单人升级暂停时，`_process_tick` 仍发送权威 `SurvivalState`/`LevelUpChoices`，但在世界推进阶段前短路：不回血、不执行 EnemyMgr AI、不推进普通移动/经验球；PlayerMove/PlayerFacing/AttackStart handler 同时拒绝暂停期输入。多人模式不进入该短路。
 - `_trigger_attack(attacker_id, atk_id)` — 完整攻击发动流程(注册给 GameRoom 作为 `attack_trigger` 钩子,由 `room.trigger_attack` 转调)。apply_attack_start 改状态 → 广播 AttackStart → 遍历 shape_list 注册 AttackTimer(hit_cb/end_cb)。**玩家(经 pending)和敌人(AI 直接调)走同一条路**,避免敌人 AI 直接调 apply_attack_start 导致"只改状态不发动"
 - `cleanup_player(player_id)` — 断连清理:删会话/连接表 + timer_mgr.cancel + room.remove_entity + _queue_broadcast(LeaveRoom)
 - `start()` — _enable_high_timer_resolution(win32 提频) + 记录 self._loop(asyncio.get_running_loop,供实体创建回调线程安全投递) + create_task(_tick_loop) + websockets.serve 启动

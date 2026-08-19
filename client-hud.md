@@ -36,7 +36,7 @@ HudMain (Control, 全屏, mouse_filter=IGNORE 不挡游戏点击)
     │   ├── StatusRow (HBox,左)         限时状态图标(带倒计时,到点自动消失)
     │   └── BuffRow (HBox,右)           局内永久 buff 图标(无倒计时)
     ├── HpBar (ProgressBar,红)          血条
-    └── EnergyBar (ProgressBar,绿)      能量条(语义由服务端定)
+    └── EnergyBar (ProgressBar,绿)      经验条(当前经验/升级所需经验)
 ```
 
 雷达说明:中心固定为本地玩家,注入的是**相对本地玩家的世界偏移**(像素),按 `radar_range_px`(默认 1000 像素量程)等比缩放到雷达面板上,超出量程的目标钳制显示在雷达边缘(保留方向)。雷达每帧重绘跟随实体移动,`radar_visible` 控制开关。
@@ -53,7 +53,8 @@ HudMain (Control, 全屏, mouse_filter=IGNORE 不挡游戏点击)
 | `set_radar_blips(entries)` | `Array[Dictionary]` | 全量设置雷达目标(`{entity_id, type, rel_x, rel_y}`) |
 | `clear_radar_blips()` | | 清空雷达 |
 | `set_local_hp(cur_hp, max_hp)` | int, int | 本地玩家血条(红) |
-| `set_local_energy(cur, max_value)` | int, int | 本地玩家能量条(绿) |
+| `set_local_energy(cur, max_value)` | int, int | 兼容旧名；绿色经验条 |
+| `set_local_experience(cur, next_value)` | int, int | 本地玩家经验/升级阈值 |
 | `set_status_effects(effects)` | `Array[Dictionary]` | 全量设置限时状态(见下) |
 | `add_status_effect(icon_id, remain_ms, icon=null)` | String, int, Texture2D/String | 添加/刷新单个限时状态(同 icon_id 覆盖倒计时) |
 | `remove_status_effect(icon_id)` | String | 移除限时状态 |
@@ -96,7 +97,7 @@ HUD 需要的数据、建议的消息定义。已有 `game.ChatMessage`(C2S 发 
 
 | 建议消息 | 方向 | 触发时机 | 用途 / 对应 HUD API |
 |----------|------|----------|---------------------|
-| `game.EntityVital` | S2C | 血量/能量变化时广播(或并入现有战斗结算消息) | `set_local_hp` / `set_local_energy` / `update_teammate` |
+| `game.EntityVital` | S2C | 血量变化时广播(或并入现有战斗结算消息) | `set_local_hp` / `update_teammate` |
 | `game.StatusEffectSync` | S2C | 状态获得/刷新/消失时(消失也可靠 remain_ms 到期本地消失) | `set_status_effects` |
 | `game.BuffSync` | S2C | 局内永久 buff 获得/移除时 | `set_buffs` |
 | `game.BattleLogEvent` | S2C | 伤害结算/击杀/死亡时广播 | `add_battle_log` |
@@ -111,7 +112,7 @@ HUD 需要的数据、建议的消息定义。已有 `game.ChatMessage`(C2S 发 
 entity_id: String
 hp: int          # 当前血量
 max_hp: int      # 最大血量
-energy: int      # 当前能量(无能量体系的实体可省略)
+energy: int      # 旧字段，仅为兼容；生存 HUD 经验来自 SurvivalState
 max_energy: int
 
 # StatusEffectSync —— 限时状态全量同步(变化时下发全量,客户端直接 set_status_effects 替换)
@@ -194,4 +195,4 @@ func _process(_delta):
 纯客户端自测(不接网络):拿到 hud 实例后直接调 API 即可,如 `hud.set_local_hp(80, 100)`、`hud.add_battle_log("玩家A 杀死了 敌人A", 2)`、`hud.update_radar_blip("e1", hud.BlipType.ENEMY, Vector2(300, -500))`。
 ## 生存 HUD 接入（PLAN-20260818-003）
 
-HUD 消费客户端镜像信号更新经验条、等级、波次、暂停提示和奖励选择；不得从本地计时推导权威状态。结算数据直接来自服务端结果，返回大厅时清除本局节点和统计。
+HUD 消费客户端镜像信号更新经验条、等级、波次、暂停提示和奖励选择；选择按钮立即锁定且只发送一次 `ChooseReward`，不在本地应用奖励，等待服务端空候选确认后关闭。不得从本地计时推导权威状态。结算数据直接来自服务端结果，返回大厅时清除本局节点和统计。
